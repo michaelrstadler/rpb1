@@ -49,7 +49,7 @@ def _read_tiff_stack(tif_folder, tif_files, **kwargs):
     """
     if 'span' in kwargs:
         first, last = (kwargs['span'])
-        if (first < last) and (last < len(tif_files)):
+        if (first <= last) and (last < len(tif_files)):
             tif_files = tif_files[first:(last + 1)]
         else:
             raise ValueError('Span exceeds the dimensions of the stack')
@@ -154,6 +154,9 @@ def read_tiff_lattice(tif_folder, **kwargs):
         return np.stack((camA_stack, camB_stack), axis=0)
     else:
         raise ValueError('Unequal number of CamA and CamB files.')
+
+############################################################################
+# Functions for interactive image viewing/analysis
 ############################################################################
 
 def viewer(stack, order='tzxy'):
@@ -252,4 +255,157 @@ def viewer(stack, order='tzxy'):
         interact(_update_view, order=fixed(order), **interact_call)
     
     main(order)
+
 ############################################################################
+# Functions for segmenting images
+############################################################################
+
+def mask_plane(stack, top_z0, bottom_z0, top_zmax, side='>', maskval=0):
+    """Draw a plane through a 3D image and mask all positions on one side of 
+       it.
+
+    Args:
+        stack: ndarray
+            Image stack in order [..., x, y]
+        
+        ## Note: any three points will work as three points define a plane,
+        ## the position descriptions here are just convenient suggestions.
+        top_z0: tuple of three ints
+            Point in the plane at the top of the image in slice z=0.
+        bottom_z0: tuple of three ints
+            Point in the plane at the bottom of the image in slice z=0.
+        top_zmax: tuple of three ints
+            Point in the plane at the top of the image in last z slice.
+        
+        side: string
+            '>' or '<' determine side of plane on which to mask indices (for
+            embryo border masking, > masks right, < masks left)
+        maskval: int
+            Value with which to replace masked values.
+            
+    Returns:
+        stack_masked: ndarray
+            Image stack with same dimensions as input stack, masked.
+    
+    Raises:
+        ValueError: side isn't '<' or '>'.
+
+    """
+    # Recursive function that applies 3D mask to entire n-dimensional stack
+    def _apply_mask(substack, mesh, d, side, maskval):
+        # If 3-d stack, apply mask
+        # Note: changes occur in place; don't have to return up the recursion chain
+        if (len(substack.shape) == 3):            
+            if side == '>':
+                substack[mesh > d] = maskval
+            elif side == '<':
+                substack[mesh < d] = maskval
+        # If not 3-d stack, call self on each substack of left-most dimension  
+        else:
+            for n in range(0, substack.shape[0]):
+                _apply_mask(substack[n,...], mesh, d, side, maskval)
+    
+    if side not in {'<', '>'}:
+        raise ValueError("side must be < or >") 
+    
+    # Using z, i, j notation throughout 
+    max_i = stack.shape[-2] - 1
+    max_z = stack.shape[-3] - 1
+    
+    ## Use vector solution to find equation of plane given three points.
+    # Define 3 points in the plane.
+    p1 = np.array(top_z0)
+    p2 = np.array(bottom_z0)
+    p3 = np.array(top_zmax)
+
+    # Define two vectors that lie in the plane.
+    v1 = p3 - p1
+    v2 = p2 - p1
+
+    # Take their cross product to produce a vector normal to the plane, this 
+    # vector provides coefficients for equation in form ax + by + cz = d
+    cp = np.cross(v1, v2)
+    a, b, c = cp
+
+    # To solve for d (az + bi + cj = d), take dot product of normal vector and 
+    # any point in plane.
+    d = np.dot(cp, p3)
+    
+    ## Make 3D mesh grid where value is the position in the given direction
+    # Make linear vectors used to construct meshgrids.
+    z = np.arange(0, stack.shape[-3])
+    i = np.arange(0, stack.shape[-2])
+    j = np.arange(0, stack.shape[-1])
+    # Make meshgrids from vectors.
+    zmesh, imesh, jmesh = np.meshgrid(z, i, j, sparse=False, indexing='ij')
+    # Make mesh_sum array from line equation, value at each position is right 
+    # side of line equation
+    mesh_sum = a*zmesh + b*imesh + c*jmesh
+    stack_masked = np.copy(stack)
+    _apply_mask(stack_masked, mesh_sum, d, side, maskval)
+    return(stack_masked)
+
+############################################################################
+def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
+    """Segment the embryo from extra-embryo space in lattice data.
+    
+    Details: Crudely segments the embryo from extra-embryonic space in 5-
+    dimensional stacks. Performs a gaussian smoothing, then thresholds,
+    then uses morphological filtering to fill holes and then to "walk
+    back" from right-to-left, based on the observation that segementation 
+    tends to extend too far, and lattice images always have the sample on
+    the left.
+    
+    Args:
+        stack: ndarray
+            Image stack in order [c, t, z, x, y]
+        channel: int
+            Channel to use for segmentation (channel definted as first
+            dimension of the stack)
+        sigma: int
+            Sigma factor for gaussian smoothing
+        walkback: int
+            Length in pixels to "walk back" from right
+            
+    Returns:
+        stack_masked: ndarray
+            Input stack with masked (extra-embryo) positions set to 0
+    """
+    # Create a 3D mask from the mean projection of a 4D stack.
+    def _make_mask(stack, channel, sigma, walkback):
+        # Make a mean projection (on time axis) for desired channel. 
+        im = stack[channel].mean(axis=0)
+        # Smooth with gaussian kernel.
+        im_smooth = ndi.filters.gaussian_filter(im, sigma=sigma)
+        # Find threshold with minimum method.
+        t = filters.threshold_minimum(im_smooth)
+        # Make binary mask with threshold.
+        mask = np.where(im_smooth > t, im, 0)
+        mask = mask.astype('bool')
+        # Fill holes with morphological processing.
+        mask = ndi.morphology.binary_fill_holes(mask, structure=np.ones((1,2,2)))
+        # Build structure for "walking back" from right via morphological processing.
+        struc = np.ones((1,1, walkback))
+        midpoint = int(walkback / 2)
+        struc[0, 0, 0:midpoint] = 0
+        # Walk back mask from right.
+        mask = ndi.morphology.binary_erosion(mask, structure=struc)
+        return mask
+    
+    # Apply 3D mask to every 3D substack in the input stack. Changes are
+    # in place.
+    def _apply_mask(stack, mask):
+        for index in np.ndindex(stack_e1m3.shape[:-3]):
+            substack = stack[index]
+            substack[~mask] = 0
+            stack[index] = substack
+    
+    def main(stack, channel, sigma, walkback):
+        stack = np.copy(stack) # Leave original stack unchanged.
+        mask = _make_mask(stack, channel, sigma, walkback)
+        _apply_mask(stack, mask)
+        stack_masked = stack # Just a new name
+        return(stack_masked)
+    
+    return main(stack, channel, sigma, walkback)
+
