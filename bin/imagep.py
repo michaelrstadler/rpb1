@@ -393,20 +393,9 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
         mask = ndi.morphology.binary_erosion(mask, structure=struc)
         return mask
     
-    # Apply 3D mask to every 3D substack in the input stack. Changes are
-    # in place.
-    def _apply_mask(stack, mask):
-        for index in np.ndindex(stack.shape[:-3]):
-            substack = stack[index]
-            substack[~mask] = 0
-            stack[index] = substack
-    
     def main(stack, channel, sigma, walkback):
-        stack = np.copy(stack) # Leave original stack unchanged.
         mask = _make_mask(stack, channel, sigma, walkback)
-        _apply_mask(stack, mask)
-        stack_masked = stack # Just a new name
+        stack_masked = np.where(mask, stack, 0) # Broadcasting mask onto stack
         return(stack_masked)
     
     return main(stack, channel, sigma, walkback)
-
