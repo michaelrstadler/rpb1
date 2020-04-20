@@ -16,6 +16,7 @@ import re
 from skimage import filters, io
 from ipywidgets import interact, IntSlider, Dropdown, IntRangeSlider, fixed
 import matplotlib.pyplot as plt
+from scipy import ndimage as ndi
 
 ############################################################################
 # Functions for loading TIFF stacks
@@ -395,7 +396,7 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
     # Apply 3D mask to every 3D substack in the input stack. Changes are
     # in place.
     def _apply_mask(stack, mask):
-        for index in np.ndindex(stack_e1m3.shape[:-3]):
+        for index in np.ndindex(stack.shape[:-3]):
             substack = stack[index]
             substack[~mask] = 0
             stack[index] = substack
