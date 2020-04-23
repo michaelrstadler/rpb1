@@ -210,7 +210,7 @@ def viewer(stack, order='tzxy'):
     def _make_cmap_dropdown():
         dropdown = Dropdown(
             options={'viridis', 'plasma', 'magma', 'inferno','cividis',
-                'Greens', 'Reds', 'gray', 'gray_r'},
+                'Greens', 'Reds', 'gray', 'gray_r', 'prism'},
             value='viridis',
             description='Color',
         )
@@ -399,3 +399,56 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
         return(stack_masked)
     
     return main(stack, channel, sigma, walkback)
+
+############################################################################
+def segment_nuclei_1(ref_stack, sigma=4, percentile=95, size_max=1e5, 
+                     size_min=5000, erode_by=5):
+    """Segment nuclei from a single 3D lattice stack.
+    
+    Details: Segments nuclei in lattice light sheet image substack. Uses
+    gaussian smoothing and thresholding with a simple percentile to
+    generate initial nuclear mask, then erodes this mask slightly, con-
+    nects components, filters resulting objects for size, and returns
+    a 3D labelmask of filtered structures.
+    
+    Optional: Input can be pre-segmented from background by segment_embryo
+    function. This can help to standardize use of percentile-based 
+    thresholding.
+    
+    Args:
+        ref_stack: 3D ndarray
+            Image stack in order [z, x, y]. This is a representative 
+            substack (single channel and timepoint) of the full stack
+            on which to perform segmentation.
+        sigma: int
+            Sigma value to use for gaussian smoothing
+        percentile: int
+            Percentile value to use for thresholding. Only non-zero pixels
+            are used in calculating percentiles.
+        size_max: int
+            Upper size cutoff for connected structures (nuclei)
+        size_min: int
+            Lower size cutoff for connected structures
+        erode_by: int
+            Size of the structuring element (in x-y only) used to erode
+            preliminary thresholded mask.
+            
+    Returns:
+        labelmask: ndarray
+            Same shape as input stack, filtered segmented structures are 
+            masked by unique integer labels.
+    """
+    # Smooth input image.
+    ref_smooth = ndi.filters.gaussian_filter(ref_stack, sigma=sigma)
+    # Assign threshold value based on percentile of non-zero pixels, mask on threshold.
+    t = np.percentile(ref_smooth[ref_smooth > 0], percentile);
+    mask = np.where(ref_smooth > t, True, False)
+    # Erode binary mask.
+    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erode_by, erode_by)))
+    # Label connected components to generate label mask.
+    conn_comp, info = ndi.label(mask)
+    # Filter labelmask based on maximum and minimum structure size.
+    (labels, counts) = np.unique(conn_comp, return_counts=True)
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask = np.where(np.isin(conn_comp, labels_selected), conn_comp, 0)
+    return labelmask
