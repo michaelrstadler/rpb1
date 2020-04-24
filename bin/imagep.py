@@ -17,6 +17,7 @@ from skimage import filters, io
 from ipywidgets import interact, IntSlider, Dropdown, IntRangeSlider, fixed
 import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
+from functools import partial
 
 ############################################################################
 # Functions for loading TIFF stacks
