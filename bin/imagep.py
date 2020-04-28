@@ -13,11 +13,49 @@ import os
 from os import listdir
 from os.path import isfile, join
 import re
+import skimage
 from skimage import filters, io
 from ipywidgets import interact, IntSlider, Dropdown, IntRangeSlider, fixed
 import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 from functools import partial
+
+############################################################################
+# General image processing functions
+############################################################################
+
+# matlab imfill
+def imfill(mask, seed_pt='default'):
+    '''Fill holes in a binary mask.
+    
+    Equivalent to matlab's imfill function, conceptually identical to fill
+    functions in paint programs. seed_pt needs to be a point in the "back-
+    ground" area to fill. All 0 or False pixels directly contiguous with the 
+    seed are defined as background, all other pixels are declared foreground.
+    Thus any "holes" (0 pixels that are not contiguous with background) are 
+    filled in.
+    
+    Args:
+        mask: ndarray
+            Binary mask of n dimensions.
+        seed_pt: tuple
+            Pixel in mask to use for seeding "background". This is the equi-
+            valent of the point you click when filling in paint.
+    
+    Returns:
+        mask_filled: ndarray
+            Binary mask filled    
+    '''
+    # By default, start in upper left corner.
+    if (seed_pt == 'default'):
+        seed_pt = tuple(np.zeros(mask.ndim).astype(int))
+    # Fill all background pixels by changing them to 1. Changes are made to
+    # original mask, so 1s are carried over in mask_flooded.
+    mask_flooded = skimage.segmentation.flood_fill(mask, seed_pt,1)
+    # Identify background pixels by those that are changed from original mask.
+    # Unchanged pixels (0s and 1s) in original mask are now "filled" foreground.
+    mask_filled = np.where(mask == mask_flooded, 1, 0)
+    return mask_filled
 
 ############################################################################
 # Functions for loading TIFF stacks
@@ -161,12 +199,13 @@ def read_tiff_lattice(tif_folder, **kwargs):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stack, order='tzxy'):
+def viewer(stacks, order='tzxy'):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
-        stack: ndarray
-            n-dimensional image, last two dimensions must be x-y to display
+        stack: list of ndarrays
+            List of n-dimensional image stacks; last two dimensions must 
+            be x-y to display. Image shapes must be identical.
         order: string
             String specifying order of image dimensions. Examples: 'ctzxy' 
             or 'tzxy'. Last two dimensions must be 'xy'.
@@ -182,6 +221,7 @@ def viewer(stack, order='tzxy'):
     """
     # Update the displayed image with inputs from widgets.
     def _update_view(order, **kwargs):
+        numplots = len(stacks)
         indexes = []
         colmap = kwargs['colmap']
         min_ = kwargs['contrast'][0]
@@ -189,16 +229,21 @@ def viewer(stack, order='tzxy'):
         
         # Unpack order variable into array.
         order_arr = [char for char in order[:-2]]
-        #order_arr = [char for char in kwargs['order'][:-2]] 
         # Populate indexes list with widgets.
         for n in order_arr:
             indexes.append(kwargs[n])
-            
-        fig = plt.figure(figsize=(6.5, 6.5))
-        # Slice stack, leaving last two dimensions for image.
-        # Note: the (...,) in the following is not required, but I think 
-        # it is clarifying.
-        plt.imshow(stack[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
+        
+        # Set up frame for plots.
+        fig, ax = plt.subplots(1, numplots, figsize=(6 * numplots, 6 * numplots))
+        # If only one plot, pack ax into list
+        if (type(ax) is not np.ndarray):
+            ax = [ax]
+        for n in range(0, numplots):
+            stack_local = stacks[n]
+            # Slice stack, leaving last two dimensions for image.
+            # Note: the (...,) in the following is not required, but I think 
+            # it is clarifying.
+            ax[n].imshow(stack_local[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
             vmax=max_);    
     
     # Make a new slider object for dimension selection and return it
@@ -255,7 +300,12 @@ def viewer(stack, order='tzxy'):
 
         # Make color and contrast widgets.
         interact(_update_view, order=fixed(order), **interact_call)
-    
+    # Use first stack as reference for sizes, etc.
+    if (type(stacks) is list):
+        stack = stacks[0]
+    else:
+        stack = stacks
+        stacks = [stack]
     main(order)
 
 ############################################################################
@@ -453,3 +503,113 @@ def segment_nuclei_1(ref_stack, sigma=4, percentile=95, size_max=1e5,
     labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
     labelmask = np.where(np.isin(conn_comp, labels_selected), conn_comp, 0)
     return labelmask
+
+############################################################################
+def segment_nuclei3D(stack, sigma=4, percentile=95, size_max=2e5, 
+                     size_min=5000, erode_by=5):
+    """Segment nuclei from a single 3D lattice stack.
+    
+    Details: Segments nuclei in lattice light sheet image substack. Uses
+    gaussian smoothing and thresholding with a simple percentile to
+    generate initial nuclear mask, then erodes this mask slightly, con-
+    nects components, filters resulting objects for size, and returns
+    a 3D labelmask of filtered structures.
+    
+    Optional: Input can be pre-segmented from background by segment_embryo
+    function. This can help to standardize use of percentile-based 
+    thresholding.
+    
+    Args:
+        stack: 3D ndarray
+            Image stack in order [z, x, y]. This is a representative 
+            substack (single channel and timepoint) of the full stack
+            on which to perform segmentation.
+        sigma: int
+            Sigma value to use for gaussian smoothing
+        percentile: int
+            Percentile value to use for thresholding. Only non-zero pixels
+            are used in calculating percentiles.
+        size_max: int
+            Upper size cutoff for connected structures (nuclei)
+        size_min: int
+            Lower size cutoff for connected structures
+        erode_by: int
+            Size of the structuring element (in x-y only) used to erode
+            preliminary thresholded mask.
+            
+    Returns:
+        labelmask: ndarray
+            Same shape as input stack, filtered segmented structures are 
+            masked by unique integer labels.
+    """
+    # Smooth input image.
+    stack_smooth = ndi.filters.gaussian_filter(stack, sigma=sigma)
+    # Assign threshold value based on percentile of non-zero pixels, mask on threshold.
+    t = np.percentile(stack_smooth[stack_smooth > 0], percentile);
+    mask = np.where(stack_smooth > t, True, False)
+    # Erode binary mask.
+    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erode_by, erode_by)))
+    # Label connected components to generate label mask.
+    conn_comp, info = ndi.label(mask)
+    # Filter labelmask based on maximum and minimum structure size.
+    (labels, counts) = np.unique(conn_comp, return_counts=True)
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask = np.where(np.isin(conn_comp, labels_selected), conn_comp, 0)
+    return labelmask
+
+############################################################################
+def update_labels(mask1, mask2):
+    """Match labels of segmented structures to those of a previous frame.
+    
+    Uses a simple principle of reciprocal best hits: for each labeled object
+    in mask 2, find the object in mask1 with the most overlapping pixels. 
+    Then do the reverse: find the maximallly overlapping object in mask 1 for
+    the objects in mask 2. For objects that are each other's best hit (most
+    overlapping pixels), the labels in mask2 are replaced with those of mask1.
+    Labels that do not have reciprocal best hits are dropped from the mask.
+    
+    Args:
+        mask1: ndarray
+            Labelmask in order [z, x, y]. Labels from this mask will be 
+            propagated to mask2.
+        mask2: ndarray
+            Labelmask of same shape as mask1. Labels in this mask will be
+            replaced by corresponding labels from mask1.
+        
+    Returns:
+        updated_mask: ndarray
+            Labelmask of identical shape to mask1 and mask2, updated to
+            propagate labels from mask1 to mask2.
+    
+    Raises:
+        ValueError:
+            If the shapes of the two masks are not the same.
+    """
+    # Find the object in mask2 that has maximum overlap with an object in max1,
+    # (as a fraction of the objects pixels in mask1)
+    def get_max_overlap(mask1, mask2, label1):
+        # Count overlapping pixels.
+        labels, counts = np.unique(mask2[mask1 == label1], return_counts=True)
+        # Sort labels by counts (ascending).
+        labels_sorted = labels[np.argsort(counts)]
+        # Select new label with maximum overlap.
+        max_overlap = labels_sorted[-1]
+        return max_overlap
+    
+    def main(mask1, mask2):
+        if not (mask1.shape == mask2.shape):
+            raise ValueError("Masks do not have the same shape.")
+        # Initialize blank mask.
+        updated_mask = np.zeros(mask2.shape)
+        for label1 in np.unique(mask1):
+            # Find label in mask2 with maximum overlap with nuc from mask1.
+            label2 = get_max_overlap(mask1, mask2, label1)
+            # Check that labels are "reciprocal best hits" by determining the 
+            # label in mask1 with maximum overlap with label in mask2 found above.
+            label2_besthit = get_max_overlap(mask2, mask1, label2)
+            if ((label2_besthit == label1) and (label1 != 0)):
+                updated_mask[mask2 == label2] = label1
+        return updated_mask
+
+    return main(mask1, mask2)
+    
