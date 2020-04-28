@@ -612,4 +612,71 @@ def update_labels(mask1, mask2):
         return updated_mask
 
     return main(mask1, mask2)
+
+############################################################################
+def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
+    """Segment nuclei in a 4D image stack (expect lattice data).
     
+    A wrapper for two supplied functions: one function that performs
+    segmentation of a 3D image stack and a second function that connects
+    segmentation outputs for consecutive frames by identifying shared objects
+    and harmonizing their labels. Iteratively calls these functions on all
+    3D stacks and returns a 4D labelmask of segmented objects contiguous in 
+    time.
+    
+    Args:
+        stack: ndarray
+            4D image stack of dimensions [t, z, x, y].
+        seg_func: function
+            Function that performs segmentation on 3D image stacks. Must take 
+            as arguments a 3D image stack and optional keyword arguments.
+        update_func: function
+            Function that compares two 3D labelmasks, assigns object IDs from 
+            mask1 to mask2, and updates labels in mask2 to match mask1.
+        **kwargs: optional key-word arguments
+            Keyword arguments to supply to segmentation function.
+    
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y] with segmented objects.
+    
+    Example usage:
+        labelmask = segment_nuclei4D(im_stack, segment_nuclei3D, update_labels,
+            sigma=5, percentile=90)
+    """
+    # Create partial form of segmentation function with supplied kwargs.
+    seg_func_p = partial(seg_func, **kwargs)
+    # Segment first frame, add 4th axis in 0 position.
+    labelmask = seg_func_p(stack[0], **kwargs)
+    labelmask = np.expand_dims(labelmask, axis=0) 
+    
+    # Segment subsequent frames, update labels, build 4D labelmask.
+    for t in range(1, stack.shape[0]):
+        mask = seg_func_p(stack[t], **kwargs)
+        mask_updated = update_func(labelmask[t-1], mask)
+        mask_updated = np.expand_dims(mask_updated, axis=0)
+        labelmask = np.concatenate((labelmask, mask_updated), axis=0)
+    
+    return labelmask
+
+def lattice_segment_nuclei_1(stack, channel=1, **kwargs):
+    """Wrapper for nuclear segmentation routine for lattice data.
+
+    Uses 3D stack segmentation function segment_nuclei3D and label propagator
+    update_labels
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [c, t, z, x, y].
+        channel: int
+            Channel (0th dimension) to use for segmentation.
+        kwargs: key-word arguments (optional)
+            Arguments for 3D segmentation function
+        
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y]
+    
+    
+    """
+    return segment_nuclei4D(stack[channel], segment_nuclei3D, update_labels, **kwargs)   
