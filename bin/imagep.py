@@ -10,6 +10,7 @@ __author__ = 'Michael Stadler'
 
 import numpy as np
 import os
+import 
 from os import listdir
 from os.path import isfile, join
 import re
@@ -56,6 +57,97 @@ def imfill(mask, seed_pt='default'):
     # Unchanged pixels (0s and 1s) in original mask are now "filled" foreground.
     mask_filled = np.where(mask == mask_flooded, 1, 0)
     return mask_filled
+
+############################################################################
+def local_max(img, size=(70,100,100)):
+    """Find local maxima pixels in an image stack within a given window.
+    
+    Defines local maxima as pixels whose value is equal to the maximum value
+    within a defined window centered on that point. Returns a binary mask
+    of such pixels.
+    
+    Args:
+        img: ndarray
+            Image stack
+        size: tuple of ints
+            Size of the window for finding local maxima. The sizes are the
+            dimensions of the filter used to search for maxima. So a size
+            of (100, 100) will use a square with side lengths of 100 pixels.
+            Generally, you want the size dimensions to match the dimensions
+            of the objects you're searching for.
+    
+    Returns:
+        local_max: ndarray
+            A binary mask with dimensions equal to img of pixels whose value 
+            is equal to the local maximum value. 
+    """
+    # Apply a maximum filter.
+    max_f = ndi.maximum_filter(img, size=size)
+    # Find pixels that are local maxima.
+    local_max = np.where(max_f == img, 1, 0)
+    return(local_max)
+
+############################################################################
+def peak_local_max_nD(img, size=(70,100,100)):
+    """Find local maxima in an N-dimensional image.
+    
+    Generalizes scikit's peak_local_max function to three (or more) 
+    dimensions. Finds local maxima pixels within supplied window, determines
+    centroids for connected pixels, and returns a mask of these centroid
+    positions and a list of them.
+    
+    Suggested usage: finding seed points for watershed segmentation.
+    
+    Args:
+        img: ndarray
+            N-dimensional image stack
+        size: tuple of ints
+            Size of the window for finding local maxima. The sizes are the
+            dimensions of the filter used to search for maxima. So a size
+            of (100, 100) will use a square with side lengths of 100 pixels.
+            Generally, you want the size dimensions to match the dimensions
+            of the objects you're searching for.
+    
+    Returns:
+        local_peak_mask: ndarray
+            A binary mask with dimensions equal to img of single pixels
+            representing local maxima.
+        local_peaks: list of tuples
+            Coordinates of pixels masked in local_peak_mask  
+    """
+    # Find pixels that represent local maxima. Produces clusters of connected
+    # pixels at the centers of objects.
+    maxes = local_max(img, size)
+    # Connect these pixels in a labelmask.
+    conn_comp, info = ndi.label(maxes)
+    # Get the centroids of each local max object, update mask and list.
+    local_peak_mask = np.zeros_like(img)
+    local_peaks = []
+    for x in np.unique(conn_comp)[1:]:
+        centroid = get_object_centroid(conn_comp, x)
+        local_peak_mask[centroid] = 1
+        local_peaks.append(centroid)
+        
+    return local_peak_mask, local_peaks
+
+############################################################################
+def get_object_centroid(labelmask, id):
+    """Find the centroid of an object in a labelmask.
+    
+    Args:
+        labelmask: ndarray
+            Labelmask of arbitrary dimensions
+        id: int
+            Label of object to find centroid for
+            
+    Returns:
+        centroid: tuple of ints
+            Coordinates of the object's centroid
+    """
+    # Get coordinates 
+    coords = np.where(labelmask == id)
+    # Find mean of each coordinate, remove negatives, make int.
+    return tuple([int(np.mean(x)) for x in coords])
 
 ############################################################################
 # Functions for loading TIFF stacks
