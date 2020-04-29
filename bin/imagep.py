@@ -63,8 +63,10 @@ def local_max(img, size=(70,100,100)):
     """Find local maxima pixels in an image stack within a given window.
     
     Defines local maxima as pixels whose value is equal to the maximum value
-    within a defined window centered on that point. Returns a binary mask
-    of such pixels.
+    within a defined window centered on that point. Implementation is to
+    first run a maximum filter, then define pixels in the original image 
+    whose value is equal to the max-filter result at the same positions as
+    local maximum pixels. Returns a binary mask of such pixels.
     
     Args:
         img: ndarray
