@@ -10,16 +10,19 @@ __author__ = 'Michael Stadler'
 
 import numpy as np
 import os
-import 
 from os import listdir
 from os.path import isfile, join
 import re
-import skimage
 from skimage import filters, io
 from ipywidgets import interact, IntSlider, Dropdown, IntRangeSlider, fixed
 import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 from functools import partial
+import skimage as ski
+from skimage.filters.thresholding import threshold_li
+from skimage.segmentation import flood_fill
+# Bug in skimage: skimage doesn't bring modules with it in some environments.
+# Importing directly from submodules (above) gets around this.
 
 ############################################################################
 # General image processing functions
@@ -52,7 +55,7 @@ def imfill(mask, seed_pt='default'):
         seed_pt = tuple(np.zeros(mask.ndim).astype(int))
     # Fill all background pixels by changing them to 1. Changes are made to
     # original mask, so 1s are carried over in mask_flooded.
-    mask_flooded = skimage.segmentation.flood_fill(mask, seed_pt,1)
+    mask_flooded = flood_fill(mask, seed_pt,1)
     # Identify background pixels by those that are changed from original mask.
     # Unchanged pixels (0s and 1s) in original mask are now "filled" foreground.
     mask_filled = np.where(mask == mask_flooded, 1, 0)
@@ -112,8 +115,8 @@ def peak_local_max_nD(img, size=(70,100,100)):
     
     Returns:
         local_peak_mask: ndarray
-            A binary mask with dimensions equal to img of single pixels
-            representing local maxima.
+            A labelmask with dimensions equal to img of single labeled 
+            pixels representing local maxima.
         local_peaks: list of tuples
             Coordinates of pixels masked in local_peak_mask  
     """
@@ -125,12 +128,52 @@ def peak_local_max_nD(img, size=(70,100,100)):
     # Get the centroids of each local max object, update mask and list.
     local_peak_mask = np.zeros_like(img)
     local_peaks = []
-    for x in np.unique(conn_comp)[1:]:
-        centroid = get_object_centroid(conn_comp, x)
-        local_peak_mask[centroid] = 1
+    for id_ in np.unique(conn_comp)[1:]:
+        centroid = get_object_centroid(conn_comp, id_)
+        local_peak_mask[centroid] = id_
         local_peaks.append(centroid)
         
     return local_peak_mask, local_peaks
+
+############################################################################
+def get_object_centroid(labelmask, id):
+    """Find the centroid of an object in a labelmask.
+    
+    Args:
+        labelmask: ndarray
+            Labelmask of arbitrary dimensions
+        id: int
+            Label of object to find centroid for
+            
+    Returns:
+        centroid: tuple of ints
+            Coordinates of the object's centroid
+    """
+    # Get coordinates 
+    coords = np.where(labelmask == id)
+    # Find mean of each coordinate, remove negatives, make int.
+    return tuple([int(np.mean(x)) for x in coords])
+
+############################################################################
+def gradient_nD(stack):
+    """Find the gradient of an n-dimensional image.
+    
+    Approximates an nD (typically: 3D) gradient by applying a gradient filter
+    separately on each axis and taking the root of the sum of their squares.
+
+    Args:
+        stack: ndarray
+            Image stack in [z, x, y] or [x, y]
+            
+    Returns:
+        gradient: ndarray
+            Gradient transform of image in same shape as stack
+    """
+    sumsq = ndi.filters.sobel(stack, axis=0) ** 2
+    for d in range(1, stack.ndim):
+         sumsq = sumsq + (ndi.filters.sobel(stack, axis=d) ** 2)
+    gradient = np.sqrt(sumsq)
+    return gradient
 
 ############################################################################
 def get_object_centroid(labelmask, id):
@@ -546,60 +589,7 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
     return main(stack, channel, sigma, walkback)
 
 ############################################################################
-def segment_nuclei_1(ref_stack, sigma=4, percentile=95, size_max=1e5, 
-                     size_min=5000, erode_by=5):
-    """Segment nuclei from a single 3D lattice stack.
-    
-    Details: Segments nuclei in lattice light sheet image substack. Uses
-    gaussian smoothing and thresholding with a simple percentile to
-    generate initial nuclear mask, then erodes this mask slightly, con-
-    nects components, filters resulting objects for size, and returns
-    a 3D labelmask of filtered structures.
-    
-    Optional: Input can be pre-segmented from background by segment_embryo
-    function. This can help to standardize use of percentile-based 
-    thresholding.
-    
-    Args:
-        ref_stack: 3D ndarray
-            Image stack in order [z, x, y]. This is a representative 
-            substack (single channel and timepoint) of the full stack
-            on which to perform segmentation.
-        sigma: int
-            Sigma value to use for gaussian smoothing
-        percentile: int
-            Percentile value to use for thresholding. Only non-zero pixels
-            are used in calculating percentiles.
-        size_max: int
-            Upper size cutoff for connected structures (nuclei)
-        size_min: int
-            Lower size cutoff for connected structures
-        erode_by: int
-            Size of the structuring element (in x-y only) used to erode
-            preliminary thresholded mask.
-            
-    Returns:
-        labelmask: ndarray
-            Same shape as input stack, filtered segmented structures are 
-            masked by unique integer labels.
-    """
-    # Smooth input image.
-    ref_smooth = ndi.filters.gaussian_filter(ref_stack, sigma=sigma)
-    # Assign threshold value based on percentile of non-zero pixels, mask on threshold.
-    t = np.percentile(ref_smooth[ref_smooth > 0], percentile);
-    mask = np.where(ref_smooth > t, True, False)
-    # Erode binary mask.
-    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erode_by, erode_by)))
-    # Label connected components to generate label mask.
-    conn_comp, info = ndi.label(mask)
-    # Filter labelmask based on maximum and minimum structure size.
-    (labels, counts) = np.unique(conn_comp, return_counts=True)
-    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
-    labelmask = np.where(np.isin(conn_comp, labels_selected), conn_comp, 0)
-    return labelmask
-
-############################################################################
-def segment_nuclei3D(stack, sigma=4, percentile=95, size_max=2e5, 
+def segment_nuclei3D_1(stack, sigma=4, percentile=95, size_max=2e5, 
                      size_min=5000, erode_by=5):
     """Segment nuclei from a single 3D lattice stack.
     
@@ -649,6 +639,118 @@ def segment_nuclei3D(stack, sigma=4, percentile=95, size_max=2e5,
     (labels, counts) = np.unique(conn_comp, return_counts=True)
     labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
     labelmask = np.where(np.isin(conn_comp, labels_selected), conn_comp, 0)
+    return labelmask
+
+############################################################################
+def segment_nuclei3D_2(stack, sigma_seeding=3,sigma_watershed=12, sigma_dist=2, window_size=(70, 100, 100),
+                       closing_length=10, dilation_length = 7, size_max=2e5, size_min=5000, 
+                       display=False):
+    """Segment nuclei from a single 3D lattice stack.
+    
+    Details: Segments nuclei in lattice light sheet 3D image substack. Uses
+    a gradient filter to find edges of nuclei, fills them, finds their 
+    centers, and performs watershed segmentation. Resulting objects are 
+    filtered for size and roundness and a 3D labelmask of nuclei is returned.
+    
+    Args:
+        stack: 3D ndarray
+            Image stack in order [z, x, y].
+        sigma: int
+            Sigma value to use for gaussian smoothing of original image.
+        dist_sigma: int
+            Sigma value to use for gaussian smoothing of distance transform
+            of gradient.
+        closing_length: int
+            Side length of the structuring unit for morphological closing of 
+            thresholded gradient mask.
+        dilation_length: int
+            Side length of the structuring unit for morphological dilation of 
+            final mask.
+        window_size: tuple of ints
+            Size of the window for finding local maxima to seed watershed. 
+            The sizes are the dimensions of the filter used to search for 
+            maxima. So a size of (100, 100) will use a square with side lengths 
+            of 100 pixels. Generally, you want the size dimensions to match 
+            the dimensions of the objects you're searching for.
+        size_max: int
+            Maximum size in pixels allowed for segmented nuclei.
+        size_min: int
+            Minimum size in pixels allowed for segmented nuclei.
+        display: bool
+            If true, displays segmentation intermediates.
+            
+    Returns:
+        labelmask: ndarray
+            Same shape as input stack, filtered segmented structures are 
+            masked by unique integer labels.
+    """
+    # Smooth stack.
+    stack_smooth1 = ndi.filters.gaussian_filter(stack, sigma=sigma_seeding)
+
+    # Apply 3D gradient filter.
+    grad_seeding = gradient_nD(stack_smooth1)
+
+    # Threshold.
+    t = threshold_li(grad_seeding)
+    mask = np.where(grad_seeding >= t, 1, 0)
+
+    # Close with morphological filter.
+    #mask = ndi.morphology.binary_closing(mask, structure=np.ones((1, closing_length, closing_length)))
+    
+    # Fill in holes.
+    mask = imfill(mask)
+    
+    # Do a distance transform, smooth, find peaks.
+    dist = ndi.distance_transform_edt(mask)
+    dist = ndi.filters.gaussian_filter(dist, sigma_dist)
+    seed_mask, seeds = peak_local_max_nD(dist, window_size)
+    
+    # DEPRECATED: Subtract mean background from gradient image.
+    #grad_mean = grad.mean()
+    #grad_bgsub = np.where(grad >= grad_mean, grad, 1)
+    # Perform watershed segmentation on subtracted gradient with seeds.
+
+    # Smooth stack.
+    stack_smooth2 = ndi.filters.gaussian_filter(stack, sigma=sigma_watershed)
+
+    # Apply 3D gradient filter.
+    grad_watershed = gradient_nD(stack_smooth2)
+    ws = ski.segmentation.watershed(grad_watershed, seed_mask.astype(int))
+   
+    # Filter segmented objects for maximum and minimum size.
+    (labels, counts) = np.unique(ws, return_counts=True)
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask = np.where(np.isin(ws, labels_selected), ws, 0)
+    
+    # Close and slightly dilate resulting mask, re-label.
+    labelmask = ndi.morphology.binary_closing(labelmask, structure=np.ones((1, closing_length, closing_length)))
+    labelmask = ndi.morphology.binary_dilation(labelmask, structure=np.ones((1, dilation_length, dilation_length)))
+    labelmask, info = ndi.label(labelmask)
+    
+    # Display segmentation intermediates if called.
+    if (display):
+        fig, ax = plt.subplots(3,3, figsize=(9,9))
+        ax[0][0].set_title('Smoothed seeding input')
+        ax[0][0].imshow(stack_smooth1.max(axis=0))
+        ax[0][1].set_title('Seeding gradient')
+        ax[0][1].imshow(grad_seeding.max(axis=0))
+        ax[0][2].set_title('Mask')
+        ax[0][2].imshow(mask.max(axis=0))
+        ax[1][0].set_title('Dist. trnsfm')
+        ax[1][0].imshow(dist.max(axis=0))
+        ax[1][1].set_title('Watershed seeds')
+        # Dilate seed mask to make single pixels visible.
+        seed_mask_visible = ndi.morphology.binary_dilation(seed_mask, structure=np.ones((3,15,15)))
+        ax[1][1].imshow(stack_smooth1.max(axis=0), alpha=0.5)
+        ax[1][1].imshow(seed_mask_visible.max(axis=0), alpha=0.5)
+        ax[1][2].set_title('Smoothed watershed input')
+        ax[1][2].imshow(stack_smooth2.max(axis=0))
+        ax[2][0].set_title('Watershed gradient')
+        ax[2][0].imshow(grad_watershed.max(axis=0))
+        ax[2][1].set_title('Seg final')
+        ax[2][1].imshow(labelmask.max(axis=0), cmap="prism")
+        plt.tight_layout()
+        
     return labelmask
 
 ############################################################################
@@ -746,6 +848,7 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     
     # Segment subsequent frames, update labels, build 4D labelmask.
     for t in range(1, stack.shape[0]):
+        print(t)
         mask = seg_func_p(stack[t], **kwargs)
         mask_updated = update_func(labelmask[t-1], mask)
         mask_updated = np.expand_dims(mask_updated, axis=0)
@@ -773,4 +876,26 @@ def lattice_segment_nuclei_1(stack, channel=1, **kwargs):
     
     
     """
-    return segment_nuclei4D(stack[channel], segment_nuclei3D, update_labels, **kwargs)   
+    return segment_nuclei4D(stack[channel], segment_nuclei3D, update_labels, **kwargs)
+
+def lattice_segment_nuclei_2(stack, channel=1, **kwargs):
+    """Wrapper for nuclear segmentation routine for lattice data.
+
+    Uses 3D stack segmentation function segment_nuclei3D_2 and label propagator
+    update_labels
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [c, t, z, x, y].
+        channel: int
+            Channel (0th dimension) to use for segmentation.
+        kwargs: key-word arguments (optional)
+            Arguments for 3D segmentation function
+        
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y]
+    
+    
+    """
+    return segment_nuclei4D(stack[channel], segment_nuclei3D_2, update_labels, **kwargs)   
