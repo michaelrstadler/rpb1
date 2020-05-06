@@ -21,6 +21,8 @@ from functools import partial
 import skimage as ski
 from skimage.filters.thresholding import threshold_li
 from skimage.segmentation import flood_fill
+from scipy.stats import mode
+from skimage.measure import label, regionprops
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
@@ -28,7 +30,28 @@ from skimage.segmentation import flood_fill
 # General image processing functions
 ############################################################################
 
-# matlab imfill
+def labelmask_filter_objsize(labelmask, size_min, size_max):
+    """Filter objects in a labelmask by size.
+
+    Args:
+        labelmask: ndarray
+            Integer labelmask
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+
+    Returns:
+        labelmask_filtered: ndarray
+    """
+    # Count pixels in each object.
+    (labels, counts) = np.unique(labelmask, return_counts=True)
+    # Select and keep only objects within size range.
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask_filtered = np.where(np.isin(labelmask, labels_selected), labelmask, 0)
+    return labelmask_filtered
+
+############################################################################
 def imfill(mask, seed_pt='default'):
     '''Fill holes in a binary mask.
     
@@ -642,6 +665,137 @@ def update_labels(mask1, mask2):
     return main(mask1, mask2)
 
 ############################################################################
+def labelmask_filter_objsize(labelmask, size_min, size_max):
+    """Filter objects in a labelmask for size
+    
+    Args:
+        labelmask: ndarray
+            n-dimensional integer labelmask
+        size_min: int
+            Minimum size in total pixels, of the smallest object
+        size_max: int
+            Maximum size, in total pixels, of the largest object
+    
+    Return:
+        labelmask_filtered: ndarray
+            Labelmask of same shape as input mask, containing only objects
+            between minimum and maximum sizes.
+    """
+    # Count pixels in each object.
+    (labels, counts) = np.unique(labelmask, return_counts=True)
+    # Select objects in desired size range, update filtered mask.
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask_filtered = np.where(np.isin(labelmask, labels_selected), 
+        labelmask, 0)
+    return labelmask_filtered
+
+############################################################################
+def object_circularity(labelmask, label):
+    """Calculate circularity for and object in a labelmask
+    
+    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
+    
+    Args:
+        labelmask: ndarray
+            n-dimensional integer labelmask
+        label: int
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            output of circularity calculation 
+    """
+    # Find z slice with most pixels from object.
+    z, i, j = np.where(labelmask == label)
+    zmax = mode(z)[0][0]
+    # Select 2D image representing object's max Z-slice.
+    im = np.where(labelmask[zmax] == label, 1, 0)
+    # Calculate circularity from object perimeter and area.
+    regions = regionprops(im)
+    perimeter = regions[0].perimeter
+    area = len(z)
+    circularity = 4 * np.pi * area / (perimeter ** 2) 
+    return circularity
+    
+############################################################################
+def filter_labelmask(labelmask, func, above=0, below=1e6):
+    """Filter objects from a labelmask based on object properties
+    
+    Applies a user-supplied function that returns a numeric value for an
+    object in a labelmask, filters mask to contain only objects between
+    minimum and maximum values.
+    
+    Args:
+        labelmask: ndarray
+            n-dimensional integer labelmask
+        func: function
+            Function that accepts a labelmask as its first argument, object
+            ID as second argument, and returns a numeric value.
+        above: numeric
+            Lower limit for object's value returned from the function.
+        below: numeric
+            Upper limit for object's value returned from the function.
+            
+    Return:
+        labelmask_filtered: ndarray
+            Labelmask of same shape as input mask, containing only objects
+            between minimum and maximum values from supplied function.
+    """
+    labels = []
+    for x in np.unique(labelmask):
+        prop = func(labelmask, x)
+        if (prop >= above and prop <= below):
+            labels.append(x)
+    labelmask_filtered = np.where(np.isin(labelmask, labels), labelmask, 0)
+    return labelmask_filtered
+
+############################################################################
+def segment_nuclei3D_3(stack, sigma_big=12, sigma_small=3, dilation_length=7, 
+                       size_min=1e4, size_max=7.5e5, circularity_min=10):
+    """Segment nuclei from a 3D imaging stack
+   
+    Args:
+        stack: ndarray
+            3D image stack of dimensions [z, x, y].
+        sigma_big: int
+            Sigma for larger Gaussian filter
+        sigma_small: int
+            Sigma for smaller Gaussian filter
+        dilation_length: int
+            Size in x and y of structuring element for dilating objects
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+        circularity_min: float
+            Minimum circularity measure of objects to retain
+    
+    Returns:
+        labelmask: ndarray
+            Mask of same shape as input stack with nuclei segmented and labeled
+    
+    """
+    # Apply difference of gaussians filter.
+    dog = ndi.filters.gaussian_filter(test, sigma=sigma_big) - ndi.filters.gaussian_filter(test, sigma=sigma_small)
+    # Threshold, make binary mask, fill.
+    t = threshold_li(dog)
+    mask = np.where(dog >= t, 1, 0)
+    mask = imp.imfill(mask, (0,0,100))
+    # Use morphological opening to remove spurious connections.
+    mask = ndi.morphology.binary_opening(mask, structure=np.ones((3,5,5)))
+    # Label objects in binary mask.
+    labelmask, _ = ndi.label(mask)
+    # Dilate labelmask.
+    labelmask = labelmask_apply_morphology(labelmask, 
+            mfunc=ndi.morphology.binary_dilation, 
+            struct=np.ones((1, dilation_length, dilation_length)), 
+            expand_size=(1, dilation_length + 1, dilation_length + 1))
+    # Filter nuclei for size and circularity.
+    labelmask = labelmask_filter_objsize(labelmask, size_min, size_max)
+    labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
+    return labelmask
+
+############################################################################
 def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     """Segment nuclei in a 4D image stack (expect lattice data).
     
@@ -687,3 +841,26 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
         labelmask = np.concatenate((labelmask, mask_updated), axis=0)
     
     return labelmask
+
+############################################################################
+def lattice_segment_nuclei_3(stack, channel=1, **kwargs):
+    """Wrapper for nuclear segmentation routine for lattice data.
+
+    Uses 3D stack segmentation function segment_nuclei3D_3 and label propagator
+    update_labels
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [c, t, z, x, y].
+        channel: int
+            Channel (0th dimension) to use for segmentation.
+        kwargs: key-word arguments (optional)
+            Arguments for segment_nuclei3D_3
+        
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y]
+    
+    
+    """
+    return segment_nuclei4D(stack[channel], segment_nuclei3D_3, update_labels, **kwargs)
