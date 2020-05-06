@@ -606,8 +606,6 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
     
     return main(stack, channel, sigma, walkback)
 
-
-
 ############################################################################
 def update_labels(mask1, mask2):
     """Match labels of segmented structures to those of a previous frame.
@@ -750,7 +748,7 @@ def filter_labelmask(labelmask, func, above=0, below=1e6):
     return labelmask_filtered
 
 ############################################################################
-def segment_nuclei3D_3(stack, sigma_big=12, sigma_small=3, dilation_length=7, 
+def segment_nuclei3D_3(stack, sigma_big=17, sigma_small=3, erosion_length=10, dilation_length=10, 
                        size_min=1e4, size_max=7.5e5, circularity_min=10):
     """Segment nuclei from a 3D imaging stack
    
@@ -776,16 +774,16 @@ def segment_nuclei3D_3(stack, sigma_big=12, sigma_small=3, dilation_length=7,
     
     """
     # Apply difference of gaussians filter.
-    dog = ndi.filters.gaussian_filter(test, sigma=sigma_big) - ndi.filters.gaussian_filter(test, sigma=sigma_small)
+    dog = ndi.filters.gaussian_filter(stack, sigma=sigma_big) - ndi.filters.gaussian_filter(stack, sigma=sigma_small)
     # Threshold, make binary mask, fill.
     t = threshold_li(dog)
     mask = np.where(dog >= t, 1, 0)
     mask = imp.imfill(mask, (0,0,100))
-    # Use morphological opening to remove spurious connections.
-    mask = ndi.morphology.binary_opening(mask, structure=np.ones((3,5,5)))
+    # Use morphological erosion to remove spurious connections between objects.
+    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
     # Label objects in binary mask.
     labelmask, _ = ndi.label(mask)
-    # Dilate labelmask.
+    # Dilate labelmask to compensate for earlier erosion.
     labelmask = labelmask_apply_morphology(labelmask, 
             mfunc=ndi.morphology.binary_dilation, 
             struct=np.ones((1, dilation_length, dilation_length)), 
