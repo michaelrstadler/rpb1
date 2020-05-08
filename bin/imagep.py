@@ -53,29 +53,43 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
 
 ############################################################################
 def imfill(mask, seed_pt='default'):
-    '''Fill holes in a binary mask.
+    '''Fill holes within objects in a binary mask.
     
-    Equivalent to matlab's imfill function, conceptually identical to fill
-    functions in paint programs. seed_pt needs to be a point in the "back-
-    ground" area to fill. All 0 or False pixels directly contiguous with the 
-    seed are defined as background, all other pixels are declared foreground.
+    Equivalent to matlab's imfill function. seed_pt needs to be a point in 
+    the "background" area. All 0 or False pixels directly contiguous with 
+    the seed are defined as background, all other pixels are declared foreground.
     Thus any "holes" (0 pixels that are not contiguous with background) are 
-    filled in.
+    filled in. Conceptually, this is like using the "fill" function in classic
+    paint programs to fill the background, and taking all non-background as 
+    foreground.
     
     Args:
         mask: ndarray
             Binary mask of n dimensions.
         seed_pt: tuple
             Pixel in mask to use for seeding "background". This is the equi-
-            valent of the point you click when filling in paint.
+            valent of the point you click when filling in paint. Default will
+            start at the all top left ([0,0], [0,0,0], etc.) and select the
+            first zero pixel on the top line from the left.
     
     Returns:
         mask_filled: ndarray
             Binary mask filled    
     '''
+    # Find a zero pixel for default start in upper left corner. Begins at 0,0
+    # and walks to the right until it finds a zero.
+    def find_zero(mask):
+        # Grab top line of first Z-slice.
+        topline = mask[tuple(np.zeros(mask.ndim - 1).astype('int'))]
+        # Find the first zero pixel from left.
+        first_zero = np.where(topline == 0)[0][0]
+        # Return this location as seed.
+        seed_pt = tuple(np.zeros(mask.ndim - 1).astype(int)) + tuple([first_zero])
+        return seed_pt
     # By default, start in upper left corner.
     if (seed_pt == 'default'):
-        seed_pt = tuple(np.zeros(mask.ndim).astype(int))
+        #seed_pt = tuple(np.zeros(mask.ndim).astype(int))
+        seed_pt = find_zero(mask)
     # Fill all background pixels by changing them to 1. Changes are made to
     # original mask, so 1s are carried over in mask_flooded.
     mask_flooded = flood_fill(mask, seed_pt,1)
