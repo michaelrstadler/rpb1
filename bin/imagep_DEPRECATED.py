@@ -299,3 +299,51 @@ def mask_plane(stack, top_z0, bottom_z0, top_zmax, side='>', maskval=0):
     stack_masked = np.copy(stack)
     _apply_mask(stack_masked, mesh_sum, d, side, maskval)
     return(stack_masked)
+
+############################################################################
+def segment_nuclei3D_3(instack, sigma_big=17, sigma_small=3, erosion_length=10, dilation_length=10, 
+                       size_min=1e4, size_max=7.5e5, circularity_min=10):
+    """Segment nuclei from a 3D imaging stack
+   
+    Args:
+        stack: ndarray
+            3D image stack of dimensions [z, x, y].
+        sigma_big: int
+            Sigma for larger Gaussian filter
+        sigma_small: int
+            Sigma for smaller Gaussian filter
+        dilation_length: int
+            Size in x and y of structuring element for dilating objects
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+        circularity_min: float
+            Minimum circularity measure of objects to retain
+    
+    Returns:
+        labelmask: ndarray
+            Mask of same shape as input stack with nuclei segmented and labeled
+    
+    """
+    # Normalize each Z-slice to mean intensity to account for uneven illumination.
+    stack = zstack_normalize_mean(instack)
+    # Apply difference of gaussians filter.
+    dog = ndi.filters.gaussian_filter(stack, sigma=sigma_big) - ndi.filters.gaussian_filter(stack, sigma=sigma_small)
+    # Threshold, make binary mask, fill.
+    t = threshold_li(dog)
+    mask = np.where(dog >= t, 1, 0)
+    mask = imp.imfill(mask, (0,0,100))
+    # Use morphological erosion to remove spurious connections between objects.
+    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
+    # Label objects in binary mask.
+    labelmask, _ = ndi.label(mask)
+    # Dilate labelmask to compensate for earlier erosion.
+    labelmask = labelmask_apply_morphology(labelmask, 
+            mfunc=ndi.morphology.binary_dilation, 
+            struct=np.ones((1, dilation_length, dilation_length)), 
+            expand_size=(1, dilation_length + 1, dilation_length + 1))
+    # Filter nuclei for size and circularity.
+    labelmask = labelmask_filter_objsize(labelmask, size_min, size_max)
+    labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
+    return labelmask

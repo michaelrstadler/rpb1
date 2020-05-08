@@ -19,8 +19,8 @@ import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 from functools import partial
 import skimage as ski
-from skimage.filters.thresholding import threshold_li
-from skimage.segmentation import flood_fill
+from skimage.filters.thresholding import threshold_li, threshold_otsu
+from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
@@ -137,6 +137,7 @@ def peak_local_max_nD(img, size=(70,100,100)):
             of the objects you're searching for.
     
     Returns:
+        tuple: (local_peak_mask, local_peaks)
         local_peak_mask: ndarray
             A labelmask with dimensions equal to img of single labeled 
             pixels representing local maxima.
@@ -557,9 +558,10 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
     """Segment the embryo from extra-embryo space in lattice data.
     
     Details: Crudely segments the embryo from extra-embryonic space in 5-
-    dimensional stacks. Performs a gaussian smoothing, then thresholds,
-    then uses morphological filtering to fill holes and then to "walk
-    back" from right-to-left, based on the observation that segementation 
+    dimensional stacks. The mean projection across all time slices is first
+    taken, followed by performing a gaussian smoothing, then thresholding,
+    then using morphological filtering to fill holes and then "walking
+    back" from right-to-left, based on the observation that segmentation 
     tends to extend too far, and lattice images always have the sample on
     the left.
     
@@ -585,7 +587,7 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
         # Smooth with gaussian kernel.
         im_smooth = ndi.filters.gaussian_filter(im, sigma=sigma)
         # Find threshold with minimum method.
-        t = filters.threshold_minimum(im_smooth)
+        t = ski.filters.threshold_minimum(im_smooth)
         # Make binary mask with threshold.
         mask = np.where(im_smooth > t, im, 0)
         mask = mask.astype('bool')
@@ -605,62 +607,6 @@ def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
         return(stack_masked)
     
     return main(stack, channel, sigma, walkback)
-
-############################################################################
-def update_labels(mask1, mask2):
-    """Match labels of segmented structures to those of a previous frame.
-    
-    Uses a simple principle of reciprocal best hits: for each labeled object
-    in mask 2, find the object in mask1 with the most overlapping pixels. 
-    Then do the reverse: find the maximallly overlapping object in mask 1 for
-    the objects in mask 2. For objects that are each other's best hit (most
-    overlapping pixels), the labels in mask2 are replaced with those of mask1.
-    Labels that do not have reciprocal best hits are dropped from the mask.
-    
-    Args:
-        mask1: ndarray
-            Labelmask in order [z, x, y]. Labels from this mask will be 
-            propagated to mask2.
-        mask2: ndarray
-            Labelmask of same shape as mask1. Labels in this mask will be
-            replaced by corresponding labels from mask1.
-        
-    Returns:
-        updated_mask: ndarray
-            Labelmask of identical shape to mask1 and mask2, updated to
-            propagate labels from mask1 to mask2.
-    
-    Raises:
-        ValueError:
-            If the shapes of the two masks are not the same.
-    """
-    # Find the object in mask2 that has maximum overlap with an object in max1,
-    # (as a fraction of the objects pixels in mask1)
-    def get_max_overlap(mask1, mask2, label1):
-        # Count overlapping pixels.
-        labels, counts = np.unique(mask2[mask1 == label1], return_counts=True)
-        # Sort labels by counts (ascending).
-        labels_sorted = labels[np.argsort(counts)]
-        # Select new label with maximum overlap.
-        max_overlap = labels_sorted[-1]
-        return max_overlap
-    
-    def main(mask1, mask2):
-        if not (mask1.shape == mask2.shape):
-            raise ValueError("Masks do not have the same shape.")
-        # Initialize blank mask.
-        updated_mask = np.zeros(mask2.shape)
-        for label1 in np.unique(mask1):
-            # Find label in mask2 with maximum overlap with nuc from mask1.
-            label2 = get_max_overlap(mask1, mask2, label1)
-            # Check that labels are "reciprocal best hits" by determining the 
-            # label in mask1 with maximum overlap with label in mask2 found above.
-            label2_besthit = get_max_overlap(mask2, mask1, label2)
-            if ((label2_besthit == label1) and (label1 != 0)):
-                updated_mask[mask2 == label2] = label1
-        return updated_mask
-
-    return main(mask1, mask2)
 
 ############################################################################
 def labelmask_filter_objsize(labelmask, size_min, size_max):
@@ -748,19 +694,78 @@ def filter_labelmask(labelmask, func, above=0, below=1e6):
     return labelmask_filtered
 
 ############################################################################
-def segment_nuclei3D_3(stack, sigma_big=17, sigma_small=3, erosion_length=10, dilation_length=10, 
-                       size_min=1e4, size_max=7.5e5, circularity_min=10):
+def zstack_normalize_mean(instack):
+    """Normalize each Z-slice in a Z-stack to by dividing by its mean
+
+    Args:
+        instack: ndarray
+            Image stack in order [z, x, y]
+
+    Returns:
+        stack: ndarray
+            Image stack of same shape as instack.
+    """
+    stack = np.copy(instack)    
+    stackmean = stack.mean()
+    for x in range(0,stack.shape[0]):
+        immean = stack[x].mean()
+        stack[x] = stack[x] / immean * stackmean
+    return(stack)
+
+############################################################################
+def stack_bgsub(stack, bgchannel=0, fgchannel=1):
+    """Use one channel of image stack to background subtract a second channel.
+    
+    Built for 2-color lattice MS2 stacks. Observation is that low-frequency
+    features in MS2 channel (typically red) are almost all shared background
+    structures, particularly the embryo boundary. Subtraction is a very 
+    effective method of removing this boundary and other non-specific signals.
+    The mean projection in time of the background channel is used for
+    subtraction.
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [z, x, y].
+        bgchannel: int
+            Channel to use for background (to be subtracted)
+        fgchannel: int
+            Channel to use for foreground (to be subtracted from)
+    
+    Returns:
+        bgsub: ndarray
+            Background-subtracted stack in same shape as input stack
+    """
+    # Generate background from mean projection in time.
+    bg = stack[bgchannel].mean(axis=0)
+    # Find scale factor to equalize mean intensities.
+    scale = stack[fgchannel].mean() / bg.mean()
+    # Subtract background (broadcast to whole array, in both channels)
+    bgsub = stack - (scale * bg)
+    # Set minimum value to 0 (remove negative values).
+    bgsub = bgsub + abs(bgsub.min())
+    return bgsub
+
+############################################################################
+def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100),
+                       erosion_length=10, dilation_length=10, size_min=1e4, 
+                       size_max=7.5e5, circularity_min=10, display=False):
     """Segment nuclei from a 3D imaging stack
    
     Args:
-        stack: ndarray
+        instack: ndarray
             3D image stack of dimensions [z, x, y].
-        sigma_big: int
-            Sigma for larger Gaussian filter
-        sigma_small: int
-            Sigma for smaller Gaussian filter
+        sigma1: int
+            Sigma for initial Gaussian filter, for making initial mask
+        sigma_grad: int
+            Sigma for Gaussian filter used to make gradient for watershed
+        seed_window: tuple of three ints
+            Size in [z, x, y] for window for determining local maxes in distance
+            transform. Generally want size to be ~ size of nuclei.
+        erosion_length: int
+            Size in x and y of structuring element for erosion of initial mask.
         dilation_length: int
-            Size in x and y of structuring element for dilating objects
+            Size in x and y of structuring element for dilating objects after
+            final segmentation.
         size_min: int
             Minimum size, in pixels, of objects to retain
         size_max: int
@@ -773,25 +778,109 @@ def segment_nuclei3D_3(stack, sigma_big=17, sigma_small=3, erosion_length=10, di
             Mask of same shape as input stack with nuclei segmented and labeled
     
     """
-    # Apply difference of gaussians filter.
-    dog = ndi.filters.gaussian_filter(stack, sigma=sigma_big) - ndi.filters.gaussian_filter(stack, sigma=sigma_small)
+    # Normalize each Z-slice to mean intensity to account for uneven illumination.
+    stack = zstack_normalize_mean(instack)
+    # Apply gaussian filter.
+    stack_smooth = ndi.filters.gaussian_filter(stack, sigma=sigma1)
     # Threshold, make binary mask, fill.
-    t = threshold_li(dog)
-    mask = np.where(dog >= t, 1, 0)
-    mask = imp.imfill(mask, (0,0,100))
+    t = threshold_otsu(stack_smooth)
+    mask = np.where(stack_smooth >= t, 1, 0)
+    mask = imfill(mask, (0,0,100))
     # Use morphological erosion to remove spurious connections between objects.
     mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
-    # Label objects in binary mask.
-    labelmask, _ = ndi.label(mask)
-    # Dilate labelmask to compensate for earlier erosion.
+    # Perform distance transform of mask.
+    dist = ndi.distance_transform_edt(mask)
+    # Find local maxima for watershed seeds.
+    seeds, _ = peak_local_max_nD(dist, size=seed_window)
+    # Re-smooth, do gradient transform to get substrate for watershedding.
+    stack_smooth2 = ndi.filters.gaussian_filter(stack, sigma=sigma_grad)
+    grad = gradient_nD(stack_smooth2)
+    # Segment by watershed algorithm.
+    ws = watershed(grad, seeds.astype(int))
+    # Filter nuclei for size and circularity.
+    labelmask = labelmask_filter_objsize(ws, size_min, size_max)
+    labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
+    # Lightly dilate labeled structures.
     labelmask = labelmask_apply_morphology(labelmask, 
             mfunc=ndi.morphology.binary_dilation, 
             struct=np.ones((1, dilation_length, dilation_length)), 
             expand_size=(1, dilation_length + 1, dilation_length + 1))
-    # Filter nuclei for size and circularity.
-    labelmask = labelmask_filter_objsize(labelmask, size_min, size_max)
-    labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
+    
+    if (display):
+        middle_slice = int(stack.shape[0] / 2)
+        fig, ax = plt.subplots(2,2, figsize=(10,10))
+        # Display mask.
+        ax[0][0].imshow(mask.max(axis=0))
+        ax[0][0].set_title('Initial Mask')
+        # Display watershed seeds.
+        seeds_vis = ndi.morphology.binary_dilation(seeds, structure=np.ones((1,8,8)))
+        ax[0][1].imshow(stack_smooth.max(axis=0), alpha=0.5)
+        ax[0][1].imshow(seeds_vis.max(axis=0), alpha=0.5)
+        ax[0][1].set_title('Watershed seeds')
+        # Display gradient.
+        ax[1][0].imshow(grad[middle_slice])
+        ax[1][0].set_title('Gradient')
+        # Display final mask.
+        ax[1][1].imshow(labelmask.max(axis=0))
+        ax[1][1].set_title('Final Segmentation')
+        
     return labelmask
+
+############################################################################
+def update_labels(mask1, mask2):
+    """Match labels of segmented structures to those of a previous frame.
+    
+    Uses a simple principle of reciprocal best hits: for each labeled object
+    in mask 2, find the object in mask1 with the most overlapping pixels. 
+    Then do the reverse: find the maximallly overlapping object in mask 1 for
+    the objects in mask 2. For objects that are each other's best hit (most
+    overlapping pixels), the labels in mask2 are replaced with those of mask1.
+    Labels that do not have reciprocal best hits are dropped from the mask.
+    
+    Args:
+        mask1: ndarray
+            Labelmask in order [z, x, y]. Labels from this mask will be 
+            propagated to mask2.
+        mask2: ndarray
+            Labelmask of same shape as mask1. Labels in this mask will be
+            replaced by corresponding labels from mask1.
+        
+    Returns:
+        updated_mask: ndarray
+            Labelmask of identical shape to mask1 and mask2, updated to
+            propagate labels from mask1 to mask2.
+    
+    Raises:
+        ValueError:
+            If the shapes of the two masks are not the same.
+    """
+    # Find the object in mask2 that has maximum overlap with an object in max1,
+    # (as a fraction of the objects pixels in mask1)
+    def get_max_overlap(mask1, mask2, label1):
+        # Count overlapping pixels.
+        labels, counts = np.unique(mask2[mask1 == label1], return_counts=True)
+        # Sort labels by counts (ascending).
+        labels_sorted = labels[np.argsort(counts)]
+        # Select new label with maximum overlap.
+        max_overlap = labels_sorted[-1]
+        return max_overlap
+    
+    def main(mask1, mask2):
+        if not (mask1.shape == mask2.shape):
+            raise ValueError("Masks do not have the same shape.")
+        # Initialize blank mask.
+        updated_mask = np.zeros(mask2.shape)
+        for label1 in np.unique(mask1):
+            # Find label in mask2 with maximum overlap with nuc from mask1.
+            label2 = get_max_overlap(mask1, mask2, label1)
+            # Check that labels are "reciprocal best hits" by determining the 
+            # label in mask1 with maximum overlap with label in mask2 found above.
+            label2_besthit = get_max_overlap(mask2, mask1, label2)
+            if ((label2_besthit == label1) and (label1 != 0)):
+                updated_mask[mask2 == label2] = label1
+        return updated_mask
+
+    return main(mask1, mask2)
 
 ############################################################################
 def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
@@ -841,11 +930,21 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     return labelmask
 
 ############################################################################
-def lattice_segment_nuclei_3(stack, channel=1, **kwargs):
+def lattice_segment_nuclei_4(stack, channel=1, **kwargs):
     """Wrapper for nuclear segmentation routine for lattice data.
 
-    Uses 3D stack segmentation function segment_nuclei3D_3 and label propagator
-    update_labels
+    Uses 3D stack segmentation function segment_nuclei3D_4 and label propagator
+    update_labels.
+
+    Suggested workflow:
+
+    1. Background subtract stack: 
+        bgsub = stack_bgsub(stack)
+    2. Test parameters to get good segmentation of first Z-stack:
+        test = segment_nuclei3D_4(bgsub[1,0], seed_window=(70,50,50), display=True)
+        viewer(test, 'zxy')
+    3. Call this function on bgsub with optimized parameters.
+        labelmask = lattice_segment_nuclei_4(bgsub, channel=1, seed_window=(70,40,40))
     
     Args:
         stack: ndarray
@@ -853,12 +952,11 @@ def lattice_segment_nuclei_3(stack, channel=1, **kwargs):
         channel: int
             Channel (0th dimension) to use for segmentation.
         kwargs: key-word arguments (optional)
-            Arguments for segment_nuclei3D_3
+            Arguments for segment_nuclei3D_4
         
     Returns:
         labelmask: ndarray
             4D labelmask of dimensions [t, z, x, y]
-    
-    
     """
-    return segment_nuclei4D(stack[channel], segment_nuclei3D_3, update_labels, **kwargs)
+
+    return segment_nuclei4D(stack[channel], segment_nuclei3D_4, update_labels, **kwargs)
