@@ -4,7 +4,7 @@
 Insert description here.
 
 """
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 __author__ = 'Michael Stadler'
 
 
@@ -564,10 +564,66 @@ def viewer(stacks, order='tzxy'):
     main(order)
 
 ############################################################################
+def qax(n, ncol=4):
+    """Quick axes: generate 1d list of axes objects of specified number
+    
+    Args:
+        n: int
+            Number of plots desired
+            
+    Returns:
+        ax1d: list
+            1D list of axes objects in order top left to bottom right (columns
+            then rows)
+    """
+    nrow = int(np.ceil(n / ncol))
+    fig, ax = plt.subplots(nrow, ncol, figsize=(16, 4*nrow))
+    ax1d = []
+    pos1d = 0
+    if (nrow > 1):
+        for r in range(0, nrow):
+            for c in range(0, ncol):
+                ax1d.append(ax[r][c])
+                pos1d = pos1d + 1
+    else:
+        for c in range(0, ncol):
+            ax1d.append(ax[c])
+            pos1d = pos1d + 1
+    
+    return ax1d
+
+############################################################################
+def plot_ps(func, span=range(0,8)):
+    """Plot a parameter series in a specified range
+    
+    User supplies a plotting function that takes a single integer input as
+    a parameter. plot_ps builds axes to display all parameter values and
+    serially calls plot function on them.
+    
+    Example:
+       def temp(x):
+            dog = dog_filter(red, x, 3)
+            plt.imshow(dog)
+
+        plot_ps(temp, range(8,13)) 
+    
+    Args:
+        func: function
+            Must take a single integer value as a parameter and call a plot
+            function on the active axes object.
+        span: range
+            Range object containing values of parameter to plot. 
+    """
+    nplots = len(span)
+    ax = qax(int(len(span)))
+    for pln in range(0, len(span)):
+        plt.sca(ax[pln])
+        func(span[pln])
+
+############################################################################
 # Functions for segmenting images
 ############################################################################
 
-############################################################################
 def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
     """Segment the embryo from extra-embryo space in lattice data.
     
