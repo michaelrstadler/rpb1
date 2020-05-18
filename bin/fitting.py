@@ -21,7 +21,7 @@ def gaussian3d(height, center_z, center_x, center_y, width_z, width_x, width_y):
             Locations of the center of the gaussian
         width_z, width_x, width_y: int
             Sigmas for the gaussians in each dimension
-    
+
     Returns:
         Function that accepts int coordinates z,x,y and returns the value of
         the 3D gaussian function at that position based on input parameters.
@@ -78,7 +78,7 @@ def moments3d(data):
     return height, z, x, y, width_z, width_x, width_y
 
 ############################################################################
-def fitgaussian(data):
+def fitgaussian3d(data):
     """Fit a gaussian
     
     Returns (height, z, x, y, width_z, width_x, width_y)
@@ -89,14 +89,20 @@ def fitgaussian(data):
         data: ndarray
             The 3D data to fit in shape [z,x,y]
     Returns:
-        tuple of ints
-            Parameters of the fit: (height, z, x, y, width_z, width_x, width_y)
-    
+        opt: OptimizeResult
+            opt.x: parameters of the fit: (height, z, x, y, width_z, width_x, width_y)
+            opt.success: boolean: whether fit exited successfully
     """
     
     params = moments3d(data)
     # Error function is simple difference between gaussian function and data.
     errorfunction = lambda p: np.ravel(gaussian3d(*p)(*np.indices(data.shape)) -
                                  data)
-    p, success = optimize.leastsq(errorfunction, params)
-    return p
+    opt = optimize.least_squares(errorfunction, params, bounds=([-np.inf,0,0,0,-np.inf,-np.inf,-np.inf],[np.inf,data.shape[0]-1,data.shape[1]-1,data.shape[2]-1,np.inf,np.inf,np.inf]))
+    return opt
+
+def fit_viewable(data, p):
+    f = gaussian3d(*p)
+    x, y, z = np.indices(data.shape)
+    fit = f(x, y, z)
+    return fit

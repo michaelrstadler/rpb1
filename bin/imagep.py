@@ -26,6 +26,10 @@ from skimage.measure import label, regionprops
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
+# Import my packages.
+import sys
+sys.path.append('/Users/MStadler/Bioinformatics/Projects/Zelda/Quarantine_analysis/bin')
+from fitting import fitgaussian3d
 ############################################################################
 # General image processing functions
 ############################################################################
@@ -138,7 +142,10 @@ def peak_local_max_nD(img, size=(70,100,100)):
     centroids for connected pixels, and returns a mask of these centroid
     positions and a list of them.
     
-    Suggested usage: finding seed points for watershed segmentation.
+    Suggested usage: finding seed points for watershed segmentation from 
+    distance transform. It is necessary because there are often multiple
+    pixels with the same distance value, leaving little clusters of connected
+    pixels.
     
     Args:
         img: ndarray
@@ -191,27 +198,6 @@ def get_object_centroid(labelmask, id):
     coords = np.where(labelmask == id)
     # Find mean of each coordinate, remove negatives, make int.
     return tuple([int(np.mean(x)) for x in coords])
-
-############################################################################
-def gradient_nD(stack):
-    """Find the gradient of an n-dimensional image.
-    
-    Approximates an nD (typically: 3D) gradient by applying a gradient filter
-    separately on each axis and taking the root of the sum of their squares.
-
-    Args:
-        stack: ndarray
-            Image stack in [z, x, y] or [x, y]
-            
-    Returns:
-        gradient: ndarray
-            Gradient transform of image in same shape as stack
-    """
-    sumsq = ndi.filters.sobel(stack, axis=0) ** 2
-    for d in range(1, stack.ndim):
-         sumsq = sumsq + (ndi.filters.sobel(stack, axis=d) ** 2)
-    gradient = np.sqrt(sumsq)
-    return gradient
 
 ############################################################################
 def get_object_centroid(labelmask, id):
@@ -311,6 +297,68 @@ def labelmask_apply_morphology(labelmask, mfunc, struct=np.ones((2,2,2)),
     # Match labels in new mask to those of lookup mask.
     new_labelmask = np.where(new_binmask, lookupmask, 0)
     return new_labelmask
+
+############################################################################
+# Function implementing filters
+############################################################################
+
+def gradient_nD(stack):
+    """Find the gradient of an n-dimensional image.
+    
+    Approximates an nD (typically: 3D) gradient by applying a gradient filter
+    separately on each axis and taking the root of the sum of their squares.
+
+    Args:
+        stack: ndarray
+            Image stack in [z, x, y] or [x, y]
+            
+    Returns:
+        gradient: ndarray
+            Gradient transform of image in same shape as stack
+    """
+    sumsq = ndi.filters.sobel(stack, axis=0) ** 2
+    for d in range(1, stack.ndim):
+         sumsq = sumsq + (ndi.filters.sobel(stack, axis=d) ** 2)
+    gradient = np.sqrt(sumsq)
+    return gradient
+
+############################################################################
+def dog_filter(stack, sigma_big, sigma_small):
+    """Difference of Gaussians filter
+    
+    Args:
+        stack: ndarray
+            n-dimensional image stack
+        sigma_big: int
+            Larger sigma for gaussian filter
+        sigma_small: int
+            Smaller sigma for gaussian filter
+    
+    Returns:
+        dog: ndarray
+            DoG filtered stack of same shape as input stack.
+    """
+    stack_cp = stack.astype(np.int16)
+    return ndi.filters.gaussian_filter(stack_cp, sigma=sigma_big) - ndi.filters.gaussian_filter(stack_cp, sigma=sigma_small)
+
+############################################################################
+def log_filter(stack, sigma):
+    """Laplacian of Gaussian filter
+    
+    Args:
+        stack: ndarray
+            n-dimensional image stack
+        sigma: int
+            Sigma for gaussian filter
+    
+    Returns:
+        log: ndarray
+            LoG filtered stack of same shape as input stack.
+    """
+    stack_cp = stack.astype(np.int16)
+    gauss = ndi.filters.gaussian_filter(stack_cp, sigma=sigma)
+    log = ndi.filters.laplace(gauss)
+    return log
 
 ############################################################################
 # Functions for loading TIFF stacks
@@ -577,6 +625,8 @@ def qax(n, ncol=4):
             then rows)
     """
     nrow = int(np.ceil(n / ncol))
+    if (n < ncol):
+        ncol = n
     fig, ax = plt.subplots(nrow, ncol, figsize=(16, 4*nrow))
     ax1d = []
     pos1d = 0
@@ -727,7 +777,7 @@ def object_circularity(labelmask, label):
     # Calculate circularity from object perimeter and area.
     regions = regionprops(im)
     perimeter = regions[0].perimeter
-    area = len(z)
+    area = regions[0].area
     circularity = 4 * np.pi * area / (perimeter ** 2) 
     return circularity
     
@@ -816,9 +866,9 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     return bgsub
 
 ############################################################################
-def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100),
-                       erosion_length=10, dilation_length=10, size_min=1e4, 
-                       size_max=7.5e5, circularity_min=10, display=False):
+def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=10, sigma_dog_big=20, seed_window=(70,100,100),
+                       erosion_length=5, dilation_length=10, size_min=1e4, 
+                       size_max=5e5, circularity_min=0.2, display=False):
     """Segment nuclei from a 3D imaging stack
    
     Args:
@@ -826,8 +876,10 @@ def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100)
             3D image stack of dimensions [z, x, y].
         sigma1: int
             Sigma for initial Gaussian filter, for making initial mask
-        sigma_grad: int
-            Sigma for Gaussian filter used to make gradient for watershed
+        sigma_dog_small: int
+            Smaller sigma for DoG filter used as input to gradient for watershed
+        sigma_dog_big: int
+            Larger sigma for DoG filter used as input to gradient for watershed
         seed_window: tuple of three ints
             Size in [z, x, y] for window for determining local maxes in distance
             transform. Generally want size to be ~ size of nuclei.
@@ -863,8 +915,8 @@ def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100)
     # Find local maxima for watershed seeds.
     seeds, _ = peak_local_max_nD(dist, size=seed_window)
     # Re-smooth, do gradient transform to get substrate for watershedding.
-    stack_smooth2 = ndi.filters.gaussian_filter(stack, sigma=sigma_grad)
-    grad = gradient_nD(stack_smooth2)
+    dog = dog_filter(stack, sigma_dog_small, sigma_dog_big)
+    grad = gradient_nD(dog)
     # Segment by watershed algorithm.
     ws = watershed(grad, seeds.astype(int))
     # Filter nuclei for size and circularity.
@@ -878,7 +930,7 @@ def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100)
     
     if (display):
         middle_slice = int(stack.shape[0] / 2)
-        fig, ax = plt.subplots(2,2, figsize=(10,10))
+        fig, ax = plt.subplots(3,2, figsize=(10,10))
         # Display mask.
         ax[0][0].imshow(mask.max(axis=0))
         ax[0][0].set_title('Initial Mask')
@@ -890,9 +942,12 @@ def segment_nuclei3D_4(instack, sigma1=3, sigma_grad=5, seed_window=(70,100,100)
         # Display gradient.
         ax[1][0].imshow(grad[middle_slice])
         ax[1][0].set_title('Gradient')
+        # Display watershed output.
+        ax[1][1].imshow(ws.max(axis=0))
+        ax[1][1].set_title('Watershed')
         # Display final mask.
-        ax[1][1].imshow(labelmask.max(axis=0))
-        ax[1][1].set_title('Final Segmentation')
+        ax[2][0].imshow(labelmask.max(axis=0))
+        ax[2][0].set_title('Final Segmentation')
         
     return labelmask
 
@@ -1000,7 +1055,7 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     return labelmask
 
 ############################################################################
-def lattice_segment_nuclei_4(stack, channel=1, **kwargs):
+def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
     """Wrapper for nuclear segmentation routine for lattice data.
 
     Uses 3D stack segmentation function segment_nuclei3D_4 and label propagator
@@ -1011,7 +1066,7 @@ def lattice_segment_nuclei_4(stack, channel=1, **kwargs):
     1. Background subtract stack: 
         bgsub = stack_bgsub(stack)
     2. Test parameters to get good segmentation of first Z-stack:
-        test = segment_nuclei3D_4(bgsub[1,0], seed_window=(70,50,50), display=True)
+        test = segment_nuclei3D_5(bgsub[1,0], seed_window=(70,50,50), display=True)
         viewer(test, 'zxy')
     3. Call this function on bgsub with optimized parameters.
         labelmask = lattice_segment_nuclei_4(bgsub, channel=1, seed_window=(70,40,40))
@@ -1029,4 +1084,110 @@ def lattice_segment_nuclei_4(stack, channel=1, **kwargs):
             4D labelmask of dimensions [t, z, x, y]
     """
 
-    return segment_nuclei4D(stack[channel], segment_nuclei3D_4, update_labels, **kwargs)
+    return segment_nuclei4D(stack[channel], segment_nuclei3D_5, update_labels, **kwargs)
+
+############################################################################
+def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5, 
+                   sigma_big=4, bg_radius=4, fitwindow_rad_xy=5, 
+                   fitwindow_rad_z=9, h_thresh_multiplier=0.8, 
+                   xy_max_width=10):  
+    """Segment MS2 spots from a 3D stack, fit them with 3D gaussian
+    
+    Alrigthm: bandbass filter -> background subtraction -> find local maxima
+    -> fit gaussian to windows around maxima -> filter based on fit parameters
+    -> label and return.
+    
+    Args:
+        stack: ndarray
+            3D image stack containing MS2 spots
+        peak_window_size: tuple of three ints
+            Size in [z,x,y] of window used to find local maxima. Typically
+            set to the approximage dimensions of nuclei.
+        sigma_small: numeric
+            Lower sigma for difference-of-gaussians bandpass filter
+        sigma_small: numeric
+            Upper sigma for difference-of-gaussians bandpass filter
+        bg_radius: int
+            Radius for minimum filter used for background subtraction
+        fitwindow_rad_xy: int
+            Radius in pixels in the xy-dimension of the window around local
+            maxima peaks within which to do gaussian fitting.
+        fitwindow_rad_z: int
+            Radius in pixels in the z-dimension of the window around local
+            maxima peaks within which to do gaussian fitting.
+        h_thresh_multiplier: float
+            Multiplier [0,1] used to set threshold for the minimum intensity 
+            (height) for filtering gaussian fits. Threshold set according to:
+            thresh = mean + (max - mean)*multplier
+        xy_max_width: int
+            Maximum width in xy-dimension used for filtering gaussian fits.
+    
+    Returns:
+        labelmask: ndarray
+            Segmented spots that pass filter. Labels are assigned to a single 
+            pixel which is that returned by peak_local_max_nD. It is the 
+            centroid of the object formed by all contiguous pixels constituting
+            local maxima within a defined window. In 16-bit data, nearly always
+            corresponds to the pixel of maximum intensity in the segmented object.
+        fitparams: ndarray
+            Parameters of gaussian fit for segmented spot. Each row is a spot 
+            offset by 1 (object 1 is in row 0). Columns are:
+            0: height (intensity), 1: z_center, 2: x_center, 3: y_center, 
+            4: z_width, 5: x_width, 6: y_width.
+    """
+    def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
+        """Retrieve section of image stack corresponding to given
+        window around a point"""
+        zmin = max(0,peak[0] - z_rad)
+        zmax = min(data.shape[0] - 1, peak[0] + z_rad)
+        xmin = max(0,peak[1] - xy_rad)
+        xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
+        ymin = max(0,peak[2] - xy_rad)
+        ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
+        return data[zmin:zmax, xmin:xmax, ymin:ymax]
+    
+    def relabel(mask, p):
+        """Renumber labelmask and corresponding fit parameters
+        
+        Set background as 0, objects in order 1...end
+        """
+        newmask = np.zeros_like(mask)
+        params = np.ndarray((0, p.shape[1]))
+        ids = np.unique(mask)
+        for n in range(1,len(ids)):
+            old_id = ids[n]
+            new_id = n
+            newmask[mask == old_id] = new_id
+            params = np.vstack((params, p[old_id-1,:])) # object 1 will be fitparams row 0
+        return newmask, params
+    
+    # Filter and background subtract image.
+    dog = dog_filter(stack, sigma_small, sigma_big)
+    bg = ndi.filters.minimum_filter(dog, bg_radius)
+    dog_bs = dog - bg
+    # Make a labelmask corresponding to local maxima peaks.
+    mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
+    
+    # Fit 3D gaussian in window surrounding each local maximum.
+    fitparams = np.ndarray((0,7))
+    for peak in peaks:
+        fitwindow = get_fitwindow(stack, peak, fitwindow_rad_xy, 
+                                  fitwindow_rad_z)
+        opt = fitgaussian3d(fitwindow)
+        if opt.success:
+            fitparams = np.vstack((fitparams, opt.x))
+    
+    # Find threshold for gaussian height (intensity for 3D).
+    mean_ = np.mean(stack)
+    p99 = np.percentile(stack.flatten(),99)
+    t = mean_ + ((p99 - mean_) * h_thresh_multiplier)
+    
+    # Filter peaks based on guassian fit parameters.
+    peak_ids = np.unique(mask)[1:]
+    # fitparams columns: 0: height, 5: x_width, 6: y_width
+    trupeaks = peak_ids[(fitparams[:,0] > t) 
+                        & (fitparams[:,5] < xy_max_width) 
+                        & (fitparams[:,6] < xy_max_width)]
+    fmask = np.where(np.isin(mask, trupeaks),mask,0)
+    labelmask, fitparams = relabel(fmask, fitparams)
+    return labelmask, fitparams
