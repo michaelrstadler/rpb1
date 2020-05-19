@@ -1169,7 +1169,7 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
     
     # Fit 3D gaussian in window surrounding each local maximum.
-    fitparams = np.ndarray((0,7))
+    fitparams = {np.ndarray((0,7))}
     for peak in peaks:
         fitwindow = get_fitwindow(stack, peak, fitwindow_rad_xy, 
                                   fitwindow_rad_z)
