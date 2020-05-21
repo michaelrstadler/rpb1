@@ -1152,13 +1152,13 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         Set background as 0, objects in order 1...end
         """
         newmask = np.zeros_like(mask)
-        params = np.ndarray((0, p.shape[1]))
+        params = {}
         ids = np.unique(mask)
         for n in range(1,len(ids)):
             old_id = ids[n]
             new_id = n
             newmask[mask == old_id] = new_id
-            params = np.vstack((params, p[old_id-1,:])) # object 1 will be fitparams row 0
+            params[new_id] = p[old_id-1,:] # object 1 will be fitparams row 0
         return newmask, params
     
     # Filter and background subtract image.
@@ -1169,7 +1169,7 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
     
     # Fit 3D gaussian in window surrounding each local maximum.
-    fitparams = {np.ndarray((0,7))}
+    fitparams = np.ndarray((0,7))
     for peak in peaks:
         fitwindow = get_fitwindow(stack, peak, fitwindow_rad_xy, 
                                   fitwindow_rad_z)
