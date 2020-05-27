@@ -1123,17 +1123,11 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             Maximum width in xy-dimension used for filtering gaussian fits.
     
     Returns:
-        labelmask: ndarray
-            Segmented spots that pass filter. Labels are assigned to a single 
-            pixel which is that returned by peak_local_max_nD. It is the 
-            centroid of the object formed by all contiguous pixels constituting
-            local maxima within a defined window. In 16-bit data, nearly always
-            corresponds to the pixel of maximum intensity in the segmented object.
-        fitparams: ndarray
-            Parameters of gaussian fit for segmented spot. Each row is a spot 
-            offset by 1 (object 1 is in row 0). Columns are:
-            0: height (intensity), 1: z_center, 2: x_center, 3: y_center, 
-            4: z_width, 5: x_width, 6: y_width.
+        spot_data: dict of ndarrays
+            Data for detected spots. Dict keys are unique spot IDs (integers),
+            array entries are 0: z-coordinate, 1: x-coordinate, 2: y-coordinate, 
+            3: gaussian fit height, 4: gaussian fit z-width, 5: gaussian fit 
+            x-width, 6: gaussian fit y-width.
     """
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
@@ -1146,20 +1140,20 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
         return data[zmin:zmax, xmin:xmax, ymin:ymax]
     
-    def relabel(mask, p):
+    def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
         
-        Set background as 0, objects in order 1...end
+        Set background as 0, objects in order 1...end, drop relative (to fit window)
+        coordinates and replace with coordinates from original stack.
         """
-        newmask = np.zeros_like(mask)
-        params = {}
-        ids = np.unique(mask)
-        for n in range(1,len(ids)):
-            old_id = ids[n]
-            new_id = n
-            newmask[mask == old_id] = new_id
-            params[new_id] = p[old_id-1,:] # object 1 will be fitparams row 0
-        return newmask, params
+        spot_data = {}
+        peak_num = 1
+        for peak in peak_ids:
+            coords = np.where(mask == peak)
+            paramsnew = oldparams[peak_num-1,:] # object 1 will be fitparams row 0
+            spot_data[peak_num] = np.append([coords[0][0], coords[1][0], coords[2][0]], paramsnew[[0,4,5,6]])
+            peak_num = peak_num + 1
+        return spot_data
     
     # Filter and background subtract image.
     dog = dog_filter(stack, sigma_small, sigma_big)
@@ -1188,6 +1182,5 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     trupeaks = peak_ids[(fitparams[:,0] > t) 
                         & (fitparams[:,5] < xy_max_width) 
                         & (fitparams[:,6] < xy_max_width)]
-    fmask = np.where(np.isin(mask, trupeaks),mask,0)
-    labelmask, fitparams = relabel(fmask, fitparams)
-    return labelmask, fitparams
+    spot_data = relabel(trupeaks, fitparams, mask)
+    return spot_data
