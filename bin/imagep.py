@@ -299,6 +299,35 @@ def labelmask_apply_morphology(labelmask, mfunc, struct=np.ones((2,2,2)),
     return new_labelmask
 
 ############################################################################
+def mesh_like(arr, n):
+    """Make mesh grid for last n dimensions of an array
+    
+    Makes a meshgrid with the same shape as the last n dimensions of input
+    array-like object.
+    
+    Args:
+        arr: array-like
+            Array-like object that has a shape parameter
+        n: int
+            Number of dimensions, from the right, for which to make meshgrid.
+    
+    Returns:
+        meshes: list of ndarrays
+            Each element of list corresponds to ordered dimension of input,
+            ndarrays are corresponding meshgrids of same shape as arr.
+    """
+    if (n > stack.ndim):
+        raise ValueError('n is larger than the dimension of the array')
+    # Make vectors of linear ranges for each dimension.
+    vectors = []
+    for i in reversed(range(1, n+1)):
+        a = np.arange(0, arr.shape[-i])
+        vectors.append(list(a))
+    # Make meshgrids from vectors.
+    meshes = np.meshgrid(*vectors, sparse=False, indexing='ij')
+    return meshes
+
+############################################################################
 # Function implementing filters
 ############################################################################
 
@@ -1183,4 +1212,293 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
                         & (fitparams[:,5] < xy_max_width) 
                         & (fitparams[:,6] < xy_max_width)]
     spot_data = relabel(trupeaks, fitparams, mask)
+    return spot_data
+
+############################################################################
+def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t, 
+                  max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1):
+    """Add spot detections for new frame to detection data for previous frames.
+    
+    Spots detected in new frame are connected to spots in previous frames
+    if they are within specified distance (max_jump) and contained within
+    the same nucleus. Spots can "disappear" for a number of frames defined
+    by max_frame_gap. Spots that cannot be connected to spots from prior
+    frames are initialized as new spots.
+    
+    Args:
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected in previous frames.
+            Dict entries are unique spot IDs (numeric 1...), rows of ndarray
+            are detections of the spot in a single frame. Column order is
+            0: frame no. (time), 1: nucleus ID, 2: z-coordinate, 3: x-
+            coordinate, 4: y-coordinate, 5: gaussian fit height, 6: gaussian
+            fit z-width, 7: gaussian fit x-width, 8: gaussian fit y-width.
+        newframe_spotdata: dict of ndarrays
+            Data for detected spots in frame to be added, returned from MS2
+            dot segmentation function. Dict keys are unique spot IDs (integers),
+            array entries are 0: z-coordinate, 1: x-coordinate, 2: y-coordinate, 
+            3: gaussian fit height, 4: gaussian fit z-width, 5: gaussian fit 
+            x-width, 6: gaussian fit y-width.
+        nucmask: ndarray
+            4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
+            background (not a nucleus) and nuclei have integer labels.
+        t: int
+            Number of frame to be added.
+        max_frame_gap: int
+            Maximum number of frames from which spot can be absent and still
+            connected across the gap. Example: for a value of 1, a spot
+            detected in frame 6 and absent from frame 7 can be connected to
+            a spot in frame 8, but a spot in frame 5 cannot be connected to
+            frame 8 if it is absent in frames 6 and 7.
+        max_jump: numeric
+            Maximum 3D displacement between frames for two spots to be connected
+        scale_xy: numeric
+            Distance scale for xy direction (typically: nm per pixel)
+        scale_z: numeric
+            Distance scale for z direction (typically: nm per pixel)
+        
+    Returns:
+        spot_data: dict of ndarrays
+            Same structure as input spot_data with data from new frame added.
+    """
+    def initialize_new_spot(new_spot_data, spot_data):
+        """Initialize new spot with next numeric ID and entry in spot_data."""
+        new_id = max(spot_data.keys()) + 1
+        spot_data[new_id] = np.expand_dims(new_spot_data, 0)
+
+    def sq_euc_distance(coords1, coords2, scale_z=1, scale_xy=1):
+        """Find the squared euclidean distance between two points."""
+        z2 = ((coords2[0] - coords1[0]) * scale_z) ** 2
+        x2 = ((coords2[1] - coords1[1]) * scale_xy) ** 2
+        y2 = ((coords2[2] - coords1[2]) * scale_xy) ** 2
+        sed = z2 + x2 + y2
+        return sed
+    
+    # Make a list of coordinates for all spots in a frame
+    def coord_list_t(spot_data, t):
+        """Make a list of [z,x,y] coordinate tuples for all spots in a given
+        frame"""
+        coord_list = []
+        for spot_id in spot_data:
+            this_spot_data = spot_data[spot_id]
+            row = this_spot_data[this_spot_data[:,0] == t]
+            if (len(row) > 0):
+                row = list(row[0])
+                spot_coords = [spot_id] + row[2:5]
+                coord_list.append(spot_coords)
+        return coord_list
+            
+    
+    def find_nearest_spot(this_coord, coord_list, scale_z, scale_xy):
+        """For a given point, find the closest spot in a coordinate list
+        and the distance between the points."""
+        closest_sed = np.inf
+        closest_spot = 0
+        for test_data in coord_list:
+            test_spot_id = test_data[0]
+            test_coords = (test_data[1:4])
+            sed = sq_euc_distance(test_coords, this_coord, scale_z, scale_xy)
+            if (sed < closest_sed):
+                closest_sed = sed
+                closest_spot = test_spot_id
+                closest_spot_coords = test_coords
+        return closest_spot, np.sqrt(closest_sed), closest_spot_coords
+
+    def update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, 
+                    t):
+        """Walk back one frame at a time within limit set by maximum gap, search 
+        for a nearest spot that is within the maximum allowable jump, handle 
+        duplicates, add connected points to spot_data."""
+        this_spot_coords = (this_spot_data[2:5])
+        # Walk back one frame at a time.
+        for t_lag in range(1, max_frame_gap + 2):
+            if ((t - t_lag) >= 0):
+                # Get nearest spot in the current frame.
+                spot_coords_tlag = coord_list_t(spot_data, t - t_lag)
+                nearest_spot_id, dist, nearest_spot_coords = find_nearest_spot(this_spot_coords, spot_coords_tlag, scale_z, scale_xy)
+                # Check is spot is within max distance.
+                if (dist <= max_jump):
+                    this_spot_nucID = this_spot_data[1]
+                    nearest_spot_nucID = spot_data[nearest_spot_id][-1,1]
+                    # Check is spots are in the same nucleus.
+                    if (this_spot_nucID == nearest_spot_nucID):
+                        # Check if there's already a spot added for this time.
+                        existing = spot_data[nearest_spot_id][spot_data[nearest_spot_id][:,0] == t]
+                        # If there's no existing spot, add this spot to the end of the data for connected spot.
+                        if (len(existing) == 0):
+                            spot_data[nearest_spot_id] = np.append(spot_data[nearest_spot_id], [this_spot_data], axis=0)
+                            return
+                        # If there is an existing spot, if the current spot is closer to the previous-frame spot
+                        # than the existing entry, replace it. Otherwise, continue looking in previous frames (if
+                        # applicable) and eventually create new spot after for loop. I'm not sure this is the best
+                        # behavior--may consider dumping out of for loop and creating new spot rather than looking
+                        # to previous frames in this situation.
+                        else:
+                            existing_dist = np.sqrt(sq_euc_distance(nearest_spot_coords, existing[0,2:5], scale_z, scale_xy))
+                            # If the the current spot is closer than the existing spot, replace 
+                            # existing and initialize it as a new spot.
+                            if (dist < existing_dist):
+                                row_index = np.where(spot_data[nearest_spot_id][:,0] == t)[0][0]
+                                superseded_spot_data = spot_data[nearest_spot_id][row_index]
+                                # Superseded spot from this frame gets bumped to be a new spot.
+                                initialize_new_spot(superseded_spot_data, spot_data)
+                                # Replace data for superseded spot with this spot's data.
+                                spot_data[nearest_spot_id][row_index] = this_spot_data
+                                return
+
+        # If no suitable spot was found in previous frames, make a new spot.
+        initialize_new_spot(this_spot_data, spot_data)
+        
+    
+    # Main
+    spot_data = spot_data.copy()
+    # Go through each spot in the new mask
+    for this_spot_id in newframe_spotdata:
+        spot_coords = tuple(np.append([t], newframe_spotdata[this_spot_id][0:3]).astype(int))
+        nuc_id = nucmask[spot_coords]
+        # Check if spot is in a nucleus.
+        if (nuc_id != 0):
+            # Add time and nuclear ID columns to spot data and call update to search 
+            # for connected spots in previous frames.
+            this_spot_data = np.append([t, nuc_id], newframe_spotdata[this_spot_id])
+            update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, t)
+    return spot_data   
+
+############################################################################
+def ms2_segment_stack(stack, channel, nucmask, seg_func=segMS2_3dstack, 
+    max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1, **kwargs):
+    """Detect and segment MS2 spots from a 5D image stack.
+    
+    Mostly a wrapper for MS2 detection function and spot connector function
+    add_ms2_frame. Initializes spot_data structure using segmentation of 
+    frame 0, then calls detector function and connector on each subsequent
+    frame. Is modular with respect to segmentation function: a new function
+    receives args from *kwargs. Connector is hard-coded as add_ms2_frame.
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [c,t,z,x,y] containing MS2 spots
+        channel: int
+            Channel containing MS2 spots
+        nucmask: ndarray
+            4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
+            background (not a nucleus) and nuclei have integer labels.
+        seg_func: function
+            Function that performs segmentation of MS2 dots in a 3D stack
+        max_frame_gap: int
+            Maximum number of frames from which spot can be absent and still
+            connected across the gap. Example: for a value of 1, a spot
+            detected in frame 6 and absent from frame 7 can be connected to
+            a spot in frame 8, but a spot in frame 5 cannot be connected to
+            frame 8 if it is absent in frames 6 and 7.
+        max_jump: numeric
+            Maximum 3D displacement between frames for two spots to be connected
+        scale_xy: numeric
+            Distance scale for xy direction (typically: nm per pixel)
+        scale_z: numeric
+            Distance scale for z direction (typically: nm per pixel)
+        *kwargs: key-word arguments
+            Args supplied to segmentation function
+        
+    Returns:
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected. Dict entries are unique 
+            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
+            in a single frame. Column order is 0: frame no. (time), 1: nucleus 
+            ID, 2: z-coordinate, 3: x-coordinate, 4: y-coordinate, 5: gaussian 
+            fit height, 6: gaussian fit z-width, 7: gaussian fit x-width, 
+            8: gaussian fit y-width.   
+    """
+    
+    def init_spot_data(data_f0, nucmask):
+        """Initialize spot_data dict from data for first frame. Filters out spots 
+        that are not in nuclei, relabels remaining spots 1...end, adds time 0 and
+        nucleus id to each data entry."""
+        spot_id = 1
+        spot_data = {}
+        for n in data_f0:
+            spot_coords = tuple(np.append([0], data_f0[n][0:3]).astype(int))
+            nuc_id = nucmask[spot_coords]
+            if (nuc_id != 0):
+                spot_data[spot_id] = np.expand_dims(np.append([0, nuc_id], data_f0[n]), 0)
+                spot_id = spot_id + 1
+        return spot_data
+        
+    # Segment first frame and initialize spot data
+    nframes = stack[channel].shape[0]
+    spot_data_f0 = seg_func(stack[channel, 0], **kwargs)
+    spot_data = init_spot_data(spot_data_f0, nucmask)
+
+    # Segment and connect subsequent frames.
+    for t in range(1, nframes):
+        substack = stack[channel, t]
+        print(t)
+        frame_data = seg_func(substack, **kwargs)
+        spot_data = add_ms2_frame(spot_data, frame_data, nucmask, t, max_frame_gap=max_frame_gap,
+            max_jump=max_jump, scale_xy=scale_xy, scale_z=scale_z)
+    return spot_data
+
+############################################################################
+# Functions for analyzing segmented images
+############################################################################
+
+def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scale=1):
+    """Find mean volume within ellipsoid centered on spots, add to spot_info
+    
+    Args:
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected in previous frames.
+            Dict entries are unique spot IDs (numeric 1...), rows of ndarray
+            are detections of the spot in a single frame. Column order is
+            0: frame no. (time), 1: nucleus ID, 2: z-coordinate, 3: x-
+            coordinate, 4: y-coordinate, 5: gaussian fit height, 6: gaussian
+            fit z-width, 7: gaussian fit x-width, 8: gaussian fit y-width.
+        stack: ndarray
+            Image stack of dimensions [c,t,z,x,y]
+        channel: int
+            Channel containing MS2 spots
+        ij_rad: numeric
+            Radius in real units of ellipsoid in the ij (xy) dimension.
+        z_rad: numeric
+            Radius in real units of ellipsoid in the z dimension.
+        ij_scale: numeric
+            Scale factor for ij_rad (typically nm/pixel)
+        z_scale: numeric
+            Scale factor for z_rad (typically nm/pixel)
+    
+    Returns:
+        spot_data: dict of ndarrays
+            Input dictionary with mean ellipsoid pixel values appended as an 
+            additional column (9) to all entries.
+    """
+    def ellipsoid_mean(coords, stack, meshgrid, ij_rad, z_rad):
+        """Define ellipsoid around point, return mean of pixel values in ellipsoid."""
+        # Equation: (x-x0)^2 + (y-y0)^2 + a(z-z0)^2 = r^2
+        r = ij_rad # r is just more intuitive for me to think about...
+        a = (r ** 2) / (z_rad ** 2)
+        z0, i0, j0 = coords
+        valsgrid = np.sqrt((a * ((meshgrid[0] - z0) ** 2)) + ((meshgrid[1] - i0) ** 2) + ((meshgrid[2] - j0) ** 2))
+        pixels = stack[valsgrid <= r]
+        return pixels.mean()
+    
+    spot_data = spot_data.copy()
+    # Make meshgrid for stack.
+    meshgrid = mesh_like(stack, 3)
+    # Scale radii to pixels.
+    ij_rad_pix = ij_rad / ij_scale
+    z_rad_pix = z_rad / z_scale
+    # Update data for each spot at each time point combination by adding column
+    # with the sum of the pixel values within defined ellipses.
+    for spot_id in spot_data:
+        spot_array = spot_data[spot_id]
+        # Initialize new array with extra column.
+        new_array = np.ndarray((spot_array.shape[0], spot_array.shape[1] + 1))
+        for rownum in range(0, spot_array.shape[0]):
+            row = spot_array[rownum]
+            t = int(row[0])
+            coords = tuple(row[2:5].astype(int))
+            substack = stack[channel, t]
+            pix_mean = ellipsoid_mean(coords, substack, meshgrid, ij_rad_pix, z_rad_pix)
+            new_array[rownum] = np.append(row, [pix_mean])
+        spot_data[spot_id] = new_array
     return spot_data
