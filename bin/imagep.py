@@ -864,7 +864,7 @@ def zstack_normalize_mean(instack):
 ############################################################################
 def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     """Use one channel of image stack to background subtract a second channel.
-    
+
     Built for 2-color lattice MS2 stacks. Observation is that low-frequency
     features in MS2 channel (typically red) are almost all shared background
     structures, particularly the embryo boundary. Subtraction is a very 
@@ -946,6 +946,8 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=10, sigma_dog_big=20, 
     # Re-smooth, do gradient transform to get substrate for watershedding.
     dog = dog_filter(stack, sigma_dog_small, sigma_dog_big)
     grad = gradient_nD(dog)
+    # Remove nan from grad, replace with non-nan max values.
+    grad[np.isnan(grad)] = grad[~np.isnan(grad)].max()
     # Segment by watershed algorithm.
     ws = watershed(grad, seeds.astype(int))
     # Filter nuclei for size and circularity.
