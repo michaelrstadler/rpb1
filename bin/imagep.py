@@ -896,7 +896,7 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
 
 ############################################################################
 def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, seed_window=(70,100,100),
-                       erosion_length=5, dilation_length=10, size_min=1e4, 
+                       erosion_length=5, dilation_length=10, sensitivity=0.5, size_min=1e4, 
                        size_max=5e5, circularity_min=0.5, display=False):
     """Segment nuclei from a 3D imaging stack
    
@@ -941,6 +941,27 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
                 seeds[z,i,j] = seeds.max() + 1
                 return
 
+    def smart_dilate(stack, labelmask, sensitivity, dilation_length):
+        """
+        Dilate nuclei, then apply a threshold to the newly-added pixels and
+        only retains pixels that cross it. Change mask in place.
+        """
+        # Get mean pixel values of foreground and background and define threshold.
+        bg_mean = np.mean(stack[labelmask == 0])
+        fg_mean = np.mean(stack[labelmask > 0])
+        t = bg_mean + ((fg_mean - bg_mean) * sensitivity)
+        # Dilate labelmask, return as new mask.
+        labelmask_dilated = labelmask_apply_morphology(labelmask, 
+                mfunc=ndi.morphology.binary_dilation, 
+                struct=np.ones((1, dilation_length, dilation_length)), 
+                expand_size=(1, dilation_length + 1, dilation_length + 1))
+        # Remove any pixels from dilated mask that are below threshhold.
+        labelmask_dilated[stack < t] = 0
+        # Add pixels matching nuc in dilated mask to old mask, pixels in old mask that are n
+        # and 0 in dilated mask are kept at n. So dilation doesn't remove any nuclear pixels.
+        for n in np.unique(labelmask):
+            labelmask[labelmask_dilated == n] = n
+
     # Normalize each Z-slice to mean intensity to account for uneven illumination.
     stack = zstack_normalize_mean(instack)
     # Apply gaussian filter.
@@ -966,12 +987,9 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
     # Filter nuclei for size and circularity.
     labelmask = labelmask_filter_objsize(ws, size_min, size_max)
     labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
-    # Lightly dilate labeled structures.
-    labelmask = labelmask_apply_morphology(labelmask, 
-            mfunc=ndi.morphology.binary_dilation, 
-            struct=np.ones((1, dilation_length, dilation_length)), 
-            expand_size=(1, dilation_length + 1, dilation_length + 1))
-    
+    # Dilate labeled structures.
+    smart_dilate(stack_smooth, labelmask, sensitivity, dilation_length)
+
     if (display):
         middle_slice = int(stack.shape[0] / 2)
         fig, ax = plt.subplots(3,2, figsize=(10,10))
