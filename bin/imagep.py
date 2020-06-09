@@ -874,7 +874,7 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     
     Args:
         stack: ndarray
-            5D image stack of dimensions [z, x, y].
+            5D image stack of dimensions [c,t,z,x,y].
         bgchannel: int
             Channel to use for background (to be subtracted)
         fgchannel: int
@@ -895,9 +895,9 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     return bgsub
 
 ############################################################################
-def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=10, sigma_dog_big=20, seed_window=(70,100,100),
+def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, seed_window=(70,100,100),
                        erosion_length=5, dilation_length=10, size_min=1e4, 
-                       size_max=5e5, circularity_min=0.2, display=False):
+                       size_max=5e5, circularity_min=0.5, display=False):
     """Segment nuclei from a 3D imaging stack
    
     Args:
@@ -929,6 +929,18 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=10, sigma_dog_big=20, 
             Mask of same shape as input stack with nuclei segmented and labeled
     
     """
+    def add_background_seed(mask, seeds):
+        """Searches for a background pixel in the mask to make a background
+        seed for watershedding. For watershed to work properly, at least one
+        seed must fill the background. This usually happens on its own but this
+        is a safety function."""
+        j=10
+        z=10
+        for i in range(20, 500, 20):
+            if (mask[z,i,j] == 0):
+                seeds[z,i,j] = seeds.max() + 1
+                return
+
     # Normalize each Z-slice to mean intensity to account for uneven illumination.
     stack = zstack_normalize_mean(instack)
     # Apply gaussian filter.
@@ -941,8 +953,9 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=10, sigma_dog_big=20, 
     mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
     # Perform distance transform of mask.
     dist = ndi.distance_transform_edt(mask)
-    # Find local maxima for watershed seeds.
+    # Find local maxima for watershed seeds, add a background seed.
     seeds, _ = peak_local_max_nD(dist, size=seed_window)
+    add_background_seed(mask, seeds)
     # Re-smooth, do gradient transform to get substrate for watershedding.
     dog = dog_filter(stack, sigma_dog_small, sigma_dog_big)
     grad = gradient_nD(dog)
@@ -1169,22 +1182,28 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
         ymin = max(0,peak[2] - xy_rad)
         ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
-        return data[zmin:zmax, xmin:xmax, ymin:ymax]
+        # Get adjustments in each direction — value to subtract from relative
+        # coordinates to center them at 0,0,0 in the window center.
+        z_adj, x_adj, y_adj = int((zmax-zmin)/2), int((xmax-xmin)/2), int((ymax-ymin)/2)
+        return data[zmin:zmax, xmin:xmax, ymin:ymax], z_adj, x_adj, y_adj
     
     def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
-        
-        Set background as 0, objects in order 1...end, drop relative (to fit window)
-        coordinates and replace with coordinates from original stack.
+        Set background as 0, objects in order 1...end.
         """
         spot_data = {}
         peak_num = 1
         for peak in peak_ids:
-            coords = np.where(mask == peak)
-            paramsnew = oldparams[peak_num-1,:] # object 1 will be fitparams row 0
-            spot_data[peak_num] = np.append([coords[0][0], coords[1][0], coords[2][0]], paramsnew[[0,4,5,6]])
+            #coords = np.where(mask == peak)
+            paramsnew = oldparams[peak-1,:] # object 1 will be fitparams row 0
+            # Rearrange params from fit function so coordinates lead.
+            spot_data[peak_num] = paramsnew[[1,2,3,0,4,5,6]]
             peak_num = peak_num + 1
         return spot_data
+
+    def clamp(n, minn, maxn):
+        """Bound a number between two constants"""
+        return max(min(maxn, n), minn)
     
     # Filter and background subtract image.
     dog = dog_filter(stack, sigma_small, sigma_big)
@@ -1196,10 +1215,15 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     # Fit 3D gaussian in window surrounding each local maximum.
     fitparams = np.ndarray((0,7))
     for peak in peaks:
-        fitwindow = get_fitwindow(stack, peak, fitwindow_rad_xy, 
-                                  fitwindow_rad_z)
+        fitwindow, z_adj, x_adj, y_adj = get_fitwindow(stack, peak, fitwindow_rad_xy, 
+                                            fitwindow_rad_z)
         opt = fitgaussian3d(fitwindow)
         if opt.success:
+            peak_fitparams = opt.x
+            # Move center coordinates to match center of gaussian fit, ensure they're within image.
+            peak_fitparams[1] = clamp(int(peak[0] + peak_fitparams[1] - z_adj), 0, stack.shape[-3]-1)
+            peak_fitparams[2] = clamp(int(peak[1] + peak_fitparams[2] - x_adj), 0, stack.shape[-2]-1)
+            peak_fitparams[3] = clamp(int(peak[2] + peak_fitparams[3] - y_adj), 0, stack.shape[-1]-1)
             fitparams = np.vstack((fitparams, opt.x))
     
     # Find threshold for gaussian height (intensity for 3D).
