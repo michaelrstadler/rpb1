@@ -959,8 +959,9 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
         labelmask_dilated[stack < t] = 0
         # Add pixels matching nuc in dilated mask to old mask, pixels in old mask that are n
         # and 0 in dilated mask are kept at n. So dilation doesn't remove any nuclear pixels.
-        for n in np.unique(labelmask):
-            labelmask[labelmask_dilated == n] = n
+        for n in np.unique(labelmask)[1:]:
+            if (n != 0):
+                labelmask[labelmask_dilated == n] = n
 
     # Normalize each Z-slice to mean intensity to account for uneven illumination.
     stack = zstack_normalize_mean(instack)
@@ -1264,10 +1265,9 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
     """Add spot detections for new frame to detection data for previous frames.
     
     Spots detected in new frame are connected to spots in previous frames
-    if they are within specified distance (max_jump) and contained within
-    the same nucleus. Spots can "disappear" for a number of frames defined
-    by max_frame_gap. Spots that cannot be connected to spots from prior
-    frames are initialized as new spots.
+    if they are within specified distance (max_jump). Spots can "disappear" 
+    for a number of frames defined by max_frame_gap. Spots that cannot be 
+    connected to spots from prior frames are initialized as new spots.
     
     Args:
         spot_data: dict of ndarrays
@@ -1364,31 +1364,29 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
                 if (dist <= max_jump):
                     this_spot_nucID = this_spot_data[1]
                     nearest_spot_nucID = spot_data[nearest_spot_id][-1,1]
-                    # Check is spots are in the same nucleus.
-                    if (this_spot_nucID == nearest_spot_nucID):
-                        # Check if there's already a spot added for this time.
-                        existing = spot_data[nearest_spot_id][spot_data[nearest_spot_id][:,0] == t]
-                        # If there's no existing spot, add this spot to the end of the data for connected spot.
-                        if (len(existing) == 0):
-                            spot_data[nearest_spot_id] = np.append(spot_data[nearest_spot_id], [this_spot_data], axis=0)
+                    # Check if there's already a spot added for this time.
+                    existing = spot_data[nearest_spot_id][spot_data[nearest_spot_id][:,0] == t]
+                    # If there's no existing spot, add this spot to the end of the data for connected spot.
+                    if (len(existing) == 0):
+                        spot_data[nearest_spot_id] = np.append(spot_data[nearest_spot_id], [this_spot_data], axis=0)
+                        return
+                    # If there is an existing spot, if the current spot is closer to the previous-frame spot
+                    # than the existing entry, replace it. Otherwise, continue looking in previous frames (if
+                    # applicable) and eventually create new spot after for loop. I'm not sure this is the best
+                    # behavior--may consider dumping out of for loop and creating new spot rather than looking
+                    # to previous frames in this situation.
+                    else:
+                        existing_dist = np.sqrt(sq_euc_distance(nearest_spot_coords, existing[0,2:5], scale_z, scale_xy))
+                        # If the the current spot is closer than the existing spot, replace 
+                        # existing and initialize it as a new spot.
+                        if (dist < existing_dist):
+                            row_index = np.where(spot_data[nearest_spot_id][:,0] == t)[0][0]
+                            superseded_spot_data = spot_data[nearest_spot_id][row_index]
+                            # Superseded spot from this frame gets bumped to be a new spot.
+                            initialize_new_spot(superseded_spot_data, spot_data)
+                            # Replace data for superseded spot with this spot's data.
+                            spot_data[nearest_spot_id][row_index] = this_spot_data
                             return
-                        # If there is an existing spot, if the current spot is closer to the previous-frame spot
-                        # than the existing entry, replace it. Otherwise, continue looking in previous frames (if
-                        # applicable) and eventually create new spot after for loop. I'm not sure this is the best
-                        # behavior--may consider dumping out of for loop and creating new spot rather than looking
-                        # to previous frames in this situation.
-                        else:
-                            existing_dist = np.sqrt(sq_euc_distance(nearest_spot_coords, existing[0,2:5], scale_z, scale_xy))
-                            # If the the current spot is closer than the existing spot, replace 
-                            # existing and initialize it as a new spot.
-                            if (dist < existing_dist):
-                                row_index = np.where(spot_data[nearest_spot_id][:,0] == t)[0][0]
-                                superseded_spot_data = spot_data[nearest_spot_id][row_index]
-                                # Superseded spot from this frame gets bumped to be a new spot.
-                                initialize_new_spot(superseded_spot_data, spot_data)
-                                # Replace data for superseded spot with this spot's data.
-                                spot_data[nearest_spot_id][row_index] = this_spot_data
-                                return
 
         # If no suitable spot was found in previous frames, make a new spot.
         initialize_new_spot(this_spot_data, spot_data)
@@ -1400,16 +1398,14 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
     for this_spot_id in newframe_spotdata:
         spot_coords = tuple(np.append([t], newframe_spotdata[this_spot_id][0:3]).astype(int))
         nuc_id = nucmask[spot_coords]
-        # Check if spot is in a nucleus.
-        if (nuc_id != 0):
-            # Add time and nuclear ID columns to spot data and call update to search 
-            # for connected spots in previous frames.
-            this_spot_data = np.append([t, nuc_id], newframe_spotdata[this_spot_id])
-            update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, t)
+        # Add time and nuclear ID columns to spot data and call update to search 
+        # for connected spots in previous frames.
+        this_spot_data = np.append([t, nuc_id], newframe_spotdata[this_spot_id])
+        update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, t)
     return spot_data   
 
 ############################################################################
-def ms2_segment_stack(stack, channel, nucmask, seg_func=segMS2_3dstack, 
+def ms2_segment_stack(stack, nucmask, channel=0, seg_func=segMS2_3dstack, 
     max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1, **kwargs):
     """Detect and segment MS2 spots from a 5D image stack.
     
@@ -1463,9 +1459,8 @@ def ms2_segment_stack(stack, channel, nucmask, seg_func=segMS2_3dstack,
         for n in data_f0:
             spot_coords = tuple(np.append([0], data_f0[n][0:3]).astype(int))
             nuc_id = nucmask[spot_coords]
-            if (nuc_id != 0):
-                spot_data[spot_id] = np.expand_dims(np.append([0, nuc_id], data_f0[n]), 0)
-                spot_id = spot_id + 1
+            spot_data[spot_id] = np.expand_dims(np.append([0, nuc_id], data_f0[n]), 0)
+            spot_id = spot_id + 1
         return spot_data
         
     # Segment first frame and initialize spot data
