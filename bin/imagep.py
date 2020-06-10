@@ -700,6 +700,79 @@ def plot_ps(func, span=range(0,8)):
         func(span[pln])
 
 ############################################################################
+def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15, 
+              halfwidth_z=8, linewidth=3, shadows=True):
+    """Draw boxes around detected MS2 spots.
+    
+    Usage suggestions: Useful with a Z-projection to examine effectiveness
+    of spot segmentation. Can also use with very small halfwidths to create
+    artificial "dots" representing called spots to overlay on other data,
+    e.g. a nuclear mask or a blank matrix of 0s (to examine spot movement
+    alone).
+    
+    Args: 
+        stack: ndarray
+            Multi-dimensional image stack of dimensions [t,z,x,y]
+        channel: int
+            Channel containing MS2 spots
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected. Dict entries are unique 
+            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
+            in a single frame. Time must be column 0, [z,x,y] in columns 2:4.
+        max_multi: numeric
+            Multiplier of maximum value to use for drawing box.
+        halfwidth_xy: int
+            Halfwidth in pixels of the boxes in xy direction (sides will be 
+            2*halfwidth)
+        halfwidth_z: int
+            Halfwidth of the boxes in z direction(vertical sides will be 
+            2*halfwidth)
+        linewidth: int
+            Width of lines used to draw boxes
+        shadows: bool
+            Draw "shadows" (dark boxes) in non-boxed z-slices.
+        
+    Return:
+        boxstack: ndarray
+            Selected channel of input image stack with boxes drawn around 
+            spots. Dimensions [t,z,x,y]
+    """
+    boxstack = np.copy(stack)
+    hival = 1.3 * boxstack.max()
+    
+    def drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows):
+        t, z, i, j = point
+        z_min = max(0, z - halfwidth_z)
+        z_max = min(boxstack.shape[1], z + halfwidth_z)
+        i_min = max(0, i - halfwidth_xy)
+        i_max = min(boxstack.shape[2], i + halfwidth_xy)
+        j_min = max(0, j - halfwidth_xy)
+        j_max = min(boxstack.shape[3], j + halfwidth_xy)
+        if shadows:
+            # Draw shadow boxes in all Z-frames.
+            boxstack[t, :, i_min:i_max, j_min:(j_min + linewidth)] = 0
+            boxstack[t, :, i_min:i_max, (j_max-linewidth):j_max] = 0
+            boxstack[t, :, i_min:(i_min+linewidth), j_min:j_max] = 0
+            boxstack[t, :, (i_max-linewidth):i_max, j_min:j_max] = 0
+        # Draw left line.
+        boxstack[t, z_min:z_max, i_min:i_max, j_min:(j_min + linewidth)] = hival     
+        # Draw right line. 
+        boxstack[t, z_min:z_max, i_min:i_max, (j_max-linewidth):j_max] = hival
+        # Draw top line. 
+        boxstack[t, z_min:z_max, i_min:(i_min+linewidth), j_min:j_max] = hival
+        # Draw bottom line.
+        boxstack[t, z_min:z_max, (i_max-linewidth):i_max, j_min:j_max] = hival
+    
+    # Main.
+    for spot in spot_data:
+        arr = spot_data[spot]
+        for row in arr:
+            row = row.astype(int)
+            point = (row[[0,2,3,4]])
+            drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows)
+    return boxstack   
+
+############################################################################
 # Functions for segmenting images
 ############################################################################
 
