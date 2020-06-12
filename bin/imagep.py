@@ -316,7 +316,7 @@ def mesh_like(arr, n):
             Each element of list corresponds to ordered dimension of input,
             ndarrays are corresponding meshgrids of same shape as arr.
     """
-    if (n > stack.ndim):
+    if (n > arr.ndim):
         raise ValueError('n is larger than the dimension of the array')
     # Make vectors of linear ranges for each dimension.
     vectors = []
@@ -531,7 +531,7 @@ def read_tiff_lattice(tif_folder, **kwargs):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, order='tzxy'):
+def viewer(stacks, order='tzxy', figsize=6):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -566,7 +566,7 @@ def viewer(stacks, order='tzxy'):
             indexes.append(kwargs[n])
         
         # Set up frame for plots.
-        fig, ax = plt.subplots(1, numplots, figsize=(6 * numplots, 6 * numplots))
+        fig, ax = plt.subplots(1, numplots, figsize=(figsize * numplots, figsize * numplots))
         # If only one plot, pack ax into list
         if (type(ax) is not np.ndarray):
             ax = [ax]
@@ -711,7 +711,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     alone).
     
     Args: 
-        stack: ndarray
+        stack: ndarray of uint16
             Multi-dimensional image stack of dimensions [t,z,x,y]
         channel: int
             Channel containing MS2 spots
@@ -737,8 +737,12 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
             Selected channel of input image stack with boxes drawn around 
             spots. Dimensions [t,z,x,y]
     """
+    if (stack.dtype != 'uint16'):
+        raise ValueError("Stack must be uint16.")
     boxstack = np.copy(stack)
-    hival = 1.3 * boxstack.max()
+    hival = max_mult * boxstack.max()
+    if (hival > 65535):
+        hival = 65535
     
     def drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows):
         t, z, i, j = point
@@ -1225,8 +1229,8 @@ def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
 ############################################################################
 def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5, 
                    sigma_big=4, bg_radius=4, fitwindow_rad_xy=5, 
-                   fitwindow_rad_z=9, h_thresh_multiplier=0.8, 
-                   xy_max_width=10):  
+                   fitwindow_rad_z=9, h_stringency=1, 
+                   xy_max_width=15):  
     """Segment MS2 spots from a 3D stack, fit them with 3D gaussian
     
     Alrigthm: bandbass filter -> background subtraction -> find local maxima
@@ -1251,10 +1255,10 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         fitwindow_rad_z: int
             Radius in pixels in the z-dimension of the window around local
             maxima peaks within which to do gaussian fitting.
-        h_thresh_multiplier: float
-            Multiplier [0,1] used to set threshold for the minimum intensity 
-            (height) for filtering gaussian fits. Threshold set according to:
-            thresh = mean + (max - mean)*multplier
+        h_stringency: float
+            Sets the filter for the minimum peak height of the gaussian fit
+            for a spot to be retained, expressed as standard deviations
+            above the mean pixel value for the entire 3D stack.
         xy_max_width: int
             Maximum width in xy-dimension used for filtering gaussian fits.
     
@@ -1320,15 +1324,13 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     
     # Find threshold for gaussian height (intensity for 3D).
     mean_ = np.mean(stack)
-    p99 = np.percentile(stack.flatten(),99)
-    t = mean_ + ((p99 - mean_) * h_thresh_multiplier)
-    
+    std = np.std(stack)
+    t = mean_ + (std * h_stringency)
     # Filter peaks based on guassian fit parameters.
     peak_ids = np.unique(mask)[1:]
     # fitparams columns: 0: height, 5: x_width, 6: y_width
     trupeaks = peak_ids[(fitparams[:,0] > t) 
-                        & (fitparams[:,5] < xy_max_width) 
-                        & (fitparams[:,6] < xy_max_width)]
+                        & (np.mean(fitparams[:,5:6], axis=1) < xy_max_width)]
     spot_data = relabel(trupeaks, fitparams, mask)
     return spot_data
 
@@ -1380,7 +1382,10 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
     """
     def initialize_new_spot(new_spot_data, spot_data):
         """Initialize new spot with next numeric ID and entry in spot_data."""
-        new_id = max(spot_data.keys()) + 1
+        if (spot_data.keys()):
+            new_id = max(spot_data.keys()) + 1
+        else:
+            new_id = 1
         spot_data[new_id] = np.expand_dims(new_spot_data, 0)
 
     def sq_euc_distance(coords1, coords2, scale_z=1, scale_xy=1):
@@ -1432,6 +1437,9 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
             if ((t - t_lag) >= 0):
                 # Get nearest spot in the current frame.
                 spot_coords_tlag = coord_list_t(spot_data, t - t_lag)
+                # If there are no previously detected spots, break from for loop and initialize new spot entry.
+                if (len(spot_coords_tlag) == 0):
+                    break
                 nearest_spot_id, dist, nearest_spot_coords = find_nearest_spot(this_spot_coords, spot_coords_tlag, scale_z, scale_xy)
                 # Check is spot is within max distance.
                 if (dist <= max_jump):

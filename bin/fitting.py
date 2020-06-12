@@ -99,6 +99,9 @@ def fitgaussian3d(data):
     errorfunction = lambda p: np.ravel(gaussian3d(*p)(*np.indices(data.shape)) -
                                  data)
     opt = optimize.least_squares(errorfunction, params, bounds=([-np.inf,0,0,0,-np.inf,-np.inf,-np.inf],[np.inf,data.shape[0]-1,data.shape[1]-1,data.shape[2]-1,np.inf,np.inf,np.inf]))
+    # Make all widths positive (negative values are equally valid but less useful downstream).
+    for i in range(4,7):
+        opt.x[i] = abs(opt.x[i])
     return opt
 
 def fit_viewable(data, p):
