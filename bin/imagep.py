@@ -1321,6 +1321,10 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             peak_fitparams[2] = clamp(int(peak[1] + peak_fitparams[2] - x_adj), 0, stack.shape[-2]-1)
             peak_fitparams[3] = clamp(int(peak[2] + peak_fitparams[3] - y_adj), 0, stack.shape[-1]-1)
             fitparams = np.vstack((fitparams, opt.x))
+        # If fit fails, add dummy entry for spot.
+        #height, z, x, y, width_z, width_x, width_y
+        else:
+            fitparams = np.vstack((fitparams, np.array([0,0,0,0,1e6,1e6,1e6])))
     
     # Find threshold for gaussian height (intensity for 3D).
     mean_ = np.mean(stack)
