@@ -747,11 +747,11 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     def drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows):
         t, z, i, j = point
         z_min = max(0, z - halfwidth_z)
-        z_max = min(boxstack.shape[1], z + halfwidth_z)
+        z_max = min(boxstack.shape[1], z + halfwidth_z + 1)
         i_min = max(0, i - halfwidth_xy)
-        i_max = min(boxstack.shape[2], i + halfwidth_xy)
+        i_max = min(boxstack.shape[2], i + halfwidth_xy + 1)
         j_min = max(0, j - halfwidth_xy)
-        j_max = min(boxstack.shape[3], j + halfwidth_xy)
+        j_max = min(boxstack.shape[3], j + halfwidth_xy + 1)
         if shadows:
             # Draw shadow boxes in all Z-frames.
             boxstack[t, :, i_min:i_max, j_min:(j_min + linewidth)] = 0
@@ -1281,7 +1281,7 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         # Get adjustments in each direction — value to subtract from relative
         # coordinates to center them at 0,0,0 in the window center.
         z_adj, x_adj, y_adj = int((zmax-zmin)/2), int((xmax-xmin)/2), int((ymax-ymin)/2)
-        return data[zmin:zmax, xmin:xmax, ymin:ymax], z_adj, x_adj, y_adj
+        return data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj
     
     def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
@@ -1322,7 +1322,6 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             peak_fitparams[3] = clamp(int(peak[2] + peak_fitparams[3] - y_adj), 0, stack.shape[-1]-1)
             fitparams = np.vstack((fitparams, opt.x))
         # If fit fails, add dummy entry for spot.
-        #height, z, x, y, width_z, width_x, width_y
         else:
             fitparams = np.vstack((fitparams, np.array([0,0,0,0,1e6,1e6,1e6])))
     
@@ -1568,7 +1567,7 @@ def ms2_segment_stack(stack, nucmask, channel=0, seg_func=segMS2_3dstack,
 
 def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scale=1):
     """Find mean volume within ellipsoid centered on spots, add to spot_info
-    
+
     Args:
         spot_data: dict of ndarrays
             Data containing tracking of spots detected in previous frames.
@@ -1623,6 +1622,69 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
             coords = tuple(row[2:5].astype(int))
             substack = stack[channel, t]
             pix_mean = ellipsoid_mean(coords, substack, meshgrid, ij_rad_pix, z_rad_pix)
+            new_array[rownum] = np.append(row, [pix_mean])
+        spot_data[spot_id] = new_array
+    return spot_data
+
+############################################################################
+def add_gaussian_integration(spot_data, wlength_xy, wlength_z):
+    """Add a column to spot_data that integrates intensity from gaussian fit
+    
+    For each spot in spot_data, uses gaussian fit parameters (height and 
+    widths in z,y,x) to integrate the gaussian function within a window of 
+    supplied dimensions ([z,x,y] = [wlength_z, wlength_xy, wlength_xy]). 
+    "Integration" is discrete — gaussian function is converted to pixel values, 
+    and the mean pixel intensity is then added as an additional column to each 
+    entry in spot_data. Mean is used over sum simply to keep numbers low and 
+    aid interpretability.
+    
+    Args:
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected. Dict entries are unique 
+            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
+            in a single frame. Required columns: 5: gaussian fit height, 6: 
+            gaussian fit z-width, 7: gaussian fit x-width, 8: gaussian fit 
+            y-width.
+        wlength_xy: int
+            Length of the sides of the window used for integration in the
+            lateral dimension. Must be an odd number.
+        wlength_z: int
+            Length of the sides of the window used for integration in the
+            axial dimension. Must be an odd number.
+            
+    Returns:
+        spot_data: dict of ndarrays
+            Structure identical to input with an additional column appended to
+            all entries containing result of integration.
+    """
+    def integrate_gaussian(p, wlength_xy, wlength_z):
+        """Determine mean pixel intensity within a window given parameters
+        of a 3D gaussian function."""
+        if ((wlength_xy % 2 == 0) or (wlength_z % 2 == 0)):
+            raise ValueError('wlength_xy and wlength_z must be odd.')
+        # Get fit parameters, find coords for center pixel within window.    
+        h, width_z, width_x, width_y = p[5:9]
+        center_xy = int(wlength_xy / 2)
+        center_z = int(wlength_z / 2)
+        # Get indices for the window.
+        z,x,y = np.indices((wlength_z, wlength_xy, wlength_xy))
+        # Generate function to receive indexes and return values of gaussian 
+        # function with given parameters
+        f = gaussian3d(h, center_z, center_xy, center_xy, width_z, width_x, width_y)
+        # Generate window with intensity values from 3d gaussian function.
+        vals = f(z,x,y)
+        # Return mean pixel intensity of window.
+        return vals.mean()
+    
+    # Work on a copy of input data.
+    spot_data = spot_data.copy()
+    for spot_id in spot_data:
+        spot_array = spot_data[spot_id]
+        # Initialize new array with extra column.
+        new_array = np.ndarray((spot_array.shape[0], spot_array.shape[1] + 1))
+        for rownum in range(0, spot_array.shape[0]):
+            row = spot_array[rownum]
+            pix_mean = integrate_gaussian(row, wlength_xy, wlength_z)
             new_array[rownum] = np.append(row, [pix_mean])
         spot_data[spot_id] = new_array
     return spot_data
