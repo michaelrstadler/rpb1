@@ -59,7 +59,7 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
     return labelmask_filtered
 
 ############################################################################
-def imfill(mask, seed_pt='default'):
+def imfill(mask, seed_pt='default', min_fraction_filled=0.1):
     '''Fill holes within objects in a binary mask.
     
     Equivalent to matlab's imfill function. seed_pt needs to be a point in 
@@ -75,35 +75,34 @@ def imfill(mask, seed_pt='default'):
             Binary mask of n dimensions.
         seed_pt: tuple
             Pixel in mask to use for seeding "background". This is the equi-
-            valent of the point you click when filling in paint. Default will
-            start at the all top left ([0,0], [0,0,0], etc.) and select the
-            first zero pixel on the top line from the left.
-    
+            valent of the point you click when filling in paint. Default
+            behavior is to select a random 0-valued point under the constraint
+            that the resulting fill covers a fraction of the total pixels
+            given by min_fraction_filled.
+        min_fraction_filled: numeric
+            Fraction of total pixels in the mask that must be filled for a 
+            randomly chosen seed point (from 'default' setting) to be 
+            accepted. 
     Returns:
         mask_filled: ndarray
             Binary mask filled    
     '''
-    # Find a zero pixel for default start in upper left corner. Begins at 0,0
-    # and walks to the right until it finds a zero.
-    def find_zero(mask):
-        # Grab top line of first Z-slice.
-        topline = mask[tuple(np.zeros(mask.ndim - 1).astype('int'))]
-        # Find the first zero pixel from left.
-        first_zero = np.where(topline == 0)[0][0]
-        # Return this location as seed.
-        seed_pt = tuple(np.zeros(mask.ndim - 1).astype(int)) + tuple([first_zero])
-        return seed_pt
-    # By default, start in upper left corner.
     if (seed_pt == 'default'):
-        #seed_pt = tuple(np.zeros(mask.ndim).astype(int))
-        seed_pt = find_zero(mask)
-    # Fill all background pixels by changing them to 1. Changes are made to
-    # original mask, so 1s are carried over in mask_flooded.
-    mask_flooded = flood_fill(mask, seed_pt,1)
-    # Identify background pixels by those that are changed from original mask.
-    # Unchanged pixels (0s and 1s) in original mask are now "filled" foreground.
-    mask_filled = np.where(mask == mask_flooded, 1, 0)
-    return mask_filled
+        # Try 20 random seeds.
+        for i in range(0,20):
+            # Get a random 0-valued pixel.
+            seed_pt = find_background_point(mask)
+            # Try flooding background from this point.
+            mask_flooded = flood_fill(mask, seed_pt,1)
+            fraction_filled = np.count_nonzero(mask != mask_flooded) / mask.size
+            if (fraction_filled >= min_fraction_filled):
+                mask_filled = np.where(mask == mask_flooded, 1, 0)
+                return mask_filled
+        raise Error('Cannot find a seed point that satisfies minimum fraction filled')
+    else:
+        mask_flooded = flood_fill(mask, seed_pt,1)
+        mask_filled = np.where(mask == mask_flooded, 1, 0)
+        return mask_filled
 
 ############################################################################
 def local_max(img, size=(70,100,100)):
@@ -349,10 +348,10 @@ def mesh_like(arr, n):
 
 ############################################################################
 def find_background_point(mask):
-    """Find a background (0) pixel in a mask.
+    """Find a background (value=0) pixel in a mask.
     
     Searches for a background pixel in a mask, defined as a pixel with 
-    value 0.
+    value 0. Background pixel is chosen at random from among all 0 pixels.
 
     Args:
         mask: ndarray
@@ -363,9 +362,10 @@ def find_background_point(mask):
             Coordinates of a single background pixel.
     """
     zerocoords = np.where(mask == 0)
-    coord = zerocoords[0][0]
+    i = np.random.randint(0,len(zerocoords[0]))
+    coord = zerocoords[0][i]
     for n in range(1, len(zerocoords)):
-        coord = np.append(coord, zerocoords[n][0])
+        coord = np.append(coord, zerocoords[n][i])
     return tuple(coord)  
 
 ############################################################################
@@ -1159,7 +1159,7 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
 ############################################################################
 def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15, 
         sigma_dog_small=5, seed_window=(30,30), min_seed_dist=25, 
-        dilation_length=5, size_min=0, size_max=np.inf):
+        dilation_length=5, size_min=0, size_max=np.inf, display=False):
     """Segment nuclei from confocal nuclear monolayers
     
     Segment nuclei from nuclear monolayers, such as standard MS2 confocal
@@ -1197,11 +1197,11 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
     # Make max projection on Z.
     maxp = stack.max(axis=0)
     # Filter with DoG to make nuclei into blobs.
-    dog = imp.dog_filter(maxp, sigma_dog_small, sigma_dog_big)
+    dog = dog_filter(maxp, sigma_dog_small, sigma_dog_big)
     # Get threshold, use thresh to make initial mask and fill holes.
     t = threshold_otsu(dog)
     mask = np.where(dog > t, 1, 0)
-    mask = imfill(mask, find_background_point(mask))
+    mask = imfill(mask)
     # Perform distance transform, find local maxima for watershed seeds.
     dist = ndi.distance_transform_edt(mask)
     seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
@@ -1217,12 +1217,33 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
                     mfunc=ndi.morphology.binary_dilation, 
                     struct=np.ones((dilation_length, dilation_length)), 
                     expand_size=(dilation_length + 1, dilation_length + 1))
+
+    if (display):
+        fig, ax = plt.subplots(3,2, figsize=(10,10))
+        # Display mask.
+        ax[0][0].imshow(mask)
+        ax[0][0].set_title('Initial Mask')
+        # Display watershed seeds.
+        seeds_vis = ndi.morphology.binary_dilation(seeds, structure=np.ones((8,8)))
+        ax[0][1].imshow(im_smooth, alpha=0.5)
+        ax[0][1].imshow(seeds_vis, alpha=0.5)
+        ax[0][1].set_title('Watershed seeds')
+        # Display gradient.
+        ax[1][0].imshow(grad)
+        ax[1][0].set_title('Gradient')
+        # Display watershed output.
+        ws = relabel_labelmask(ws)
+        ax[1][1].imshow(ws.astype('bool'))
+        ax[1][1].set_title('Watershed')
+        # Display final mask.
+        ax[2][0].imshow(labelmask.astype('bool'))
+        ax[2][0].set_title('Final Segmentation')
     
     return labelmask
 
 ############################################################################
 def update_labels(mask1, mask2):
-    """Match labels of segmented structures to those of a previous frame.
+    """Match labels of segmented structures between two labelmasks.
     
     Uses a simple principle of reciprocal best hits: for each labeled object
     in mask 2, find the object in mask1 with the most overlapping pixels. 
@@ -1278,15 +1299,19 @@ def update_labels(mask1, mask2):
     return main(mask1, mask2)
 
 ############################################################################
-def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
+def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, max_frames_skipped=2, **kwargs):
     """Segment nuclei in a 4D image stack (expect lattice data).
     
     A wrapper for two supplied functions: one function that performs
     segmentation of a 3D image stack and a second function that connects
-    segmentation outputs for consecutive frames by identifying shared objects
-    and harmonizing their labels. Iteratively calls these functions on all
-    3D stacks and returns a 4D labelmask of segmented objects contiguous in 
-    time.
+    segmentation outputs for a new frame with previous frames, identifying
+    shared objects and harmonizing their labels. The 3D segmentation function
+    is iteratively called on all frames, and the label update function is
+    used to connect objects through time.
+    
+    Note: Though descriptions are written for segmentation of frames of 3D
+    movies, this function is compatible with 2D labelmasks as well. 2D masks
+    will be combined into 3D (presumably [t,x,y]) stacks.
     
     Args:
         stack: ndarray
@@ -1295,8 +1320,14 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
             Function that performs segmentation on 3D image stacks. Must take 
             as arguments a 3D image stack and optional keyword arguments.
         update_func: function
-            Function that compares two 3D labelmasks, assigns object IDs from 
-            mask1 to mask2, and updates labels in mask2 to match mask1.
+            Function that compares new labelmask to a stack of masks from 
+            previous frames. 
+        max_frames_skipped: int
+            Maximum number of frames that can be "skipped" to find a nucleus
+            to connect to. Compensates for errors in segmentation that cause
+            nuclei to sometimes drop from frames. e.g., for a value of 1, 
+            function will search for a connected nucleus in the last frame 
+            and, if unsuccessful, in the second-to-last frame.
         **kwargs: optional key-word arguments
             Keyword arguments to supply to segmentation function.
     
@@ -1312,17 +1343,17 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     seg_func_p = partial(seg_func, **kwargs)
     # Segment first frame, add 4th axis in 0 position.
     labelmask = seg_func_p(stack[0])
-    labelmask = np.expand_dims(labelmask, axis=0) 
-    
+    labelstack = np.expand_dims(labelmask, axis=0) 
+
     # Segment subsequent frames, update labels, build 4D labelmask.
     for t in range(1, stack.shape[0]):
         print(t)
         mask = seg_func_p(stack[t])
-        mask_updated = update_func(labelmask[t-1], mask)
+        mask_updated = update_func(labelstack, mask, max_frames_skipped)
         mask_updated = np.expand_dims(mask_updated, axis=0)
-        labelmask = np.concatenate((labelmask, mask_updated), axis=0)
-    
-    return labelmask
+        labelstack = np.concatenate((labelstack, mask_updated), axis=0)
+
+    return labelstack
 
 ############################################################################
 def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
