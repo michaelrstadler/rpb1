@@ -4,7 +4,7 @@
 Insert description here.
 
 """
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 __author__ = 'Michael Stadler'
 
 
@@ -148,7 +148,10 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     Suggested usage: finding seed points for watershed segmentation from 
     distance transform. It is necessary because there are often multiple
     pixels with the same distance value, leaving little clusters of connected
-    pixels.
+    pixels. For circular objects (nuclei), distance transforms will form
+    nice connected local max clusters. For less circular nuclei/objects,
+    sometimes multiple unconnected clusters occur within an object. This
+    is the reason for adding the minimum distance function.
     
     Args:
         img: ndarray
@@ -159,6 +162,10 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
             of (100, 100) will use a square with side lengths of 100 pixels.
             Generally, you want the size dimensions to match the dimensions
             of the objects you're searching for.
+        min_dist: numeric
+            Minimum (euclidean) distance in pixels allowed between peaks. If
+            two peaks are within the minimum distance, the numerically lower
+            peak (arbitrary) wins. 
     
     Returns:
         tuple: (local_peak_mask, local_peaks)
@@ -185,6 +192,8 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     peak_num=1
     for id_ in np.unique(conn_comp)[1:]:
         centroid = get_object_centroid(conn_comp, id_)
+        # If there is no already-added seed within the minimum distance,
+        # add this seed to the mask and list.
         if (not has_neighbor(centroid, local_peaks, min_dist)):
             local_peak_mask[centroid] = peak_num
             local_peaks.append(centroid)
@@ -358,6 +367,37 @@ def find_background_point(mask):
     for n in range(1, len(zerocoords)):
         coord = np.append(coord, zerocoords[n][0])
     return tuple(coord)  
+
+############################################################################
+def relabel_labelmask(labelmask):
+    """Relabel labelmask to set background to 0 and object IDs to be linearly 
+    ascending from 1
+    
+    Args:
+        labelmask: ndarray
+            N-dimensional labelmask.
+    
+    Returns:
+        labelmask: ndarray
+            Labelmask of same shape as input, with the largest object's (
+            background) ID set to 0 and all other objects labeled 1..n
+    
+    """
+    mask = np.copy(labelmask)
+    # Get all object labels and their counts.
+    labels, counts = np.unique(mask, return_counts=True)
+    # Get the indexes of sorted counts, descending.
+    ordered_indexes = np.argsort(counts)[::-1]
+    # Set largest object as background (ID=0).
+    background_label = labels[ordered_indexes[0]]
+    mask[mask == background_label] = 0
+    # Renumber the rest of the objects 1..n.
+    obj_num=1
+    for n in ordered_indexes[1:]:
+        old_label = labels[n]
+        mask[labelmask == old_label] = obj_num
+        obj_num = obj_num + 1
+    return mask
 ############################################################################
 # Function implementing filters
 ############################################################################
