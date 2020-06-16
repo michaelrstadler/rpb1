@@ -23,6 +23,7 @@ from skimage.filters.thresholding import threshold_li, threshold_otsu
 from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
+from scipy.spatial import distance
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
@@ -47,6 +48,8 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
 
     Returns:
         labelmask_filtered: ndarray
+            Input labelmask with all pixels not corresponding to objects
+            within size range set to 0.
     """
     # Count pixels in each object.
     (labels, counts) = np.unique(labelmask, return_counts=True)
@@ -134,7 +137,7 @@ def local_max(img, size=(70,100,100)):
     return(local_max)
 
 ############################################################################
-def peak_local_max_nD(img, size=(70,100,100)):
+def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     """Find local maxima in an N-dimensional image.
     
     Generalizes scikit's peak_local_max function to three (or more) 
@@ -165,6 +168,12 @@ def peak_local_max_nD(img, size=(70,100,100)):
         local_peaks: list of tuples
             Coordinates of pixels masked in local_peak_mask  
     """
+    def has_neighbor(peak, peak_list, min_dist):
+        """Find whether a peak already exists within minimum distance of this peak"""
+        for testpeak in peak_list:
+            if (distance.euclidean(peak, testpeak) < min_dist):
+                return True
+        return False
     # Find pixels that represent local maxima. Produces clusters of connected
     # pixels at the centers of objects.
     maxes = local_max(img, size)
@@ -173,11 +182,13 @@ def peak_local_max_nD(img, size=(70,100,100)):
     # Get the centroids of each local max object, update mask and list.
     local_peak_mask = np.zeros_like(img)
     local_peaks = []
+    peak_num=1
     for id_ in np.unique(conn_comp)[1:]:
         centroid = get_object_centroid(conn_comp, id_)
-        local_peak_mask[centroid] = id_
-        local_peaks.append(centroid)
-        
+        if (not has_neighbor(centroid, local_peaks, min_dist)):
+            local_peak_mask[centroid] = peak_num
+            local_peaks.append(centroid)
+            peak_num = peak_num + 1
     return local_peak_mask, local_peaks
 
 ############################################################################
@@ -328,6 +339,26 @@ def mesh_like(arr, n):
     return meshes
 
 ############################################################################
+def find_background_point(mask):
+    """Find a background (0) pixel in a mask.
+    
+    Searches for a background pixel in a mask, defined as a pixel with 
+    value 0.
+
+    Args:
+        mask: ndarray
+            Mask of abritrary dimensions, background must be 0.
+
+    Returns: 
+        coord: tuple of ints
+            Coordinates of a single background pixel.
+    """
+    zerocoords = np.where(mask == 0)
+    coord = zerocoords[0][0]
+    for n in range(1, len(zerocoords)):
+        coord = np.append(coord, zerocoords[n][0])
+    return tuple(coord)  
+############################################################################
 # Function implementing filters
 ############################################################################
 
@@ -345,6 +376,9 @@ def gradient_nD(stack):
         gradient: ndarray
             Gradient transform of image in same shape as stack
     """
+    # Convert for 64-bit to avoid large number problems in squares.
+    stack = np.copy(stack)
+    stack = stack.astype(np.float64)
     sumsq = ndi.filters.sobel(stack, axis=0) ** 2
     for d in range(1, stack.ndim):
          sumsq = sumsq + (ndi.filters.sobel(stack, axis=d) ** 2)
@@ -1006,17 +1040,7 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
             Mask of same shape as input stack with nuclei segmented and labeled
     
     """
-    def add_background_seed(mask, seeds):
-        """Searches for a background pixel in the mask to make a background
-        seed for watershedding. For watershed to work properly, at least one
-        seed must fill the background. This usually happens on its own but this
-        is a safety function."""
-        j=10
-        z=10
-        for i in range(20, 500, 20):
-            if (mask[z,i,j] == 0):
-                seeds[z,i,j] = seeds.max() + 1
-                return
+
 
     def smart_dilate(stack, labelmask, sensitivity, dilation_length):
         """
@@ -1047,14 +1071,15 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
     # Threshold, make binary mask, fill.
     t = threshold_otsu(stack_smooth)
     mask = np.where(stack_smooth >= t, 1, 0)
-    mask = imfill(mask, (0,0,100))
+    mask = imfill(mask, find_background_point(mask))
     # Use morphological erosion to remove spurious connections between objects.
     mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
     # Perform distance transform of mask.
     dist = ndi.distance_transform_edt(mask)
-    # Find local maxima for watershed seeds, add a background seed.
+    # Find local maxima for watershed seeds.
     seeds, _ = peak_local_max_nD(dist, size=seed_window)
-    add_background_seed(mask, seeds)
+    # Add a background seed.
+    seeds[find_background_point(mask)] = seeds.max() + 1
     # Re-smooth, do gradient transform to get substrate for watershedding.
     dog = dog_filter(stack, sigma_dog_small, sigma_dog_big)
     grad = gradient_nD(dog)
@@ -1126,6 +1151,7 @@ def update_labels(mask1, mask2):
         labels, counts = np.unique(mask2[mask1 == label1], return_counts=True)
         # Sort labels by counts (ascending).
         labels_sorted = labels[np.argsort(counts)]
+        counts_sorted = counts[np.argsort(counts)]
         # Select new label with maximum overlap.
         max_overlap = labels_sorted[-1]
         return max_overlap
@@ -1135,7 +1161,7 @@ def update_labels(mask1, mask2):
             raise ValueError("Masks do not have the same shape.")
         # Initialize blank mask.
         updated_mask = np.zeros(mask2.shape)
-        for label1 in np.unique(mask1):
+        for label1 in np.unique(mask1)[1:]:
             # Find label in mask2 with maximum overlap with nuc from mask1.
             label2 = get_max_overlap(mask1, mask2, label1)
             # Check that labels are "reciprocal best hits" by determining the 
@@ -1181,13 +1207,13 @@ def segment_nuclei4D(stack, seg_func, update_func, **kwargs):
     # Create partial form of segmentation function with supplied kwargs.
     seg_func_p = partial(seg_func, **kwargs)
     # Segment first frame, add 4th axis in 0 position.
-    labelmask = seg_func_p(stack[0], **kwargs)
+    labelmask = seg_func_p(stack[0])
     labelmask = np.expand_dims(labelmask, axis=0) 
     
     # Segment subsequent frames, update labels, build 4D labelmask.
     for t in range(1, stack.shape[0]):
         print(t)
-        mask = seg_func_p(stack[t], **kwargs)
+        mask = seg_func_p(stack[t])
         mask_updated = update_func(labelmask[t-1], mask)
         mask_updated = np.expand_dims(mask_updated, axis=0)
         labelmask = np.concatenate((labelmask, mask_updated), axis=0)
