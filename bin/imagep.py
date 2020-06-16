@@ -1157,6 +1157,70 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
     return labelmask
 
 ############################################################################
+def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15, 
+        sigma_dog_small=5, seed_window=(30,30), min_seed_dist=25, 
+        dilation_length=5, size_min=0, size_max=np.inf):
+    """Segment nuclei from confocal nuclear monolayers
+    
+    Segment nuclei from nuclear monolayers, such as standard MS2 confocal
+    stacks. Monolayers don't generally require 3D segmentation, so this
+    function uses the max projection in Z to define the domain of each 
+    nucleus in XY. 
+    
+    Args:
+        stack: ndarray
+            3D image stack of dimensions [z, x, y].
+        sigma1: int
+            Sigma for Gaussian smoothing used to make gradient input to watershed
+        sigma_dog_small: int
+            Smaller sigma for DoG filter used to create initial mask
+        sigma_dog_big: int
+            Larger sigma for DoG filter used to create initial mask
+        seed_window: tuple of three ints
+            Size in [z, x, y] for window for determining local maxes in distance
+            transform. Generally want size to be ~ size of nuclei.
+        min_seed_dist: numeric
+            The minimum euclidean distance (in pixels) allowed between watershed
+            seeds. Typically set as ~the diameter of the nuclei.
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+        dilation_length: int
+            Size in x and y of structuring element for dilating objects after
+            final segmentation.
+        
+    Returns:
+        labelmask: ndarray
+            2D labelmask of nuclei.
+    """
+    # Make max projection on Z.
+    maxp = stack.max(axis=0)
+    # Filter with DoG to make nuclei into blobs.
+    dog = imp.dog_filter(maxp, sigma_dog_small, sigma_dog_big)
+    # Get threshold, use thresh to make initial mask and fill holes.
+    t = threshold_otsu(dog)
+    mask = np.where(dog > t, 1, 0)
+    mask = imfill(mask, find_background_point(mask))
+    # Perform distance transform, find local maxima for watershed seeds.
+    dist = ndi.distance_transform_edt(mask)
+    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
+    # Smooth image and take gradient, use as input for watershed.
+    im_smooth = ndi.filters.gaussian_filter(maxp, sigma=sigma1)
+    grad = gradient_nD(im_smooth)
+    ws = watershed(grad, seeds.astype(int))
+    # Filter object size, relabel to set background to 0.
+    labelmask = labelmask_filter_objsize(ws, size_min, size_max)
+    labelmask = relabel_labelmask(labelmask)
+    # Dilate segmented nuclei.
+    labelmask = labelmask_apply_morphology(labelmask, 
+                    mfunc=ndi.morphology.binary_dilation, 
+                    struct=np.ones((dilation_length, dilation_length)), 
+                    expand_size=(dilation_length + 1, dilation_length + 1))
+    
+    return labelmask
+
+############################################################################
 def update_labels(mask1, mask2):
     """Match labels of segmented structures to those of a previous frame.
     
