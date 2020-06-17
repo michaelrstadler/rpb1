@@ -1299,7 +1299,54 @@ def update_labels(mask1, mask2):
     return main(mask1, mask2)
 
 ############################################################################
-def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, max_frames_skipped=2, **kwargs):
+def update_labels_withmemory(maskstack, newmask, max_frames_skipped=2, 
+                             update_func=update_labels):
+    """Match labels in a labelmask to masks from previous frames
+    
+    Take a mask and a stack of masks, walk backward in time looking for
+    segmented nuclei in previous frames that correspond to nuclei in the
+    new frame. Default is to use update_labels function to do comparison
+    of two masks, but this can be changed.
+    
+    Note: Written with adding 3d masks to 4d stacks, but works for 3d-
+    2d.
+    
+    Args:
+        maskstack:
+            4D labelmask [t,z,x,y] of nuclei at previous time frames
+        newmask:
+            3D labelmask [z,x,y] of new frame
+        max_frames_skipped: int
+            Maximum number of frames that can be "skipped" to find a nucleus
+            to connect to. Compensates for errors in segmentation that cause
+            nuclei to sometimes drop from frames. e.g., for a value of 1, 
+            function will search for a connected nucleus in the last frame 
+            and, if unsuccessful, in the second-to-last frame.
+        update_func: function
+            Function that takes two label masks, updates labels in the second
+            based on matches in the first. Default is to use update_labels.
+    
+    Returns:
+        updated_mask: ndarray
+            3D labelmask of same shape as newmask with object labels updated
+            to match previous frames.       
+    """
+    # Initialize blank mask.
+    updated_mask = np.zeros_like(newmask)
+    # Step backwards through frames, limited by available frames and max
+    # allowable skipped frames.
+    for i in range(1, min(max_frames_skipped + 2, maskstack.shape[0] + 1)):
+        # Update new mask with connections to earlier frame.
+        mask_updated_thisframe = update_func(maskstack[-i], newmask)
+        # For positions that do not have an object in the currently updated mask
+        # but do have an object in this frame's update, add object pixels.
+        updated_mask = np.where((updated_mask == 0) & (mask_updated_thisframe != 0), 
+                                mask_updated_thisframe, updated_mask)
+    return updated_mask
+    
+############################################################################
+def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, 
+    max_frames_skipped=2, **kwargs):
     """Segment nuclei in a 4D image stack (expect lattice data).
     
     A wrapper for two supplied functions: one function that performs
