@@ -11,14 +11,14 @@ import numpy as np
 from scipy import optimize
 
 ############################################################################
-def gaussian3d(height, center_z, center_x, center_y, width_z, width_x, width_y):
+def gaussian3d(center_z, center_x, center_y, height, width_z, width_x, width_y):
     """Returns a 3D gaussian function with the given parameters
     
     Args:
-        height: int
-            Height of the gaussian
         center_z, center_x, center_y: int
             Locations of the center of the gaussian
+        height: int
+            Height of the gaussian
         width_z, width_x, width_y: int
             Sigmas for the gaussians in each dimension
 
@@ -38,7 +38,7 @@ def gaussian3d(height, center_z, center_x, center_y, width_z, width_x, width_y):
 def moments3d(data):
     """Estimate initial parameters of 3D gaussian fit
     
-    Returns (height, z, x, y, width_z, width_x, width_y)
+    Returns (z, x, y, height, width_z, width_x, width_y)
     the gaussian parameters of a 3D distribution by calculating its
     moments (mean for centers, standard deviation for widths) 
     
@@ -47,7 +47,7 @@ def moments3d(data):
             The 3D data to fit in shape [z,x,y]
     Returns:
         tuple of ints
-            Estimates for intial fit params: (height, z, x, y, width_z,
+            Estimates for intial fit params: (z, x, y, height, width_z,
             width_x, width_y)   
     """
     # Find total for all values in the data.
@@ -75,13 +75,13 @@ def moments3d(data):
     
     # Estimator height from max value.
     height = data.max()
-    return height, z, x, y, width_z, width_x, width_y
+    return z, x, y, height, width_z, width_x, width_y
 
 ############################################################################
 def fitgaussian3d(data):
     """Fit a gaussian
     
-    Returns (height, z, x, y, width_z, width_x, width_y)
+    Returns (z, x, y, height, width_z, width_x, width_y)
     the gaussian parameters of a 3D distribution found by a least squares 
     fit. Wrote for 3D, but will work for 2D.
     
@@ -90,7 +90,7 @@ def fitgaussian3d(data):
             The 3D data to fit in shape [z,x,y]
     Returns:
         opt: OptimizeResult
-            opt.x: parameters of the fit: (height, z, x, y, width_z, width_x, width_y)
+            opt.x: parameters of the fit: (z, x, y, height, width_z, width_x, width_y)
             opt.success: boolean: whether fit exited successfully
     """
     
@@ -98,7 +98,7 @@ def fitgaussian3d(data):
     # Error function is simple difference between gaussian function and data.
     errorfunction = lambda p: np.ravel(gaussian3d(*p)(*np.indices(data.shape)) -
                                  data)
-    opt = optimize.least_squares(errorfunction, params, bounds=([-np.inf,0,0,0,-np.inf,-np.inf,-np.inf],[np.inf,data.shape[0]-1,data.shape[1]-1,data.shape[2]-1,np.inf,np.inf,np.inf]))
+    opt = optimize.least_squares(errorfunction, params, bounds=([0,0,0,-np.inf, -np.inf,-np.inf,-np.inf],[data.shape[0]-1,data.shape[1]-1,data.shape[2]-1,np.inf,np.inf,np.inf,np.inf]))
     # Make all widths positive (negative values are equally valid but less useful downstream).
     for i in range(4,7):
         opt.x[i] = abs(opt.x[i])

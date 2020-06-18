@@ -890,6 +890,24 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     return boxstack   
 
 ############################################################################
+def quickview_ms2(stack, spot_data, channel=0):
+    """View image stack with boxes drawn around detected spots
+    
+    Args:
+        stack: ndarray
+            5d image stack [c,t,z,x,y]
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected. Dict entries are unique 
+            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
+            in a single frame. Time must be column 0, [z,x,y] in columns 2:4.
+        channel: int
+            Channel (dimension 0) to be viewed
+    """
+    substack = stack[channel]
+    boxes = box_spots(substack, spot_data, halfwidth_xy=6, linewidth=2)
+    viewer(boxes.max(axis=1), 'txy', 15)
+
+############################################################################
 # Functions for segmenting images
 ############################################################################
 
