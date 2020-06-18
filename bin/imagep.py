@@ -24,6 +24,7 @@ from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
 from scipy.spatial import distance
+import pickle
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
@@ -35,7 +36,7 @@ from fitting import fitgaussian3d
 # General image processing functions
 ############################################################################
 
-def save_pickle(filename, obj):
+def save_pickle(obj, filename):
     """Pickel (serialize) an object into a file
 
     Args:
