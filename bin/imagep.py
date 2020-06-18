@@ -369,13 +369,17 @@ def find_background_point(mask):
     return tuple(coord)  
 
 ############################################################################
-def relabel_labelmask(labelmask):
+def relabel_labelmask(labelmask, preserve_order=True):
     """Relabel labelmask to set background to 0 and object IDs to be linearly 
-    ascending from 1
+    ascending from 1. 
     
     Args:
         labelmask: ndarray
             N-dimensional labelmask.
+        preserve_order: bool
+            If true, order of labels in original mask is maintained (except
+            background). Otherwise, labels will be in descending order of
+            object size.
     
     Returns:
         labelmask: ndarray
@@ -393,11 +397,16 @@ def relabel_labelmask(labelmask):
     mask[mask == background_label] = 0
     # Renumber the rest of the objects 1..n.
     obj_num=1
-    for n in ordered_indexes[1:]:
-        old_label = labels[n]
-        mask[labelmask == old_label] = obj_num
-        obj_num = obj_num + 1
+    if (preserve_order):
+        oldlabels = labels
+    else:
+        oldlabels = labels[ordered_indexes]
+    for old_label in oldlabels:
+        if (old_label != background_label):
+            mask[labelmask == old_label] = obj_num
+            obj_num = obj_num + 1
     return mask
+
 ############################################################################
 # Function implementing filters
 ############################################################################
@@ -1239,6 +1248,8 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
         ax[2][0].imshow(labelmask.astype('bool'))
         ax[2][0].set_title('Final Segmentation')
     
+    # Make 2D labelmask into 3D mask by repeating.
+    labelmask = np.repeat([labelmask], stack.shape[0], axis=0)
     return labelmask
 
 ############################################################################
@@ -1286,14 +1297,22 @@ def update_labels(mask1, mask2):
             raise ValueError("Masks do not have the same shape.")
         # Initialize blank mask.
         updated_mask = np.zeros(mask2.shape)
-        for label1 in np.unique(mask1)[1:]:
-            # Find label in mask2 with maximum overlap with nuc from mask1.
-            label2 = get_max_overlap(mask1, mask2, label1)
-            # Check that labels are "reciprocal best hits" by determining the 
-            # label in mask1 with maximum overlap with label in mask2 found above.
-            label2_besthit = get_max_overlap(mask2, mask1, label2)
-            if ((label2_besthit == label1) and (label1 != 0)):
-                updated_mask[mask2 == label2] = label1
+        # Go one-by-one through the labels in mask2
+        for label in np.unique(mask2)[1:]:
+            # Find label in mask1 with maximum overlap with nuc from mask2.
+            mask1_besthit = get_max_overlap(mask2, mask1, label)
+            # Find reverse: best hit for the mask1 label in mask2.
+            mask2_besthit = get_max_overlap(mask1, mask2, mask1_besthit)
+            # If the labels are reciprocal best hits, update label in 
+            # new mask to have the shape of the object in mask 2 with 
+            # the label propagated from mask1.
+            if ((mask2_besthit == label) and (mask1_besthit != 0)):
+                updated_mask[mask2 == label] = mask1_besthit
+            # If no reciprocal best hit was found, initialize nucleus as a
+            # new object.
+            else:
+                new_id = np.max([mask1, mask2, updated_mask]) + 1
+                updated_mask[mask2 == label] = new_id
         return updated_mask
 
     return main(mask1, mask2)
@@ -1343,7 +1362,7 @@ def update_labels_withmemory(maskstack, newmask, max_frames_skipped=2,
         updated_mask = np.where((updated_mask == 0) & (mask_updated_thisframe != 0), 
                                 mask_updated_thisframe, updated_mask)
     return updated_mask
-    
+
 ############################################################################
 def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, 
     max_frames_skipped=2, **kwargs):
@@ -1521,6 +1540,7 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     for peak in peaks:
         fitwindow, z_adj, x_adj, y_adj = get_fitwindow(stack, peak, fitwindow_rad_xy, 
                                             fitwindow_rad_z)
+        norm_var = np.std(fitwindow) / np.mean(fitwindow)
         opt = fitgaussian3d(fitwindow)
         if opt.success:
             peak_fitparams = opt.x
@@ -1532,7 +1552,6 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         # If fit fails, add dummy entry for spot.
         else:
             fitparams = np.vstack((fitparams, np.array([0,0,0,0,1e6,1e6,1e6])))
-    
     # Find threshold for gaussian height (intensity for 3D).
     mean_ = np.mean(stack)
     std = np.std(stack)
@@ -1697,7 +1716,7 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
     return spot_data   
 
 ############################################################################
-def ms2_segment_stack(stack, nucmask, channel=0, seg_func=segMS2_3dstack, 
+def ms2_segment_stack(stack, nucmask=None, channel=0, seg_func=segMS2_3dstack, 
     max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1, **kwargs):
     """Detect and segment MS2 spots from a 5D image stack.
     
@@ -1714,7 +1733,8 @@ def ms2_segment_stack(stack, nucmask, channel=0, seg_func=segMS2_3dstack,
             Channel containing MS2 spots
         nucmask: ndarray
             4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
-            background (not a nucleus) and nuclei have integer labels.
+            background (not a nucleus) and nuclei have integer labels. If
+            "None", a mask of all 1s is substituted.
         seg_func: function
             Function that performs segmentation of MS2 dots in a 3D stack
         max_frame_gap: int
@@ -1754,7 +1774,9 @@ def ms2_segment_stack(stack, nucmask, channel=0, seg_func=segMS2_3dstack,
             spot_data[spot_id] = np.expand_dims(np.append([0, nuc_id], data_f0[n]), 0)
             spot_id = spot_id + 1
         return spot_data
-        
+     
+    if nucmask is not None:
+        nucmask = np.ones_like(stack[channel])   
     # Segment first frame and initialize spot data
     nframes = stack[channel].shape[0]
     spot_data_f0 = seg_func(stack[channel, 0], **kwargs)
