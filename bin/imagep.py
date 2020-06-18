@@ -35,6 +35,35 @@ from fitting import fitgaussian3d
 # General image processing functions
 ############################################################################
 
+def save_pickle(filename, obj):
+    """Pickel (serialize) an object into a file
+
+    Args:
+        filename: string
+            Full path to save to
+        obj: object
+            Python object to serialize
+    """
+    with open(filename, 'wb') as file:
+        pickle.dump(obj, file)
+
+############################################################################
+def load_pickle(filename):
+    """Load a pickled (serialized) object
+
+    Args:
+        filename: string
+            Full path containing pickled object
+    
+    Returns:
+        obj: object
+            Object(s) contained in pickled file
+    """
+    with open(filename, 'rb') as file:
+        obj = pickle.load(file)
+    return obj
+
+############################################################################
 def labelmask_filter_objsize(labelmask, size_min, size_max):
     """Filter objects in a labelmask by size.
 
