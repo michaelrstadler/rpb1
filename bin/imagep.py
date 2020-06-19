@@ -36,35 +36,6 @@ from fitting import fitgaussian3d
 # General image processing functions
 ############################################################################
 
-def save_pickle(obj, filename):
-    """Pickel (serialize) an object into a file
-
-    Args:
-        filename: string
-            Full path to save to
-        obj: object
-            Python object to serialize
-    """
-    with open(filename, 'wb') as file:
-        pickle.dump(obj, file)
-
-############################################################################
-def load_pickle(filename):
-    """Load a pickled (serialized) object
-
-    Args:
-        filename: string
-            Full path containing pickled object
-    
-    Returns:
-        obj: object
-            Object(s) contained in pickled file
-    """
-    with open(filename, 'rb') as file:
-        obj = pickle.load(file)
-    return obj
-
-############################################################################
 def labelmask_filter_objsize(labelmask, size_min, size_max):
     """Filter objects in a labelmask by size.
 
@@ -503,7 +474,7 @@ def log_filter(stack, sigma):
     return log
 
 ############################################################################
-# Functions for loading TIFF stacks
+# Functions for loading reading and writing data
 ############################################################################
 
 # Main function for loading TIFF stacks
@@ -639,6 +610,61 @@ def read_tiff_lattice(tif_folder, **kwargs):
         return np.stack((camA_stack, camB_stack), axis=0)
     else:
         raise ValueError('Unequal number of CamA and CamB files.')
+
+############################################################################
+def read_czi(filename, trim=False, swapaxes=True):
+    """Read a czi file into an ndarray
+    
+    Args:
+        filename: string
+            Path to czi file
+        trim: bool
+            If true, remove last frame
+        swapaxes: bool
+            If true, switches first two axes to produce a stack order ctzxy
+            
+    Returns:
+        stack: ndarray
+            Image stack in dimensions [t,c,z,x,y] (no swap) or 
+            [c,t,z,x,y] (swapped)
+    """
+    stack = czifile.imread(filename)
+    stack = np.squeeze(stack)
+    # Trim off last frame 
+    if trim:
+        stack = stack[0:stack.shape[0]-1]
+    if (swapaxes):
+        stack = np.swapaxes(stack,0,1)
+    return stack
+
+############################################################################
+def save_pickle(obj, filename):
+    """Pickel (serialize) an object into a file
+
+    Args:
+        filename: string
+            Full path to save to
+        obj: object
+            Python object to serialize
+    """
+    with open(filename, 'wb') as file:
+        pickle.dump(obj, file)
+
+############################################################################
+def load_pickle(filename):
+    """Load a pickled (serialized) object
+
+    Args:
+        filename: string
+            Full path containing pickled object
+    
+    Returns:
+        obj: object
+            Object(s) contained in pickled file
+    """
+    with open(filename, 'rb') as file:
+        obj = pickle.load(file)
+    return obj
 
 ############################################################################
 # Functions for interactive image viewing/analysis
