@@ -1470,6 +1470,8 @@ def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory,
     return labelstack
 
 ############################################################################
+### Currently broken. Needs to be adapted to work with update_labels_withmemory
+# Should be a simple fix, but needs to be done before this will work
 def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
     """Wrapper for nuclear segmentation routine for lattice data.
 
@@ -1839,9 +1841,11 @@ def filter_spot_duration(connected_data, min_len):
 
     """
     filtered_data = {}
+    spot_num = 1
     for spot in connected_data:
         if (connected_data[spot].shape[0] >= min_len):
-            filtered_data[spot] = connected_data[spot]
+            filtered_data[spot_num] = connected_data[spot]
+            spot_num = spot_num + 1
     return filtered_data
 
 ############################################################################
