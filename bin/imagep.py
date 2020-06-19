@@ -1502,19 +1502,17 @@ def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
     return segment_nuclei4D(stack[channel], segment_nuclei3D_5, update_labels, **kwargs)
 
 ############################################################################
-def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5, 
+def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5, 
                    sigma_big=4, bg_radius=4, fitwindow_rad_xy=5, 
-                   fitwindow_rad_z=9, h_stringency=1, 
-                   xy_max_width=15):  
-    """Segment MS2 spots from a 3D stack, fit them with 3D gaussian
+                   fitwindow_rad_z=9):  
+    """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
     Alrigthm: bandbass filter -> background subtraction -> find local maxima
-    -> fit gaussian to windows around maxima -> filter based on fit parameters
-    -> label and return.
+    -> fit gaussian to windows around maxima
     
     Args:
         stack: ndarray
-            3D image stack containing MS2 spots
+            4D image stack [t,z,x,y] containing MS2 spots
         peak_window_size: tuple of three ints
             Size in [z,x,y] of window used to find local maxima. Typically
             set to the approximage dimensions of nuclei.
@@ -1530,19 +1528,15 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         fitwindow_rad_z: int
             Radius in pixels in the z-dimension of the window around local
             maxima peaks within which to do gaussian fitting.
-        h_stringency: float
-            Sets the filter for the minimum peak height of the gaussian fit
-            for a spot to be retained, expressed as standard deviations
-            above the mean pixel value for the entire 3D stack.
-        xy_max_width: int
-            Maximum width in xy-dimension used for filtering gaussian fits.
     
     Returns:
-        spot_data: dict of ndarrays
-            Data for detected spots. Dict keys are unique spot IDs (integers),
-            array entries are 0: z-coordinate, 1: x-coordinate, 2: y-coordinate, 
-            3: gaussian fit height, 4: gaussian fit z-width, 5: gaussian fit 
-            x-width, 6: gaussian fit y-width.
+        fit_data: list of ndarrays
+            Each entry in the list is a time point (frame). Each row in
+            array is a fit (a single local maxima), columns are: 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: width_z, 4: fit_height, 5: width_x, 6: width_y). Coordinates 
+            are adjusted so that if fit center lies outside the image, 
+            center is moved to the edge.
     """
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
@@ -1576,46 +1570,100 @@ def segMS2_3dstack(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         """Bound a number between two constants"""
         return max(min(maxn, n), minn)
     
-    # Filter and background subtract image.
-    dog = dog_filter(stack, sigma_small, sigma_big)
-    bg = ndi.filters.minimum_filter(dog, bg_radius)
-    dog_bs = dog - bg
-    # Make a labelmask corresponding to local maxima peaks.
-    mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
+    def fit_frame(substack, peak_window_size, sigma_small, 
+                   sigma_big, bg_radius, fitwindow_rad_xy, 
+                   fitwindow_rad_z):
+        """Perform 3D gaussian fitting on a 3D image stack."""
+        
+        # Filter and background subtract image.
+        dog = dog_filter(substack, sigma_small, sigma_big)
+        bg = ndi.filters.minimum_filter(dog, bg_radius)
+        dog_bs = dog - bg
+
+        # Make a labelmask corresponding to local maxima peaks.
+        mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
+
+        # Fit 3D gaussian in window surrounding each local maximum.
+        fitparams = np.ndarray((0,7))
+        for peak in peaks:
+            fitwindow, z_adj, x_adj, y_adj = get_fitwindow(substack, peak, fitwindow_rad_xy, 
+                fitwindow_rad_z)
+            opt = fitgaussian3d(fitwindow)
+            if opt.success:
+                peak_fitparams = opt.x
+                # Move center coordinates to match center of gaussian fit, ensure they're within image. 
+                # If they're outside the image, coordinate is assigned as the edge of the image.
+                peak_fitparams[0] = clamp(int(peak[0] + peak_fitparams[0] - z_adj), 0, substack.shape[-3]-1)
+                peak_fitparams[1] = clamp(int(peak[1] + peak_fitparams[1] - x_adj), 0, substack.shape[-2]-1)
+                peak_fitparams[2] = clamp(int(peak[2] + peak_fitparams[2] - y_adj), 0, substack.shape[-1]-1)
+                fitparams = np.vstack((fitparams, peak_fitparams))
+            # If fit fails, add dummy entry for spot.
+            else:
+                fitparams = np.vstack((fitparams, np.array([0,0,0,0,np.inf,np.inf,np.inf])))
+        return fitparams
     
-    # Fit 3D gaussian in window surrounding each local maximum.
-    fitparams = np.ndarray((0,7))
-    for peak in peaks:
-        fitwindow, z_adj, x_adj, y_adj = get_fitwindow(stack, peak, fitwindow_rad_xy, 
-                                            fitwindow_rad_z)
-        norm_var = np.std(fitwindow) / np.mean(fitwindow)
-        opt = fitgaussian3d(fitwindow)
-        if opt.success:
-            peak_fitparams = opt.x
-            # Move center coordinates to match center of gaussian fit, ensure they're within image.
-            peak_fitparams[1] = clamp(int(peak[0] + peak_fitparams[1] - z_adj), 0, stack.shape[-3]-1)
-            peak_fitparams[2] = clamp(int(peak[1] + peak_fitparams[2] - x_adj), 0, stack.shape[-2]-1)
-            peak_fitparams[3] = clamp(int(peak[2] + peak_fitparams[3] - y_adj), 0, stack.shape[-1]-1)
-            fitparams = np.vstack((fitparams, opt.x))
-        # If fit fails, add dummy entry for spot.
-        else:
-            fitparams = np.vstack((fitparams, np.array([0,0,0,0,1e6,1e6,1e6])))
-    # Find threshold for gaussian height (intensity for 3D).
-    mean_ = np.mean(stack)
-    std = np.std(stack)
-    t = mean_ + (std * h_stringency)
-    # Filter peaks based on guassian fit parameters.
-    peak_ids = np.unique(mask)[1:]
-    # fitparams columns: 0: height, 5: x_width, 6: y_width
-    trupeaks = peak_ids[(fitparams[:,0] > t) 
-                        & (np.mean(fitparams[:,5:6], axis=1) < xy_max_width)]
-    spot_data = relabel(trupeaks, fitparams, mask)
-    return spot_data
+    #### Main ####
+    # Do fitting on first frame.
+    fit_data_frame0 = fit_frame(stack[0], peak_window_size, sigma_small, 
+                   sigma_big, bg_radius, fitwindow_rad_xy, 
+                   fitwindow_rad_z)
+    # Make fit_data a list of ndarrays.
+    fit_data = [fit_data_frame0]
+    
+    # Fit the rest of the frames, add their data to fit_data.
+    for i in range(1, stack.shape[0]):
+        print(i)
+        fit_data_thisframe = fit_frame(stack[i], peak_window_size, sigma_small, 
+                   sigma_big, bg_radius, fitwindow_rad_xy, 
+                   fitwindow_rad_z)
+        fit_data.append(fit_data_thisframe)
+        
+    return fit_data
 
 ############################################################################
-def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t, 
-                  max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1):
-    """Add spot detections for new frame to detection data for previous frames.
+def filter_ms2fits(stack, fit_data, h_stringency=1, xy_max_width=15):
+    """Filter MS2 spot fit data based on fit parameters
+    
+    Select spots that have a minimum fit height (intensity) and a maximum 
+    lateral (xy) width.
+    
+    Args:
+        stack: ndarray
+            4D imaging stack [t,z,x,y] that the fitting was performed on
+        fit_data: list of ndarrays
+            Each entry in list is a distinct frame (in time), rows in array
+            are individual spot fits and columns are 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: width_z, 4: fit_height, 5: width_x, 6: width_y.
+        h_stringency: numeric
+            Determines minimum fit height cutoff, expressed as the number
+            of standard deviations above the mean for the entire stack.
+        xy_max_width: numeric
+            Maximum width (in pixels) of the mean of the x and y widths of
+            the fit
+    
+    Returns:
+        fit_data: list of ndarrays
+            Input data, retaining only rows that pass filter.  
+    """
+    
+    fit_data = fit_data.copy()
+    for t in range(0, len(fit_data)):
+        frame_data = fit_data[t]
+        # Define threshold for height.
+        mean_ = np.mean(stack[t])
+        std = np.std(stack[t])
+        h_thresh = mean_ + (std * h_stringency)
+        # Filter array based on min height and max width.
+        frame_data_filtered = frame_data[(frame_data[:,3] >= h_thresh) &
+                    (np.mean(frame_data[:,5:7], axis=1) < xy_max_width),:]
+        fit_data[t] = frame_data_filtered
+    return fit_data
+
+############################################################################
+def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10, 
+    scale_xy=1, scale_z=1):
+    """Connect detected MS2 spots through multiple time frames.
     
     Spots detected in new frame are connected to spots in previous frames
     if they are within specified distance (max_jump). Spots can "disappear" 
@@ -1623,24 +1671,14 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
     connected to spots from prior frames are initialized as new spots.
     
     Args:
-        spot_data: dict of ndarrays
-            Data containing tracking of spots detected in previous frames.
-            Dict entries are unique spot IDs (numeric 1...), rows of ndarray
-            are detections of the spot in a single frame. Column order is
-            0: frame no. (time), 1: nucleus ID, 2: z-coordinate, 3: x-
-            coordinate, 4: y-coordinate, 5: gaussian fit height, 6: gaussian
-            fit z-width, 7: gaussian fit x-width, 8: gaussian fit y-width.
-        newframe_spotdata: dict of ndarrays
-            Data for detected spots in frame to be added, returned from MS2
-            dot segmentation function. Dict keys are unique spot IDs (integers),
-            array entries are 0: z-coordinate, 1: x-coordinate, 2: y-coordinate, 
-            3: gaussian fit height, 4: gaussian fit z-width, 5: gaussian fit 
-            x-width, 6: gaussian fit y-width.
+        spot_data: list of ndarrays
+            Each entry in list is a distinct frame (in time), rows in array
+            are individual detected spots and columns are 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: width_z, 4: fit_height, 5: width_x, 6: width_y.
         nucmask: ndarray
             4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
             background (not a nucleus) and nuclei have integer labels.
-        t: int
-            Number of frame to be added.
         max_frame_gap: int
             Maximum number of frames from which spot can be absent and still
             connected across the gap. Example: for a value of 1, a spot
@@ -1655,16 +1693,20 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
             Distance scale for z direction (typically: nm per pixel)
         
     Returns:
-        spot_data: dict of ndarrays
-            Same structure as input spot_data with data from new frame added.
+        connected_data: dict of ndarrays
+            Each key is a unique spot tracked across 1 or more frames. Each row
+            of array is the spot's data for a single frame, with columns 0: frame
+            number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+            inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+            x_width, 8: fit y_width
     """
-    def initialize_new_spot(new_spot_data, spot_data):
-        """Initialize new spot with next numeric ID and entry in spot_data."""
-        if (spot_data.keys()):
-            new_id = max(spot_data.keys()) + 1
+    def initialize_new_spot(new_spot_data, connected_data):
+        """Initialize new spot with next numeric ID and entry in connected_data."""
+        if (connected_data.keys()):
+            new_id = max(connected_data.keys()) + 1
         else:
             new_id = 1
-        spot_data[new_id] = np.expand_dims(new_spot_data, 0)
+        connected_data[new_id] = np.expand_dims(new_spot_data, 0)
 
     def sq_euc_distance(coords1, coords2, scale_z=1, scale_xy=1):
         """Find the squared euclidean distance between two points."""
@@ -1674,13 +1716,12 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
         sed = z2 + x2 + y2
         return sed
     
-    # Make a list of coordinates for all spots in a frame
-    def coord_list_t(spot_data, t):
+    def coord_list_t(connected_data, t):
         """Make a list of [z,x,y] coordinate tuples for all spots in a given
         frame"""
         coord_list = []
-        for spot_id in spot_data:
-            this_spot_data = spot_data[spot_id]
+        for spot_id in connected_data:
+            this_spot_data = connected_data[spot_id]
             row = this_spot_data[this_spot_data[:,0] == t]
             if (len(row) > 0):
                 row = list(row[0])
@@ -1704,17 +1745,17 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
                 closest_spot_coords = test_coords
         return closest_spot, np.sqrt(closest_sed), closest_spot_coords
 
-    def update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, 
+    def update_spot(this_spot_data, connected_data, scale_z, scale_xy, max_frame_gap, 
                     t):
         """Walk back one frame at a time within limit set by maximum gap, search 
         for a nearest spot that is within the maximum allowable jump, handle 
-        duplicates, add connected points to spot_data."""
+        duplicates, add connected points to connected_data."""
         this_spot_coords = (this_spot_data[2:5])
         # Walk back one frame at a time.
         for t_lag in range(1, max_frame_gap + 2):
             if ((t - t_lag) >= 0):
                 # Get nearest spot in the current frame.
-                spot_coords_tlag = coord_list_t(spot_data, t - t_lag)
+                spot_coords_tlag = coord_list_t(connected_data, t - t_lag)
                 # If there are no previously detected spots, break from for loop and initialize new spot entry.
                 if (len(spot_coords_tlag) == 0):
                     break
@@ -1722,12 +1763,12 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
                 # Check is spot is within max distance.
                 if (dist <= max_jump):
                     this_spot_nucID = this_spot_data[1]
-                    nearest_spot_nucID = spot_data[nearest_spot_id][-1,1]
+                    nearest_spot_nucID = connected_data[nearest_spot_id][-1,1]
                     # Check if there's already a spot added for this time.
-                    existing = spot_data[nearest_spot_id][spot_data[nearest_spot_id][:,0] == t]
+                    existing = connected_data[nearest_spot_id][connected_data[nearest_spot_id][:,0] == t]
                     # If there's no existing spot, add this spot to the end of the data for connected spot.
                     if (len(existing) == 0):
-                        spot_data[nearest_spot_id] = np.append(spot_data[nearest_spot_id], [this_spot_data], axis=0)
+                        connected_data[nearest_spot_id] = np.append(connected_data[nearest_spot_id], [this_spot_data], axis=0)
                         return
                     # If there is an existing spot, if the current spot is closer to the previous-frame spot
                     # than the existing entry, replace it. Otherwise, continue looking in previous frames (if
@@ -1739,105 +1780,69 @@ def add_ms2_frame(spot_data, newframe_spotdata, nucmask, t,
                         # If the the current spot is closer than the existing spot, replace 
                         # existing and initialize it as a new spot.
                         if (dist < existing_dist):
-                            row_index = np.where(spot_data[nearest_spot_id][:,0] == t)[0][0]
-                            superseded_spot_data = spot_data[nearest_spot_id][row_index]
+                            row_index = np.where(connected_data[nearest_spot_id][:,0] == t)[0][0]
+                            superseded_spot_data = connected_data[nearest_spot_id][row_index]
                             # Superseded spot from this frame gets bumped to be a new spot.
-                            initialize_new_spot(superseded_spot_data, spot_data)
+                            initialize_new_spot(superseded_spot_data, connected_data)
                             # Replace data for superseded spot with this spot's data.
-                            spot_data[nearest_spot_id][row_index] = this_spot_data
+                            connected_data[nearest_spot_id][row_index] = this_spot_data
                             return
 
         # If no suitable spot was found in previous frames, make a new spot.
-        initialize_new_spot(this_spot_data, spot_data)
-        
+        initialize_new_spot(this_spot_data, connected_data)
     
-    # Main
-    spot_data = spot_data.copy()
-    # Go through each spot in the new mask
-    for this_spot_id in newframe_spotdata:
-        spot_coords = tuple(np.append([t], newframe_spotdata[this_spot_id][0:3]).astype(int))
+    def add_time_nuc(this_spot_data, t, nucmask):
+        """ Append the frame number (t) and nucleus ID to front of spot_data"""
+        spot_coords = tuple(np.append([t], this_spot_data[0:3]).astype(int))
         nuc_id = nucmask[spot_coords]
         # Add time and nuclear ID columns to spot data and call update to search 
         # for connected spots in previous frames.
-        this_spot_data = np.append([t, nuc_id], newframe_spotdata[this_spot_id])
-        update_spot(this_spot_data, spot_data, scale_z, scale_xy, max_frame_gap, t)
-    return spot_data   
+        this_spot_data = np.append([t, nuc_id], this_spot_data)
+        return this_spot_data
+    
+    def initialize_connected_data(frame_data):
+        """Initialize connected_data structure as a dict where each entry
+        is a unique spot and the array rows are data for single frames"""
+        connected_data = {}
+        for i in range(0, len(frame_data)):
+            this_spot_data = add_time_nuc(frame_data[i], 0, nucmask)
+            connected_data[i+1] = np.array([this_spot_data])
+        return connected_data
+        
+    # Main
+    input_data = spot_data.copy()
+    connected_data = initialize_connected_data(input_data[0])
+
+    # Go through each frame, attempt to connect each detected spot to previous spots.
+    for t in range(1, len(input_data)):
+        frame_data = input_data[t]
+        for this_spot_data in frame_data:
+            this_spot_data = add_time_nuc(this_spot_data, t, nucmask)
+            update_spot(this_spot_data, connected_data, scale_z, scale_xy, max_frame_gap, t)
+    
+    return connected_data  
 
 ############################################################################
-def ms2_segment_stack(stack, nucmask=None, channel=0, seg_func=segMS2_3dstack, 
-    max_frame_gap=1, max_jump=10, scale_xy=1, scale_z=1, **kwargs):
-    """Detect and segment MS2 spots from a 5D image stack.
-    
-    Mostly a wrapper for MS2 detection function and spot connector function
-    add_ms2_frame. Initializes spot_data structure using segmentation of 
-    frame 0, then calls detector function and connector on each subsequent
-    frame. Is modular with respect to segmentation function: a new function
-    receives args from *kwargs. Connector is hard-coded as add_ms2_frame.
-    
-    Args:
-        stack: ndarray
-            5D image stack of dimensions [c,t,z,x,y] containing MS2 spots
-        channel: int
-            Channel containing MS2 spots
-        nucmask: ndarray
-            4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
-            background (not a nucleus) and nuclei have integer labels. If
-            "None", a mask of all 1s is substituted.
-        seg_func: function
-            Function that performs segmentation of MS2 dots in a 3D stack
-        max_frame_gap: int
-            Maximum number of frames from which spot can be absent and still
-            connected across the gap. Example: for a value of 1, a spot
-            detected in frame 6 and absent from frame 7 can be connected to
-            a spot in frame 8, but a spot in frame 5 cannot be connected to
-            frame 8 if it is absent in frames 6 and 7.
-        max_jump: numeric
-            Maximum 3D displacement between frames for two spots to be connected
-        scale_xy: numeric
-            Distance scale for xy direction (typically: nm per pixel)
-        scale_z: numeric
-            Distance scale for z direction (typically: nm per pixel)
-        *kwargs: key-word arguments
-            Args supplied to segmentation function
-        
-    Returns:
-        spot_data: dict of ndarrays
-            Data containing tracking of spots detected. Dict entries are unique 
-            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
-            in a single frame. Column order is 0: frame no. (time), 1: nucleus 
-            ID, 2: z-coordinate, 3: x-coordinate, 4: y-coordinate, 5: gaussian 
-            fit height, 6: gaussian fit z-width, 7: gaussian fit x-width, 
-            8: gaussian fit y-width.   
-    """
-    
-    def init_spot_data(data_f0, nucmask):
-        """Initialize spot_data dict from data for first frame. Filters out spots 
-        that are not in nuclei, relabels remaining spots 1...end, adds time 0 and
-        nucleus id to each data entry."""
-        spot_id = 1
-        spot_data = {}
-        for n in data_f0:
-            spot_coords = tuple(np.append([0], data_f0[n][0:3]).astype(int))
-            nuc_id = nucmask[spot_coords]
-            spot_data[spot_id] = np.expand_dims(np.append([0, nuc_id], data_f0[n]), 0)
-            spot_id = spot_id + 1
-        return spot_data
-     
-    if nucmask is not None:
-        nucmask = np.ones_like(stack[channel])   
-    # Segment first frame and initialize spot data
-    nframes = stack[channel].shape[0]
-    spot_data_f0 = seg_func(stack[channel, 0], **kwargs)
-    spot_data = init_spot_data(spot_data_f0, nucmask)
+def filter_spot_duration(connected_data, min_len):
+    """Filter connected_data structure for spots lasting a minimum number
+    of frames
 
-    # Segment and connect subsequent frames.
-    for t in range(1, nframes):
-        substack = stack[channel, t]
-        print(t)
-        frame_data = seg_func(substack, **kwargs)
-        spot_data = add_ms2_frame(spot_data, frame_data, nucmask, t, max_frame_gap=max_frame_gap,
-            max_jump=max_jump, scale_xy=scale_xy, scale_z=scale_z)
-    return spot_data
+    Args:
+        connected_data: dict of ndarrays
+            Output data structure of connect_ms2_frames
+        min_len: int
+            Minimum number of frames in which a spot must be detected
+
+    Returns:
+        filtered_data: dict of ndarrays
+            connected_data retaining only spots of defined duration
+
+    """
+    filtered_data = {}
+    for spot in connected_data:
+        if (connected_data[spot].shape[0] >= min_len):
+            filtered_data[spot] = connected_data[spot]
+    return filtered_data
 
 ############################################################################
 # Functions for analyzing segmented images
