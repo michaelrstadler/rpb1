@@ -1966,3 +1966,7 @@ def add_gaussian_integration(spot_data, wlength_xy, wlength_z):
             new_array[rownum] = np.append(row, [pix_mean])
         spot_data[spot_id] = new_array
     return spot_data
+
+
+
+
