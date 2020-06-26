@@ -1327,6 +1327,39 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
     return labelmask
 
 ############################################################################
+def segment_nuclei_4dstack(stack, seg_func, **kwargs):
+    """Perform segmentation on a time-series of 3D stacks
+    
+    Accepts a function that performs nuclear segmentation on a 3D image stack, 
+    calls this function on each frame of a 4D image stack, and returns a 4D 
+    nuclear mask. Individual time frames are independently segmented and
+    labels are not connected between them.
+    
+    Args:
+        stack: ndarray
+            4D image stack [t,z,x,y]
+        seg_func: function
+            A function that performs segmentation on a 3D image stack
+        **kwargs: key-word arguments
+            Arguments to supply to segmentation function
+    
+    Returns:
+        labelmask: ndarray
+            Mask in the shape of input stack with nuclei independently
+            segmented at each time point.
+    """
+    # Segment first frame, initialize 4D labelmask.
+    frame0 = seg_func(stack[0], **kwargs)
+    labelmask = np.array([frame0])
+    # Segment subsequent frames, stack results together.
+    for n in range(1, stack.shape[0]):
+        print(n)
+        frame = seg_func(stack[n], **kwargs)
+        labelmask = np.vstack((labelmask, [frame]))
+    
+    return labelmask
+
+############################################################################
 def update_labels(mask1, mask2):
     """Match labels of segmented structures between two labelmasks.
     
@@ -1382,33 +1415,29 @@ def update_labels(mask1, mask2):
             # the label propagated from mask1.
             if ((mask2_besthit == label) and (mask1_besthit != 0)):
                 updated_mask[mask2 == label] = mask1_besthit
-            # If no reciprocal best hit was found, initialize nucleus as a
-            # new object.
-            else:
-                new_id = np.max([mask1, mask2, updated_mask]) + 1
-                updated_mask[mask2 == label] = new_id
-        return updated_mask
 
+        return updated_mask
     return main(mask1, mask2)
 
 ############################################################################
-def update_labels_withmemory(maskstack, newmask, max_frames_skipped=2, 
+def connect_nuclei(maskstack, max_frames_skipped=2, 
                              update_func=update_labels):
     """Match labels in a labelmask to masks from previous frames
     
-    Take a mask and a stack of masks, walk backward in time looking for
-    segmented nuclei in previous frames that correspond to nuclei in the
-    new frame. Default is to use update_labels function to do comparison
-    of two masks, but this can be changed.
+    Takes a stack of nuclear masks, for each frame, walk backward in time 
+    looking for segmented nuclei in previous frames that correspond to 
+    nuclei in the new frame. Default is to use update_labels function to 
+    do comparison of two masks, but this can be changed. Nuclei in a frame
+    that cannot be matched to previous nucleus are kept and initialized 
+    with new labels (change from previous behavior).
     
     Note: Written with adding 3d masks to 4d stacks, but works for 3d-
     2d.
     
     Args:
         maskstack:
-            4D labelmask [t,z,x,y] of nuclei at previous time frames
-        newmask:
-            3D labelmask [z,x,y] of new frame
+            4D labelmask [t,z,x,y] of segmented nuclei, labels not connected
+            between time frames (mask at each time generated independently).
         max_frames_skipped: int
             Maximum number of frames that can be "skipped" to find a nucleus
             to connect to. Compensates for errors in segmentation that cause
@@ -1420,114 +1449,126 @@ def update_labels_withmemory(maskstack, newmask, max_frames_skipped=2,
             based on matches in the first. Default is to use update_labels.
     
     Returns:
-        updated_mask: ndarray
-            3D labelmask of same shape as newmask with object labels updated
-            to match previous frames.       
+        connected_mask: ndarray
+            4D labelmask of same shape as maskstack with object labels connected
+            between frames. 
     """
     # Initialize blank mask.
-    updated_mask = np.zeros_like(newmask)
-    # Step backwards through frames, limited by available frames and max
-    # allowable skipped frames.
-    for i in range(1, min(max_frames_skipped + 2, maskstack.shape[0] + 1)):
-        # Update new mask with connections to earlier frame.
-        mask_updated_thisframe = update_func(maskstack[-i], newmask)
-        # For positions that do not have an object in the currently updated mask
-        # but do have an object in this frame's update, add object pixels.
-        updated_mask = np.where((updated_mask == 0) & (mask_updated_thisframe != 0), 
-                                mask_updated_thisframe, updated_mask)
-    return updated_mask
+    connected_mask = np.zeros_like(maskstack)
+    # Add first frame.
+    connected_mask[0] = maskstack[0]
+    # Walk through subsequent frames, connecting them to previous frames.
+    for n in range(1, maskstack.shape[0]):
+        print('frame ' + str(n))
+        newmask = maskstack[n]
+        # Step sequentially backwards through frames, bound by max skip.
+        for i in range(n-1, n-2-max_frames_skipped, -1):
+            # Make sure the frame exists.
+            if (i >= 0):
+                print(i)
+                # Make updated mask with connections to earlier frame.
+                mask_updated_thisframe = update_func(connected_mask[i], newmask)
+                # Only update objects that are connected in this frame but were NOT
+                # connected to a more recent frame. Do this by restricting updates
+                # to positions in connected_mask that are currently 0. Positions that
+                # are either non-zero in the current connected_mask or 0 in both are
+                # kept the same. Only pixels that are non-zero in new update and 0
+                # in current mask are changed (to the labels from the current frame).
+                connected_mask[n] = np.where((connected_mask[n] == 0) & (mask_updated_thisframe != 0),
+                    mask_updated_thisframe, connected_mask[n])
+                #connected_mask[n] = mask_updated_thisframe
+        # Initialize un-matched nuclei with new labels.
+        unmatched = newmask[(newmask != 0) & (connected_mask[n] == 0)]
+        unmatched_labels = np.unique(unmatched)
+        for orphan in unmatched_labels:
+            new_label = connected_mask.max() + 1
+            connected_mask[n][newmask == orphan] = new_label
+            
+    return connected_mask
 
 ############################################################################
-def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, 
-    max_frames_skipped=2, **kwargs):
-    """Segment nuclei in a 4D image stack (expect lattice data).
+def interpolate_nuclear_mask(mask, max_missing_frames):
+    """Fill-in frames of nuclear mask to compensate for dropout.
     
-    A wrapper for two supplied functions: one function that performs
-    segmentation of a 3D image stack and a second function that connects
-    segmentation outputs for a new frame with previous frames, identifying
-    shared objects and harmonizing their labels. The 3D segmentation function
-    is iteratively called on all frames, and the label update function is
-    used to connect objects through time.
-    
-    Note: Though descriptions are written for segmentation of frames of 3D
-    movies, this function is compatible with 2D labelmasks as well. 2D masks
-    will be combined into 3D (presumably [t,x,y]) stacks.
-    
-    Args:
-        stack: ndarray
-            4D image stack of dimensions [t, z, x, y].
-        seg_func: function
-            Function that performs segmentation on 3D image stacks. Must take 
-            as arguments a 3D image stack and optional keyword arguments.
-        update_func: function
-            Function that compares new labelmask to a stack of masks from 
-            previous frames. 
-        max_frames_skipped: int
-            Maximum number of frames that can be "skipped" to find a nucleus
-            to connect to. Compensates for errors in segmentation that cause
-            nuclei to sometimes drop from frames. e.g., for a value of 1, 
-            function will search for a connected nucleus in the last frame 
-            and, if unsuccessful, in the second-to-last frame.
-        **kwargs: optional key-word arguments
-            Keyword arguments to supply to segmentation function.
-    
-    Returns:
-        labelmask: ndarray
-            4D labelmask of dimensions [t, z, x, y] with segmented objects.
-    
-    Example usage:
-        labelmask = segment_nuclei4D(im_stack, segment_nuclei3D, update_labels,
-            sigma=5, percentile=90)
-    """
-    # Create partial form of segmentation function with supplied kwargs.
-    seg_func_p = partial(seg_func, **kwargs)
-    # Segment first frame, add 4th axis in 0 position.
-    labelmask = seg_func_p(stack[0])
-    labelstack = np.expand_dims(labelmask, axis=0) 
-
-    # Segment subsequent frames, update labels, build 4D labelmask.
-    for t in range(1, stack.shape[0]):
-        print(t)
-        mask = seg_func_p(stack[t])
-        mask_updated = update_func(labelstack, mask, max_frames_skipped)
-        mask_updated = np.expand_dims(mask_updated, axis=0)
-        labelstack = np.concatenate((labelstack, mask_updated), axis=0)
-
-    return labelstack
-
-############################################################################
-### Currently broken. Needs to be adapted to work with update_labels_withmemory
-# Should be a simple fix, but needs to be done before this will work
-def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
-    """Wrapper for nuclear segmentation routine for lattice data.
-
-    Uses 3D stack segmentation function segment_nuclei3D_4 and label propagator
-    update_labels.
-
-    Suggested workflow:
-
-    1. Background subtract stack: 
-        bgsub = stack_bgsub(stack)
-    2. Test parameters to get good segmentation of first Z-stack:
-        test = segment_nuclei3D_5(bgsub[1,0], seed_window=(70,50,50), display=True)
-        viewer(test, 'zxy')
-    3. Call this function on bgsub with optimized parameters.
-        labelmask = lattice_segment_nuclei_4(bgsub, channel=1, seed_window=(70,40,40))
+    So far all nuclear segmentation routines I've tried are susceptible to
+    occasional dropout — cases where a nucleus is absent from one or more 
+    frames. This function fills in those gaps. Interpolated nuclei have the 
+    same shape as the nucleus in the preceding frame with the centroid of
+    that shape lying at the mean position of the centroids of the nucleus
+    in the preceding and succeeding frame. So if a nucleus is missing from 
+    frame 4, the centroid of the nucleus is taken in frame 3 and 5 and the 
+    mean of those is used as the centroid of the new nucleus. All the pixels
+    belonging to the nucleus in frame 3 are then shifted to match this new
+    centroid and this is the final interpolated nuclear object.
     
     Args:
-        stack: ndarray
-            5D image stack of dimensions [c, t, z, x, y].
-        channel: int
-            Channel (0th dimension) to use for segmentation.
-        kwargs: key-word arguments (optional)
-            Arguments for segment_nuclei3D_4
-        
+        mask: ndarray
+            4D labelmask of segmented nuclei
+        max_missing_frames: int
+            Maximum allowable number of consecutive frames missing a nucleus for
+            interpolation to be executed.
+            
     Returns:
-        labelmask: ndarray
-            4D labelmask of dimensions [t, z, x, y]
+        newmask: ndarray
+            Labelmask in the same shape as input with interpolated nuclei.
+    
     """
+    def find_surrounding_frames(frame, frames_with):
+        """Find nearest frames containing nucleus before and after frame missing nucleus"""
+        # If frame is missing from the beginning, return initial frame twice.
+        if (frame < frames_with[0]):
+            return frames_with[0], frames_with[0], frames_with[0] - frame
+        # If frame is missing from the end, return last frame twice.
+        elif (frame > frames_with[-1]):
+            return frames_with[-1], frames_with[-1], frame - frames_with[-1]
+        # If frame is missing in the middle, return surrounding frames.
+        else:
+            for i in range(1, len(frames_with)):
+                frame_before = frames_with[i-1]
+                frame_after = frames_with[i]
+                if (frame > frame_before and frame < frame_after):
+                    return frame_before, frame_after, frame_after - frame_before - 1
 
-    return segment_nuclei4D(stack[channel], segment_nuclei3D_5, update_labels, **kwargs)
+    def interpolate(mask, newmask, label, frame, frames_with, coords, frame_before, frame_after):
+        """Use position of nucleus in preceding and succeeding frames to interpolate 
+        nucleus in missing frame"""
+        # Find centroid of nucleus in before and after frames, take the mean centroid for
+        # the position of interpolated nucleus.
+        centroid_before = get_object_centroid(mask[frame_before], label)
+        centroid_after = get_object_centroid(mask[frame_after], label)
+        mean_centroid = [sum(y) / len(y) for y in zip(*(centroid_before, centroid_after))]
+        mean_centroid = [int(i) for i in mean_centroid]
+        # Get difference of mean centroid and before centroid.
+        centroid_diff = ([mean_centroid[0] - centroid_before[0]])
+        for i in range(1,len(mean_centroid)):
+            centroid_diff = centroid_diff + ([mean_centroid[i] - centroid_before[i]])
+        # Make a boolean for all the coordinates in the before frame.
+        obj_bool = coords[0] == frame_before
+        # Assign the frame number to the first position for all interpolated coordinates.
+        interp_coords = tuple([np.repeat(frame, np.count_nonzero(obj_bool))])
+        # For remaining dimensions, use centroid difference to "move" pixels of nucleus
+        # from before frame to the interpolated position.
+        for i in range(0, len(centroid_diff)):
+            interp_coords = interp_coords + tuple([coords[i+1][obj_bool] + centroid_diff[i]])
+        # Update newmask in place.
+        newmask[interp_coords] = label
+
+    # Main.
+    newmask = np.copy(mask)
+    labels = np.unique(mask)[1:]
+    t_frames = np.arange(0,mask.shape[0])
+    for label in labels:
+        # Find all point coordinates with the label.
+        coords = np.where(np.isin(mask, label))
+        # Find frames containing and lacking label.
+        frames_with = np.unique(coords[0])
+        frames_without = t_frames[~np.isin(t_frames, frames_with)]
+        # Interpolate nucleus for each frame lacking it.
+        for frame in frames_without:
+            frame_before, frame_after, num_consecutive_skipped = find_surrounding_frames(frame, frames_with)
+            if (num_consecutive_skipped <= max_missing_frames):
+                interpolate(mask, newmask, label, frame, frames_with, coords, frame_before, frame_after)
+    return newmask
 
 ############################################################################
 def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5, 

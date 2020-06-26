@@ -347,3 +347,141 @@ def segment_nuclei3D_3(instack, sigma_big=17, sigma_small=3, erosion_length=10, 
     labelmask = labelmask_filter_objsize(labelmask, size_min, size_max)
     labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
     return labelmask
+
+############################################################################
+def update_labels_withmemory(maskstack, newmask, max_frames_skipped=2, 
+                             update_func=update_labels):
+    """Match labels in a labelmask to masks from previous frames
+    
+    Take a mask and a stack of masks, walk backward in time looking for
+    segmented nuclei in previous frames that correspond to nuclei in the
+    new frame. Default is to use update_labels function to do comparison
+    of two masks, but this can be changed.
+    
+    Note: Written with adding 3d masks to 4d stacks, but works for 3d-
+    2d.
+    
+    Args:
+        maskstack:
+            4D labelmask [t,z,x,y] of nuclei at previous time frames
+        newmask:
+            3D labelmask [z,x,y] of new frame
+        max_frames_skipped: int
+            Maximum number of frames that can be "skipped" to find a nucleus
+            to connect to. Compensates for errors in segmentation that cause
+            nuclei to sometimes drop from frames. e.g., for a value of 1, 
+            function will search for a connected nucleus in the last frame 
+            and, if unsuccessful, in the second-to-last frame.
+        update_func: function
+            Function that takes two label masks, updates labels in the second
+            based on matches in the first. Default is to use update_labels.
+    
+    Returns:
+        updated_mask: ndarray
+            3D labelmask of same shape as newmask with object labels updated
+            to match previous frames.       
+    """
+    # Initialize blank mask.
+    updated_mask = np.zeros_like(newmask)
+    # Step backwards through frames, limited by available frames and max
+    # allowable skipped frames.
+    for i in range(1, min(max_frames_skipped + 2, maskstack.shape[0] + 1)):
+        # Update new mask with connections to earlier frame.
+        mask_updated_thisframe = update_func(maskstack[-i], newmask)
+        # For positions that do not have an object in the currently updated mask
+        # but do have an object in this frame's update, add object pixels.
+        updated_mask = np.where((updated_mask == 0) & (mask_updated_thisframe != 0), 
+                                mask_updated_thisframe, updated_mask)
+    return updated_mask
+
+############################################################################
+def segment_nuclei4D(stack, seg_func, update_func=update_labels_withmemory, 
+    max_frames_skipped=2, **kwargs):
+    """Segment nuclei in a 4D image stack (expect lattice data).
+    
+    A wrapper for two supplied functions: one function that performs
+    segmentation of a 3D image stack and a second function that connects
+    segmentation outputs for a new frame with previous frames, identifying
+    shared objects and harmonizing their labels. The 3D segmentation function
+    is iteratively called on all frames, and the label update function is
+    used to connect objects through time.
+    
+    Note: Though descriptions are written for segmentation of frames of 3D
+    movies, this function is compatible with 2D labelmasks as well. 2D masks
+    will be combined into 3D (presumably [t,x,y]) stacks.
+    
+    Args:
+        stack: ndarray
+            4D image stack of dimensions [t, z, x, y].
+        seg_func: function
+            Function that performs segmentation on 3D image stacks. Must take 
+            as arguments a 3D image stack and optional keyword arguments.
+        update_func: function
+            Function that compares new labelmask to a stack of masks from 
+            previous frames. 
+        max_frames_skipped: int
+            Maximum number of frames that can be "skipped" to find a nucleus
+            to connect to. Compensates for errors in segmentation that cause
+            nuclei to sometimes drop from frames. e.g., for a value of 1, 
+            function will search for a connected nucleus in the last frame 
+            and, if unsuccessful, in the second-to-last frame.
+        **kwargs: optional key-word arguments
+            Keyword arguments to supply to segmentation function.
+    
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y] with segmented objects.
+    
+    Example usage:
+        labelmask = segment_nuclei4D(im_stack, segment_nuclei3D, update_labels,
+            sigma=5, percentile=90)
+    """
+    # Create partial form of segmentation function with supplied kwargs.
+    seg_func_p = partial(seg_func, **kwargs)
+    # Segment first frame, add 4th axis in 0 position.
+    labelmask = seg_func_p(stack[0])
+    labelstack = np.expand_dims(labelmask, axis=0) 
+
+    # Segment subsequent frames, update labels, build 4D labelmask.
+    for t in range(1, stack.shape[0]):
+        print(t)
+        mask = seg_func_p(stack[t])
+        mask_updated = update_func(labelstack, mask, max_frames_skipped)
+        mask_updated = np.expand_dims(mask_updated, axis=0)
+        labelstack = np.concatenate((labelstack, mask_updated), axis=0)
+
+    return labelstack
+
+############################################################################
+### Currently broken. Needs to be adapted to work with update_labels_withmemory
+# Should be a simple fix, but needs to be done before this will work
+def lattice_segment_nuclei_5(stack, channel=1, **kwargs):
+    """Wrapper for nuclear segmentation routine for lattice data.
+
+    Uses 3D stack segmentation function segment_nuclei3D_4 and label propagator
+    update_labels.
+
+    Suggested workflow:
+
+    1. Background subtract stack: 
+        bgsub = stack_bgsub(stack)
+    2. Test parameters to get good segmentation of first Z-stack:
+        test = segment_nuclei3D_5(bgsub[1,0], seed_window=(70,50,50), display=True)
+        viewer(test, 'zxy')
+    3. Call this function on bgsub with optimized parameters.
+        labelmask = lattice_segment_nuclei_4(bgsub, channel=1, seed_window=(70,40,40))
+    
+    Args:
+        stack: ndarray
+            5D image stack of dimensions [c, t, z, x, y].
+        channel: int
+            Channel (0th dimension) to use for segmentation.
+        kwargs: key-word arguments (optional)
+            Arguments for segment_nuclei3D_4
+        
+    Returns:
+        labelmask: ndarray
+            4D labelmask of dimensions [t, z, x, y]
+    """
+
+    return segment_nuclei4D(stack[channel], segment_nuclei3D_5, update_labels, **kwargs)
