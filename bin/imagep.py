@@ -25,13 +25,14 @@ from scipy.stats import mode
 from skimage.measure import label, regionprops
 from scipy.spatial import distance
 import pickle
+import czifile
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
 # Import my packages.
 import sys
 sys.path.append('/Users/MStadler/Bioinformatics/Projects/Zelda/Quarantine_analysis/bin')
-from fitting import fitgaussian3d
+from fitting import fitgaussian3d, gaussian3d
 ############################################################################
 # General image processing functions
 ############################################################################
@@ -670,7 +671,7 @@ def load_pickle(filename):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, order='tzxy', figsize=6):
+def viewer(stacks, order='default', figsize=6):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -777,6 +778,8 @@ def viewer(stacks, order='tzxy', figsize=6):
     else:
         stack = stacks
         stacks = [stack]
+    if (order == 'default'):
+            order = 'ctzxy'[5-stacks[0].ndim:]
     main(order)
 
 ############################################################################
@@ -1459,13 +1462,12 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
     connected_mask[0] = maskstack[0]
     # Walk through subsequent frames, connecting them to previous frames.
     for n in range(1, maskstack.shape[0]):
-        print('frame ' + str(n))
+        print(n)
         newmask = maskstack[n]
         # Step sequentially backwards through frames, bound by max skip.
         for i in range(n-1, n-2-max_frames_skipped, -1):
             # Make sure the frame exists.
             if (i >= 0):
-                print(i)
                 # Make updated mask with connections to earlier frame.
                 mask_updated_thisframe = update_func(connected_mask[i], newmask)
                 # Only update objects that are connected in this frame but were NOT
@@ -1487,7 +1489,7 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
     return connected_mask
 
 ############################################################################
-def interpolate_nuclear_mask(mask, max_missing_frames):
+def interpolate_nuclear_mask(mask, max_missing_frames=2):
     """Fill-in frames of nuclear mask to compensate for dropout.
     
     So far all nuclear segmentation routines I've tried are susceptible to
@@ -1884,6 +1886,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
 
     # Go through each frame, attempt to connect each detected spot to previous spots.
     for t in range(1, len(input_data)):
+        print(t)
         frame_data = input_data[t]
         for this_spot_data in frame_data:
             this_spot_data = add_time_nuc(this_spot_data, t, nucmask)
@@ -1918,7 +1921,6 @@ def filter_spot_duration(connected_data, min_len):
 ############################################################################
 # Functions for analyzing segmented images
 ############################################################################
-
 def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scale=1):
     """Find mean volume within ellipsoid centered on spots, add to spot_info
 
@@ -1948,7 +1950,7 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
             Input dictionary with mean ellipsoid pixel values appended as an 
             additional column (9) to all entries.
     """
-    def ellipsoid_mean(coords, stack, meshgrid, ij_rad, z_rad):
+    def ellipsoid_mean(coords, stack, meshgrid, ij_rad=7, z_rad=2):
         """Define ellipsoid around point, return mean of pixel values in ellipsoid."""
         # Equation: (x-x0)^2 + (y-y0)^2 + a(z-z0)^2 = r^2
         r = ij_rad # r is just more intuitive for me to think about...
@@ -1964,9 +1966,13 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
     # Scale radii to pixels.
     ij_rad_pix = ij_rad / ij_scale
     z_rad_pix = z_rad / z_scale
+    num_processed = 0
     # Update data for each spot at each time point combination by adding column
     # with the sum of the pixel values within defined ellipses.
     for spot_id in spot_data:
+        num_processed = num_processed + 1
+        if (num_processed % 10 == 0):
+            print('Processed ' + str(num_processed))
         spot_array = spot_data[spot_id]
         # Initialize new array with extra column.
         new_array = np.ndarray((spot_array.shape[0], spot_array.shape[1] + 1))
@@ -1981,7 +1987,7 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
     return spot_data
 
 ############################################################################
-def add_gaussian_integration(spot_data, wlength_xy, wlength_z):
+def add_gaussian_integration(spot_data, wlength_xy=15, wlength_z=5):
     """Add a column to spot_data that integrates intensity from gaussian fit
     
     For each spot in spot_data, uses gaussian fit parameters (height and 
@@ -2001,10 +2007,12 @@ def add_gaussian_integration(spot_data, wlength_xy, wlength_z):
             y-width.
         wlength_xy: int
             Length of the sides of the window used for integration in the
-            lateral dimension. Must be an odd number.
+            lateral dimension. Must be an odd number. To harmonize with
+            volume integration, should be 2*ij_rad + 1.
         wlength_z: int
             Length of the sides of the window used for integration in the
-            axial dimension. Must be an odd number.
+            axial dimension. Must be an odd number. To harmonize with 
+            volume integration, should be 2*z_rad + 1.
             
     Returns:
         spot_data: dict of ndarrays
@@ -2024,7 +2032,7 @@ def add_gaussian_integration(spot_data, wlength_xy, wlength_z):
         z,x,y = np.indices((wlength_z, wlength_xy, wlength_xy))
         # Generate function to receive indexes and return values of gaussian 
         # function with given parameters
-        f = gaussian3d(h, center_z, center_xy, center_xy, width_z, width_x, width_y)
+        f = gaussian3d(center_z, center_xy, center_xy, h, width_z, width_x, width_y)
         # Generate window with intensity values from 3d gaussian function.
         vals = f(z,x,y)
         # Return mean pixel intensity of window.
