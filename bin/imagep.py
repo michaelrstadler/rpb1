@@ -1618,10 +1618,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
         ymin = max(0,peak[2] - xy_rad)
         ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
-        # Get adjustments in each direction — value to subtract from relative
-        # coordinates to center them at 0,0,0 in the window center.
-        z_adj, x_adj, y_adj = int((zmax-zmin)/2), int((xmax-xmin)/2), int((ymax-ymin)/2)
-        return data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj
+        return data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)]
     
     def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
@@ -1657,16 +1654,16 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         # Fit 3D gaussian in window surrounding each local maximum.
         fitparams = np.ndarray((0,7))
         for peak in peaks:
-            fitwindow, z_adj, x_adj, y_adj = get_fitwindow(substack, peak, fitwindow_rad_xy, 
+            fitwindow = get_fitwindow(substack, peak, fitwindow_rad_xy, 
                 fitwindow_rad_z)
             opt = fitgaussian3d(fitwindow)
             if opt.success:
                 peak_fitparams = opt.x
                 # Move center coordinates to match center of gaussian fit, ensure they're within image. 
                 # If they're outside the image, coordinate is assigned as the edge of the image.
-                peak_fitparams[0] = clamp(int(peak[0] + peak_fitparams[0] - z_adj), 0, substack.shape[-3]-1)
-                peak_fitparams[1] = clamp(int(peak[1] + peak_fitparams[1] - x_adj), 0, substack.shape[-2]-1)
-                peak_fitparams[2] = clamp(int(peak[2] + peak_fitparams[2] - y_adj), 0, substack.shape[-1]-1)
+                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] - fitwindow_rad_z), 0, substack.shape[-3]-1)))
+                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] - fitwindow_rad_xy), 0, substack.shape[-2]-1)))
+                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] - fitwindow_rad_xy), 0, substack.shape[-1]-1)))
                 fitparams = np.vstack((fitparams, peak_fitparams))
             # If fit fails, add dummy entry for spot.
             else:
