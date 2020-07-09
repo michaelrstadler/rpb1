@@ -33,6 +33,17 @@ import czifile
 import sys
 sys.path.append('/Users/MStadler/Bioinformatics/Projects/Zelda/Quarantine_analysis/bin')
 from fitting import fitgaussian3d, gaussian3d
+
+############################################################################
+# Classes
+############################################################################
+class movie():
+    # Class attributes    
+    # Initializer
+    def __init__(self, nucmask, spot_data):
+        self.nucmask = nucmask
+        self.spot_data = spot_data
+
 ############################################################################
 # General image processing functions
 ############################################################################
@@ -408,6 +419,30 @@ def relabel_labelmask(labelmask, preserve_order=True):
             mask[labelmask == old_label] = obj_num
             obj_num = obj_num + 1
     return mask
+
+############################################################################
+def sortfreq(x, descending=True):
+    """Sort the items of a list by the frequency with which they occur
+    
+    Args:
+        x: list-like
+            List-like object to sort
+        descending: bool
+            If true, most frequent list item appears first.
+    
+    Returns:
+        items_sorted: array
+            List of items from original array sorted by frequency  
+    """
+    # Get unique items from list and their frequencies of occurence (counts).
+    items, counts = np.unique(x, return_counts=True)
+    # Get ordered indexes by sorting counts.
+    if (descending):
+        ordered_indexes = np.argsort(counts)[::-1]
+    else:
+        ordered_indexes = np.argsort(counts)
+    # Sort item list by ordered indexes.
+    return items[ordered_indexes]
 
 ############################################################################
 # Function implementing filters
@@ -2048,6 +2083,119 @@ def add_gaussian_integration(spot_data, wlength_xy=15, wlength_z=5):
         spot_data[spot_id] = new_array
     return spot_data
 
+############################################################################
+def stitch_ms2(mv1, mv2):
+    """Stitch two MS2 movies together across a focus break
+    
+    Connect two confocal MS2 movies together that are separated by a 
+    re-focusing break. First connects nuclear masks, then connects spots
+    based on nuclear ID (spots in the same nucleus are connected).
+    
+    Args:
+        mv1: movie object
+            First object of movie class with nucmask and spot_data features
+        mv2: movie object
+            Second object of movie class. Nucleus and spot IDs will be updated
+            to match those of mv1
+    
+    Returns:
+        mv_stitched: movie object
+            Movie object with nucmask and spot_data from mv1 and mv2 stitched
+            together
+    """
+    
+    def update_nucleus_id(data, mask):
+        """Update the nuclear ID field of a spot data array based on spot 
+        coordinates and updated nuclear mask."""
+        for i in range(0, data.shape[0]):
+            coords = tuple([int(data[i,0]), int(data[i,2]), int(data[i,3]), 
+                int(data[i,4])])
+            nuc = mask[coords]
+            data[i,1] = nuc
+            
+    def link_nuc_spots(data):
+        """Link nuclei to spots. Make dictionary with nucleus ID as key and 
+        spot ID as value."""
+        links = {}
+        for spot in data:
+            # Find modal nuclear ID for the spot.
+            nucs = sortfreq(data[spot][:,1])
+            if (nucs[0] != 0):
+                nuc_id = int(nucs[0])
+                if (nuc_id not in links):
+                    links[nuc_id] = spot
+                # If nuc already has a spot, select spot with longest trajectory.
+                else:
+                    curr_spot_id = links[nuc_id]
+                    len_curr_spot = len(data[curr_spot_id][:,1])
+                    len_this_spot = len(data[spot][:,1])
+                    if (len_this_spot > len_curr_spot):
+                        links[nuc_id] = int(spot)
+        return links
+    
+    # Main.
+    
+    ### Connect nuclei ###
+    
+    # Merge last two frames of mv1 and first two frames of mv2 to account for 
+    # potential dropout.
+    end1 = mv1.nucmask[-2:].max(axis=0)
+    start2 = mv2.nucmask[0:2].max(axis=0)
+    # Update labels from mv2 to match those of mv1
+    updated_mask2 = update_labels(end1, start2)
+    
+    # Generate an update table for old (mv2) to new (mv1) nuc IDs
+    convert = {}
+    for old in np.unique(start2)[1:]:
+        new = np.unique(updated_mask2[start2 == old])[0]
+        if (new != 0):
+            convert[old] = int(new)
+
+    # Update nucmask of mv2 with new labels, stitch mv1 and mv2 masks together.
+    labels = list(np.unique(mv1.nucmask))
+    newmask = np.zeros_like(mv2.nucmask)
+    for old in np.unique(mv2.nucmask)[1:]:
+        if (old in convert):
+            newmask[mv2.nucmask == old] = convert[old]
+        else:
+            new_id = max(labels) + 1
+            newmask[mv2.nucmask == old] = new_id
+            labels.append(new_id)
+    nucmask_stitched = np.vstack((mv1.nucmask, newmask))
+    
+    ### Connect spots ###
+    
+    # Make dict of nucleus-spot connections in mv1.
+    mv1_nuc_spot_links = link_nuc_spots(mv1.spot_data)
+    # Get t (frame) number to adjust by.
+    t_adjust = mv1.nucmask.shape[0]
+    # Initialize stitched data with mv1 data.
+    spot_data_stitched = mv1.spot_data.copy()
+    # Keep track of spot_ids used.
+    spot_ids = list(mv1.spot_data.keys())
+    
+    # For each spot in mv2, either connect to a spot in mv1 or initialize as new spot.
+    for spot in mv2.spot_data:
+        data = np.copy(mv2.spot_data[spot])
+        # Update time.
+        data[:,0] = data[:,0] + t_adjust
+        # Update nucleus ID using new mask (in place).
+        update_nucleus_id(data, nucmask_stitched)
+        # Get modal nucleus.
+        nucs = sortfreq(data[:,1])
+        nuc_id = int(nucs[0])
+        # If linked to an mv1 spot, merge data for spot.
+        if nuc_id in mv1_nuc_spot_links:
+            linked_spot_id = mv1_nuc_spot_links[nuc_id]
+            spot_data_stitched[linked_spot_id] = np.vstack((mv1.spot_data[linked_spot_id], data))
+        # If unlinked, make a new spot.
+        else:
+            new_spot_id = max(spot_ids) + 1
+            spot_data_stitched[new_spot_id] = data
+            spot_ids.append(new_spot_id)
+    
+    mv_stitched = movie(nucmask_stitched, spot_data_stitched)
+    return mv_stitched
 
 
 
