@@ -26,6 +26,7 @@ from skimage.measure import label, regionprops
 from scipy.spatial import distance
 import pickle
 import czifile
+import pandas as pd
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
@@ -40,9 +41,29 @@ from fitting import fitgaussian3d, gaussian3d
 class movie():
     # Class attributes    
     # Initializer
-    def __init__(self, nucmask, spot_data):
+    def make_spot_table(self, colnum):
+        """"""
+        nframes = self.nucmask.shape[0]
+        data = {}
+        for spot in self.spot_data:
+            arr = self.spot_data[spot]
+            vals = np.empty(nframes)
+            vals.fill(np.nan)
+            for i in range(0, len(arr)):
+                t = int(arr[i,0])
+                val = arr[i,colnum]
+                vals[t] = val
+            data[spot] = vals
+        return pd.DataFrame(data)
+    
+    def __init__(self, stack, nucmask, fits, spot_data):
+        self.stack = stack
         self.nucmask = nucmask
+        self.fits = fits
         self.spot_data = spot_data
+        self.intvol = self.make_spot_table(9)
+        self.intfit = self.make_spot_table(10)
+        self.prot = self.make_spot_table(11)
 
 ############################################################################
 # General image processing functions
@@ -972,7 +993,79 @@ def quickview_ms2(stack, spot_data, channel=0):
     viewer(boxes.max(axis=1), 'txy', 15)
 
 ############################################################################
+def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, view=True):
+    """Make image stack for viewing MS2 spot raw data
+    
+    Given spot coordinates and original movie, builds an image stack with 
+    spot ID on the first dimension and raw data centered on the spot in the
+    remaining three. Has the slightly strange behavior that if the viewing 
+    window will run off the edge of the image, the center of the window is
+    "nudged" into the image to avoid this. Spots near the edge may thus be
+    displaced from the center.
+    
+    Args:
+        stack: ndarray
+            5-D image stack [c,t,z,x,y]
+        spot_data: dict of ndarrays
+            Data containing tracking of spots detected. Dict entries are unique 
+            spot IDs (numeric 1...), rows of ndarray are detections of the spot 
+            in a single frame. Required columns: 5: gaussian fit height, 6: 
+            gaussian fit z-width, 7: gaussian fit x-width, 8: gaussian fit 
+            y-width.
+        channel: int
+            Channel from which to use data
+        len_ij: int
+            Length (in pixels) of the box to collect around each spot in the 
+            lateral (ij) dimension.
+        len_z: int
+            Length (in pixels) of the box to collect around each spot in the 
+            axial (z) dimension.
+        view: bool
+            If true, calls viewer function on the resulting stack using a max 
+            projection on Z dimension (order spot_ID-t-x-y)
+            
+    Returns:
+        movies: ndarray
+            5D image stack of input data centered around each spot. In order 
+            [spot_id, t,z,x,y]
+    """
+    def nudge(x, dimsize, rad):
+        """If needed, move center away from image edges to avoid running off."""
+        lim = int(dimsize - 1)
+        nudged_x = x
+        if ((x - rad) < 0):
+            nudged_x = rad
+        if ((x + rad) > lim):
+            nudged_x = lim - rad
+        return int(nudged_x)
+    # Check that window dimensions are appropriate.
+    if ((len_ij % 2 == 0) or (len_z % 2 == 0)):
+        raise ValuError('len_ij and len_z must be odd')
+    # Define 'radii' for window (distance to go from home pixel in each direction).
+    z_rad = int((len_z - 1) / 2)
+    ij_rad = int((len_ij - 1) / 2)
+    # Initialize movies as a zeros array.
+    movies = np.zeros((len(spot_data)+1, stack.shape[1], len_z, len_ij, len_ij))
+    # Add data for each spot.
+    for spot in spot_data:
+        arr = spot_data[spot]
+        for row in arr:
+            t = int(row[0])
+            z,i,j = row[2:5]
+            z = nudge(z, stack.shape[-3], z_rad)
+            i = nudge(i, stack.shape[-2], ij_rad)
+            j = nudge(j, stack.shape[-1], ij_rad)
+            frame = stack[channel, t, (z-z_rad):(z+z_rad+1), (i-ij_rad):(i+ij_rad+1), (j-ij_rad):(j+ij_rad+1)]
+            movies[spot, t] = frame
+    # If viewer call specified, call with mean (sum) Z-projection.
+    if(view):
+        viewer(movies.mean(axis=2), 'itxy')
+    return movies
+
+############################################################################    
+############################################################################
 # Functions for segmenting images
+############################################################################
 ############################################################################
 
 def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
@@ -1951,8 +2044,11 @@ def filter_spot_duration(connected_data, min_len):
     return filtered_data
 
 ############################################################################
+############################################################################
 # Functions for analyzing segmented images
 ############################################################################
+############################################################################
+
 def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scale=1):
     """Find mean volume within ellipsoid centered on spots, add to spot_info
 
@@ -2133,6 +2229,14 @@ def stitch_ms2(mv1, mv2):
                         links[nuc_id] = int(spot)
         return links
     
+    def stitch_stacks(stack1, stack2):
+        """Put two [ctzxy] stacks together (arbitrary number of channels)"""
+        stack_stitched = np.vstack((stack1[0], stack2[0]))
+        for i in range(1, stack1.shape[0]):
+            channel_stitched = np.vstack((stack1[i], stack2[i]))
+            stack_stitched = np.stack((stack_stitched, channel_stitched))
+        return stack_stitched
+
     # Main.
     
     ### Connect nuclei ###
@@ -2194,8 +2298,76 @@ def stitch_ms2(mv1, mv2):
             spot_data_stitched[new_spot_id] = data
             spot_ids.append(new_spot_id)
     
-    mv_stitched = movie(nucmask_stitched, spot_data_stitched)
+    fits_stitched = mv1.fits + mv2.fits
+    stack_stitched = stitch_stacks(mv1.stack, mv2.stack)
+    mv_stitched = movie(stack_stitched, nucmask_stitched, fits_stitched, spot_data_stitched)
     return mv_stitched
 
+############################################################################
+def align_traces(df, locs, window_size=11, include_nan=True):
+    """Align MS2 traces around selected frames
+    
+    For use in triggered averaging. Takes a dataframe of trace data and a 
+    list of spot IDs and frame numbers, makes a panda dataframe of the trace
+    data centered on the indicated frames.
+    
+    Args:
+        df: pandas dataframe
+            Trace data for MS2 spots. Spot IDs are columns and rows are time 
+            points
+        locs: list of 2-item lists
+            Each list entry is a spot-frame pair to align. Each entry is
+            a 2-item list, with the spot ID in the 0 position and the frame
+            number in the 1.
+        window_size: int
+            Size of the windows to be aligned (in number of frames). Must be 
+            an odd number.
+    
+    Returns:
+        data: pandas dataframe
+            Aligned trace data, rows are individual alignment points and columns
+            are time points.
+    """
+    # Check that window size is appropriate.
+    max_frame = df.shape[0] - 1
+    if (window_size % 2 == 0):
+        raise ValueError("window_size must be odd.")
+    if ((window_size - 1) >= max_frame):
+        raise ValueError("window_size larger than number of frames.")
+    
+    # Get number of frames to "extend" on either side of reference time point
+    # and make a list to store each aligned segment.
+    extend_len = int((window_size - 1) / 2)
+    data = []
+    
+    for item in locs:
+        spot = item[0]
+        loc = item[1]
+        # If the window extends past 0 on the left, pad beginning with nans.
+        if ((loc - extend_len) < 0):
+            nan_len = abs(loc - extend_len)
+            nans = pd.Series(np.repeat(np.nan, nan_len))
+            after_nans = df[spot][0:(loc + extend_len + 1)]
+            vals = nans.append(after_nans)
+            vals.index = range(0, window_size)
+            vals.name = spot
+            data.append(vals)
+        # If the window extends past the last frame on the right, pad with trailing
+        # nans.
+        elif((loc + extend_len) > max_frame):
+            nan_len = (loc + extend_len) - max_frame
+            nans = pd.Series(np.repeat(np.nan, nan_len))
+            before_nans = df[spot][(loc - extend_len):(max_frame + 1)]
+            vals = before_nans.append(nans)
+            vals.index = range(0, window_size)
+            vals.name = spot
+            data.append(vals)
+        # Otherwise slice spot data and append to list.
+        else:
+            vals = df[spot][(loc - extend_len):(loc + extend_len + 1)]
+            vals.index = range(0, window_size)
+            data.append(vals)
+    
+    return pd.DataFrame(data)
 
 
