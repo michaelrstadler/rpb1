@@ -1737,6 +1737,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
+    print('Hi! Im new2!')
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
         window around a point"""
@@ -1789,9 +1790,14 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
                 peak_fitparams = opt.x
                 # Move center coordinates to match center of gaussian fit, ensure they're within image. 
                 # If they're outside the image, coordinate is assigned as the edge of the image.
-                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] - fitwindow_rad_z), 0, substack.shape[-3]-1)))
-                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] - fitwindow_rad_xy), 0, substack.shape[-2]-1)))
-                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] - fitwindow_rad_xy), 0, substack.shape[-1]-1)))
+                # Because fit windows are truncated around image edges, need to get actual dimensions of fit window
+                # to do proper adjustments
+                fitwindow_rad_z_actual = int(fitwindow.shape[0] / 2)
+                fitwindow_rad_x_actual = int(fitwindow.shape[1] / 2)
+                fitwindow_rad_y_actual = int(fitwindow.shape[2] / 2)
+                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] - fitwindow_rad_z_actual), 0, substack.shape[-3]-1)))
+                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] - fitwindow_rad_x_actual), 0, substack.shape[-2]-1)))
+                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] - fitwindow_rad_y_actual), 0, substack.shape[-1]-1)))
                 fitparams = np.vstack((fitparams, peak_fitparams))
             # If fit fails, add dummy entry for spot.
             else:
