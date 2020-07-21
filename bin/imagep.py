@@ -1737,17 +1737,35 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
-    print('Hi! Im new2!')
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
         window around a point"""
-        zmin = max(0,peak[0] - z_rad)
+        
+        # Set the start points for windows and "adjust" them if they get 
+        # to negative numbers.
+        zmin = peak[0] - z_rad
+        xmin = peak[1] - xy_rad
+        ymin = peak[2] - xy_rad
+        # Initialize adjustments
+        z_adj = -z_rad
+        x_adj = -xy_rad
+        y_adj = -xy_rad
+        # Update mins and adjustments if windows start at negative coordinates.
+        if (zmin < 0):
+            zmin = 0
+            z_adj = -peak[0]
+        if (xmin < 0):
+            xmin = 0
+            x_adj = -peak[1]
+        if (ymin < 0):
+            ymin = 0
+            y_adj = -peak[2]
+
         zmax = min(data.shape[0] - 1, peak[0] + z_rad)
-        xmin = max(0,peak[1] - xy_rad)
         xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
-        ymin = max(0,peak[2] - xy_rad)
         ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
-        return data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)]
+
+        return (data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj)
     
     def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
@@ -1771,7 +1789,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z):
         """Perform 3D gaussian fitting on a 3D image stack."""
-        
+
         # Filter and background subtract image.
         dog = dog_filter(substack, sigma_small, sigma_big)
         bg = ndi.filters.minimum_filter(dog, bg_radius)
@@ -1783,21 +1801,16 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         # Fit 3D gaussian in window surrounding each local maximum.
         fitparams = np.ndarray((0,7))
         for peak in peaks:
-            fitwindow = get_fitwindow(substack, peak, fitwindow_rad_xy, 
+            fitwindow, z_adj, x_adj, y_adj = get_fitwindow(substack, peak, fitwindow_rad_xy, 
                 fitwindow_rad_z)
             opt = fitgaussian3d(fitwindow)
             if opt.success:
                 peak_fitparams = opt.x
                 # Move center coordinates to match center of gaussian fit, ensure they're within image. 
                 # If they're outside the image, coordinate is assigned as the edge of the image.
-                # Because fit windows are truncated around image edges, need to get actual dimensions of fit window
-                # to do proper adjustments
-                fitwindow_rad_z_actual = int(fitwindow.shape[0] / 2)
-                fitwindow_rad_x_actual = int(fitwindow.shape[1] / 2)
-                fitwindow_rad_y_actual = int(fitwindow.shape[2] / 2)
-                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] - fitwindow_rad_z_actual), 0, substack.shape[-3]-1)))
-                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] - fitwindow_rad_x_actual), 0, substack.shape[-2]-1)))
-                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] - fitwindow_rad_y_actual), 0, substack.shape[-1]-1)))
+                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] + z_adj), 0, substack.shape[-3]-1)))
+                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] + x_adj), 0, substack.shape[-2]-1)))
+                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] + y_adj), 0, substack.shape[-1]-1)))
                 fitparams = np.vstack((fitparams, peak_fitparams))
             # If fit fails, add dummy entry for spot.
             else:
@@ -1823,7 +1836,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     return fit_data
 
 ############################################################################
-def filter_ms2fits(stack, fit_data, h_stringency=1, xy_max_width=15):
+def filter_ms2fits(stack, fit_data, h_stringency=0, xy_max_width=15):
     """Filter MS2 spot fit data based on fit parameters
     
     Select spots that have a minimum fit height (intensity) and a maximum 
