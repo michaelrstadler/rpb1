@@ -1479,7 +1479,7 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
     return labelmask
 
 ############################################################################
-def segment_nuclei3D_monolayer_rbp1(stack, sigma1=3, sigma_dog_big=15, 
+def segment_nuclei3D_monolayer_rpb1(stack, sigma1=3, sigma_dog_big=15, 
         sigma_dog_small=5, seed_window=(30,30), min_seed_dist=25, 
         dilation_length=5, dilation_length_foci=10, size_min=0, 
         circularity_min=0, size_max=np.inf, display=False):
