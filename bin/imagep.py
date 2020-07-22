@@ -993,15 +993,14 @@ def quickview_ms2(stack, spot_data, channel=0):
     viewer(boxes.max(axis=1), 'txy', 15)
 
 ############################################################################
-def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, view=True):
+def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=True):
     """Make image stack for viewing MS2 spot raw data
     
     Given spot coordinates and original movie, builds an image stack with 
     spot ID on the first dimension and raw data centered on the spot in the
-    remaining three. Has the slightly strange behavior that if the viewing 
-    window will run off the edge of the image, the center of the window is
-    "nudged" into the image to avoid this. Spots near the edge may thus be
-    displaced from the center.
+    remaining three. In cases where the window exceeds the boundaries of the
+    image, the remaining portions of the frame will be filled by the value
+    specified by fill.
     
     Args:
         stack: ndarray
@@ -1020,6 +1019,8 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, view=True):
         len_z: int
             Length (in pixels) of the box to collect around each spot in the 
             axial (z) dimension.
+        fill: numeric
+            Value to fill in regions that exceed the boundaries of the image
         view: bool
             If true, calls viewer function on the resulting stack using a max 
             projection on Z dimension (order spot_ID-t-x-y)
@@ -1029,15 +1030,27 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, view=True):
             5D image stack of input data centered around each spot. In order 
             [spot_id, t,z,x,y]
     """
-    def nudge(x, dimsize, rad):
-        """If needed, move center away from image edges to avoid running off."""
-        lim = int(dimsize - 1)
-        nudged_x = x
-        if ((x - rad) < 0):
-            nudged_x = rad
-        if ((x + rad) > lim):
-            nudged_x = lim - rad
-        return int(nudged_x)
+    def adjust_coords(c, rad, frame_max, stack_max):
+        """Adjusts coordinates to account for spots located at the edge of the 
+        stack such that the window will cross the boundary of the image. 
+        For a given axis, returns both the minimum and max coordinate
+        for slicing the stack and the min and max coordinates for the position
+        in the frame to which to assign this slice."""
+
+        # Initialize coordinate and frame boundaries.
+        cmin = int(c - rad)
+        cmax = int(c + rad)
+        frame_min = 0
+
+        # Correct for cases where bounds of the stack are exceeded.
+        if (cmin < 0):
+            frame_min = -1 * cmin
+            cmin = 0
+        if (cmax > stack_max):
+            frame_max = frame_max - (cmax - stack_max)
+            cmax = stack_max
+        return cmin, cmax, frame_min, frame_max
+
     # Check that window dimensions are appropriate.
     if ((len_ij % 2 == 0) or (len_z % 2 == 0)):
         raise ValuError('len_ij and len_z must be odd')
@@ -1050,16 +1063,24 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, view=True):
     for spot in spot_data:
         arr = spot_data[spot]
         for row in arr:
+            # Get t,z,x,y coordinates for spot.
             t = int(row[0])
             z,i,j = row[2:5]
-            z = nudge(z, stack.shape[-3], z_rad)
-            i = nudge(i, stack.shape[-2], ij_rad)
-            j = nudge(j, stack.shape[-1], ij_rad)
-            frame = stack[channel, t, (z-z_rad):(z+z_rad+1), (i-ij_rad):(i+ij_rad+1), (j-ij_rad):(j+ij_rad+1)]
+            # Initialize frame.
+            frame = np.empty((len_z, len_ij, len_ij))
+            frame.fill(fill)
+            # Get the min and max values for each coordinate with reference to the stack and the
+            # coordinates in the frame that they will replace.
+            zmin, zmax, frame_zmin, frame_zmax = adjust_coords(z, z_rad, len_z - 1, stack.shape[-3]-1)
+            imin, imax, frame_imin, frame_imax = adjust_coords(i, ij_rad, len_ij - 1, stack.shape[-2]-1)
+            jmin, jmax, frame_jmin, frame_jmax = adjust_coords(j, ij_rad, len_ij - 1, stack.shape[-1]-1)
+            # Update frame from stack and assign to movies.
+            frame[frame_zmin:(frame_zmax+1), frame_imin:(frame_imax+1), frame_jmin:(frame_jmax+1)] = stack[channel, t, zmin:(zmax+1), imin:(imax+1), jmin:(jmax+1)]
             movies[spot, t] = frame
     # If viewer call specified, call with mean (sum) Z-projection.
     if(view):
-        viewer(movies.mean(axis=2), 'itxy')
+        #viewer(movies.mean(axis=2), 'itxy')
+        viewer(np.nanmean(movies, axis=2), 'itxy')
     return movies
 
 ############################################################################    
@@ -1739,14 +1760,16 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     """
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
-        window around a point"""
+        window around a point and the coordinate adjustments necessary
+        to convert window coordinates to coordinates in the original image"""
         
         # Set the start points for windows and "adjust" them if they get 
         # to negative numbers.
         zmin = peak[0] - z_rad
         xmin = peak[1] - xy_rad
         ymin = peak[2] - xy_rad
-        # Initialize adjustments
+        # Initialize adjustments to values that are correct if no edge problems 
+        # are encountered.
         z_adj = -z_rad
         x_adj = -xy_rad
         y_adj = -xy_rad
@@ -1761,6 +1784,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             ymin = 0
             y_adj = -peak[2]
 
+        # Get end points, constained by max coordinate in data.
         zmax = min(data.shape[0] - 1, peak[0] + z_rad)
         xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
         ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
