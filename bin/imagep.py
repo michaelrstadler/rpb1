@@ -35,6 +35,13 @@ import sys
 sys.path.append('/Users/MStadler/Bioinformatics/Projects/Zelda/Quarantine_analysis/bin')
 from fitting import fitgaussian3d, gaussian3d
 
+
+"""
+To fix:
+    -interpolate_nuclear_mask: ensure interpolated coordinates are within image.
+
+"""
+
 ############################################################################
 # Classes
 ############################################################################
@@ -975,7 +982,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     return boxstack   
 
 ############################################################################
-def quickview_ms2(stack, spot_data, channel=0):
+def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -987,10 +994,18 @@ def quickview_ms2(stack, spot_data, channel=0):
             in a single frame. Time must be column 0, [z,x,y] in columns 2:4.
         channel: int
             Channel (dimension 0) to be viewed
+        spot_id: int 
+            (optional) ID of spot to box. Default boxes all detected spots.
+        figsize: int
+            Size of figure to display via viewer
     """
+    if (spot_id == 'all'):
+        data = spot_data.copy()
+    else:
+        data = {spot_id:spot_data[spot_id]}
     substack = stack[channel]
-    boxes = box_spots(substack, spot_data, halfwidth_xy=6, linewidth=2)
-    viewer(boxes.max(axis=1), 'txy', 15)
+    boxes = box_spots(substack, data, halfwidth_xy=6, linewidth=2)
+    viewer(boxes.max(axis=1), 'txy', figsize)
 
 ############################################################################
 def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=True):
@@ -1802,6 +1817,7 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
         interp_coords = tuple([np.repeat(frame, np.count_nonzero(obj_bool))])
         # For remaining dimensions, use centroid difference to "move" pixels of nucleus
         # from before frame to the interpolated position.
+        ###### Need a check that interp_coords are within the image ##########
         for i in range(0, len(centroid_diff)):
             interp_coords = interp_coords + tuple([coords[i+1][obj_bool] + centroid_diff[i]])
         # Update newmask in place.
