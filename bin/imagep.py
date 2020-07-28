@@ -38,7 +38,6 @@ from fitting import fitgaussian3d, gaussian3d
 
 """
 To fix:
-    -interpolate_nuclear_mask: ensure interpolated coordinates are within image.
 
 """
 
@@ -1073,7 +1072,7 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, vi
     z_rad = int((len_z - 1) / 2)
     ij_rad = int((len_ij - 1) / 2)
     # Initialize movies as a zeros array.
-    movies = np.zeros((len(spot_data)+1, stack.shape[1], len_z, len_ij, len_ij))
+    movies = np.zeros((max(spot_data)+1, stack.shape[1], len_z, len_ij, len_ij))
     # Add data for each spot.
     for spot in spot_data:
         arr = spot_data[spot]
@@ -1626,7 +1625,6 @@ def segment_nuclei_4dstack(stack, seg_func, **kwargs):
         print(n)
         frame = seg_func(stack[n], **kwargs)
         labelmask = np.vstack((labelmask, [frame]))
-    
     return labelmask
 
 ############################################################################
@@ -1813,13 +1811,17 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
             centroid_diff = centroid_diff + ([mean_centroid[i] - centroid_before[i]])
         # Make a boolean for all the coordinates in the before frame.
         obj_bool = coords[0] == frame_before
-        # Assign the frame number to the first position for all interpolated coordinates.
+        # Assign the frame number to the first position (time) for all interpolated coordinates.
         interp_coords = tuple([np.repeat(frame, np.count_nonzero(obj_bool))])
         # For remaining dimensions, use centroid difference to "move" pixels of nucleus
         # from before frame to the interpolated position.
-        ###### Need a check that interp_coords are within the image ##########
         for i in range(0, len(centroid_diff)):
             interp_coords = interp_coords + tuple([coords[i+1][obj_bool] + centroid_diff[i]])
+        # Fix out-of bounds coordinates.
+        for i in range(1,4):
+            maxdim = newmask.shape[-i] - 1
+            interp_coords[-i][interp_coords[-i] < 0] = 0
+            interp_coords[-i][interp_coords[-i] > maxdim] = maxdim
         # Update newmask in place.
         newmask[interp_coords] = label
 
