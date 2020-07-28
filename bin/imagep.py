@@ -1875,7 +1875,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             Each entry in the list is a time point (frame). Each row in
             array is a fit (a single local maxima), columns are: 0: center 
             z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
-            3: width_z, 4: fit_height, 5: width_x, 6: width_y). Coordinates 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y). Coordinates 
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
@@ -1981,27 +1981,22 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     return fit_data
 
 ############################################################################
-def filter_ms2fits(stack, fit_data, h_stringency=0, xy_max_width=15):
+def filter_ms2fits(fit_data, peakiness=4.5):
     """Filter MS2 spot fit data based on fit parameters
     
-    Select spots that have a minimum fit height (intensity) and a maximum 
-    lateral (xy) width.
+    Select spots based on "peakiness", measured as the ratio of the height
+    to width of the fit. Currently uses the mean of the x- and y-widths.
     
     Args:
-        stack: ndarray
-            4D imaging stack [t,z,x,y] that the fitting was performed on
         fit_data: list of ndarrays
             Each entry in list is a distinct frame (in time), rows in array
             are individual spot fits and columns are 0: center 
             z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
-            3: width_z, 4: fit_height, 5: width_x, 6: width_y.
-        h_stringency: numeric
-            Determines minimum fit height cutoff, expressed as the number
-            of standard deviations above the mean for the entire stack.
-        xy_max_width: numeric
-            Maximum width (in pixels) of the mean of the x and y widths of
-            the fit
-    
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
+        peakiness: numeric
+            Spots whose log (natural) ratio of height to width exceeds this
+            are kept.
+            
     Returns:
         fit_data: list of ndarrays
             Input data, retaining only rows that pass filter.  
@@ -2010,13 +2005,10 @@ def filter_ms2fits(stack, fit_data, h_stringency=0, xy_max_width=15):
     fit_data = fit_data.copy()
     for t in range(0, len(fit_data)):
         frame_data = fit_data[t]
-        # Define threshold for height.
-        mean_ = np.mean(stack[t])
-        std = np.std(stack[t])
-        h_thresh = mean_ + (std * h_stringency)
-        # Filter array based on min height and max width.
-        frame_data_filtered = frame_data[(frame_data[:,3] >= h_thresh) &
-                    (np.mean(frame_data[:,5:7], axis=1) < xy_max_width),:]
+        xy_width_means = np.mean(frame_data[:,5:7], axis=1)
+        peak_heights = frame_data[:,3]
+        spot_peakiness = np.log(peak_heights / xy_width_means)
+        frame_data_filtered = frame_data[spot_peakiness > peakiness,:]
         fit_data[t] = frame_data_filtered
     return fit_data
 
@@ -2035,7 +2027,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
             Each entry in list is a distinct frame (in time), rows in array
             are individual detected spots and columns are 0: center 
             z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
-            3: width_z, 4: fit_height, 5: width_x, 6: width_y.
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
         nucmask: ndarray
             4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
             background (not a nucleus) and nuclei have integer labels.
