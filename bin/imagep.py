@@ -47,12 +47,13 @@ To fix:
 class movie():
     # Class attributes    
     # Initializer
-    def make_spot_table(self, colnum):
+    @staticmethod
+    def make_spot_table(spot_data, nucmask, colnum):
         """"""
-        nframes = self.nucmask.shape[0]
+        nframes = nucmask.shape[0]
         data = {}
-        for spot in self.spot_data:
-            arr = self.spot_data[spot]
+        for spot in spot_data:
+            arr = spot_data[spot]
             vals = np.empty(nframes)
             vals.fill(np.nan)
             for i in range(0, len(arr)):
@@ -67,9 +68,9 @@ class movie():
         self.nucmask = nucmask
         self.fits = fits
         self.spot_data = spot_data
-        self.intvol = self.make_spot_table(9)
-        self.intfit = self.make_spot_table(10)
-        self.prot = self.make_spot_table(11)
+        self.intvol = movie.make_spot_table(self.spot_data, self.nucmask, 9)
+        self.intfit = movie.make_spot_table(self.spot_data, self.nucmask, 10)
+        self.prot = movie.make_spot_table(self.spot_data, self.nucmask, 11)
 
 ############################################################################
 # General image processing functions
@@ -153,6 +154,11 @@ def local_max(img, size=(70,100,100)):
     first run a maximum filter, then define pixels in the original image 
     whose value is equal to the max-filter result at the same positions as
     local maximum pixels. Returns a binary mask of such pixels.
+
+    NOTE: because the size is the length of the side in the filter, objects
+    that are n/2 pixels apart will both be declared as maxes (for size of
+    101, max window extends 50 pixels in each direction, peaks spaced 51 
+    pixels apart will each be maxes.)
     
     Args:
         img: ndarray
@@ -789,9 +795,9 @@ def viewer(stacks, order='default', figsize=6):
     # Make a dropdown widget for selecting the colormap.
     def _make_cmap_dropdown():
         dropdown = Dropdown(
-            options={'viridis', 'plasma', 'magma', 'inferno','cividis',
-                'Greens', 'Reds', 'gray', 'gray_r', 'prism'},
-            value='viridis',
+            options={'Greens', 'Reds', 'viridis', 'plasma', 'magma', 'inferno','cividis', 
+            'gray', 'gray_r', 'prism'},
+            value='Greens',
             description='Color',
         )
         return dropdown
@@ -1003,7 +1009,7 @@ def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12):
     else:
         data = {spot_id:spot_data[spot_id]}
     substack = stack[channel]
-    boxes = box_spots(substack, data, halfwidth_xy=6, linewidth=2)
+    boxes = box_spots(substack, data, halfwidth_xy=8, linewidth=2)
     viewer(boxes.max(axis=1), 'txy', figsize)
 
 ############################################################################
@@ -1310,8 +1316,10 @@ def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, s
         sigma_dog_big: int
             Larger sigma for DoG filter used as input to gradient for watershed
         seed_window: tuple of three ints
-            Size in [z, x, y] for window for determining local maxes in distance
-            transform. Generally want size to be ~ size of nuclei.
+            Size in [x, y] for window for determining local maxes in distance
+            transform. Generally want size to be a little less than 2x the distance
+            between nuclear centers. Centers closer than this will not produce two
+            seeds.
         erosion_length: int
             Size in x and y of structuring element for erosion of initial mask.
         dilation_length: int
@@ -1426,8 +1434,10 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
         sigma_dog_big: int
             Larger sigma for DoG filter used to create initial mask
         seed_window: tuple of three ints
-            Size in [z, x, y] for window for determining local maxes in distance
-            transform. Generally want size to be ~ size of nuclei.
+            Size in [x, y] for window for determining local maxes in distance
+            transform. Generally want size to be a little less than 2x the distance
+            between nuclear centers. Centers closer than this will not produce two
+            seeds.
         min_seed_dist: numeric
             The minimum euclidean distance (in pixels) allowed between watershed
             seeds. Typically set as ~the diameter of the nuclei.
@@ -1514,9 +1524,11 @@ def segment_nuclei3D_monolayer_rpb1(stack, sigma1=3, sigma_dog_big=15,
             Smaller sigma for DoG filter used to create initial mask
         sigma_dog_big: int
             Larger sigma for DoG filter used to create initial mask
-        seed_window: tuple of three ints
-            Size in [z, x, y] for window for determining local maxes in distance
-            transform. Generally want size to be ~ size of nuclei.
+        seed_window: tuple of two ints
+            Size in [x, y] for window for determining local maxes in distance
+            transform. Generally want size to be a little less than 2x the distance
+            between nuclear centers. Centers closer than this will not produce two
+            seeds.
         min_seed_dist: numeric
             The minimum euclidean distance (in pixels) allowed between watershed
             seeds. Typically set as ~the diameter of the nuclei.
@@ -1843,7 +1855,7 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
     return newmask
 
 ############################################################################
-def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5, 
+def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5, 
                    sigma_big=4, bg_radius=4, fitwindow_rad_xy=5, 
                    fitwindow_rad_z=9):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
@@ -1854,9 +1866,10 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     Args:
         stack: ndarray
             4D image stack [t,z,x,y] containing MS2 spots
-        peak_window_size: tuple of three ints
-            Size in [z,x,y] of window used to find local maxima. Typically
-            set to the approximage dimensions of nuclei.
+        min_distances: tuple of three ints
+            Minimum distance (in pixels) allowed between spots for them to be
+            counted as distinct spots. Minimum distance supplied for each 
+            dimension.
         sigma_small: numeric
             Lower sigma for difference-of-gaussians bandpass filter
         sigma_small: numeric
@@ -1879,6 +1892,8 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
+
+    # Task: change size to minimum distance
     def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
         """Retrieve section of image stack corresponding to given
         window around a point and the coordinate adjustments necessary
@@ -1930,7 +1945,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         """Bound a number between two constants"""
         return max(min(maxn, n), minn)
     
-    def fit_frame(substack, peak_window_size, sigma_small, 
+    def fit_frame(substack, min_distances, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z):
         """Perform 3D gaussian fitting on a 3D image stack."""
@@ -1941,6 +1956,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
         dog_bs = dog - bg
 
         # Make a labelmask corresponding to local maxima peaks.
+        peak_window_size = (min_distances[0] * 2 + 1, min_distances[1] * 2 + 1, min_distances[2] * 2 + 1)
         mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
 
         # Fit 3D gaussian in window surrounding each local maximum.
@@ -1964,7 +1980,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     
     #### Main ####
     # Do fitting on first frame.
-    fit_data_frame0 = fit_frame(stack[0], peak_window_size, sigma_small, 
+    fit_data_frame0 = fit_frame(stack[0], min_distances, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z)
     # Make fit_data a list of ndarrays.
@@ -1973,7 +1989,7 @@ def fit_ms2(stack, peak_window_size=(70,50,50), sigma_small=0.5,
     # Fit the rest of the frames, add their data to fit_data.
     for i in range(1, stack.shape[0]):
         print(i)
-        fit_data_thisframe = fit_frame(stack[i], peak_window_size, sigma_small, 
+        fit_data_thisframe = fit_frame(stack[i], min_distances, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z)
         fit_data.append(fit_data_thisframe)
@@ -2208,6 +2224,11 @@ def filter_spot_duration(connected_data, min_len):
 def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scale=1):
     """Find mean volume within ellipsoid centered on spots, add to spot_info
 
+    NOTE: For math reasons I don't fully understand, using radii equal to 
+    n (e.g. z_rad = 2) will give you a radius equal to n - 1. I recommend
+    using non-integers slightly higher than the desired (like z_rad = 2.1)
+    radius to avoid this problem.  
+
     Args:
         spot_data: dict of ndarrays
             Data containing tracking of spots detected in previous frames.
@@ -2223,7 +2244,9 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
         ij_rad: numeric
             Radius in real units of ellipsoid in the ij (xy) dimension.
         z_rad: numeric
-            Radius in real units of ellipsoid in the z dimension.
+            Radius in real units of ellipsoid in the z dimension. For reasons
+            I don't totally understand, a radius of 1 will actually give a 
+            radius of 0, while 1.1 will give the desired behavior.
         ij_scale: numeric
             Scale factor for ij_rad (typically nm/pixel)
         z_scale: numeric
