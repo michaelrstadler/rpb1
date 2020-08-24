@@ -27,6 +27,7 @@ from scipy.spatial import distance
 import pickle
 import czifile
 import pandas as pd
+from copy import deepcopy
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
@@ -76,6 +77,53 @@ class movie():
 # General image processing functions
 ############################################################################
 
+def concatenate_5dstacks(stacks):
+    """Concatenate multiple [ctzxy] stacks
+    
+    Args:
+        stacks: list of 5d ndarrays
+            List of 5d (2-channel) ndarray image stacks to concatenate
+    
+    Returns:
+        stack: 5d ndarray
+            Concatenation of input stacks
+        frames: list of ints
+            List of the frame numbers at which joins occur, with each entry
+            representing the 0-indexed location of the first frame of a new
+            stack.
+    """
+    def stack_channel(stacks, channel):
+        """Stack multiple 4d ndarrays"""
+        cstack = stacks[0][channel].copy()
+        frames = []
+        for i in range(1, len(stacks)):
+            frames.append(len(cstack))
+            cstack = np.vstack([cstack, stacks[i][channel]])
+        return cstack, frames
+    c0_stack, frames = stack_channel(stacks, 0)
+    c1_stack, _ = stack_channel(stacks, 1)
+    return np.stack((c0_stack, c1_stack)), frames
+
+############################################################################
+def clamp(n, minn, maxn):
+    """Bound a number between two constants
+
+    Args:
+        n: numeric
+            Number to clamp
+        minn: numeric
+            Minimum value
+        maxn: numeric
+            Maximum value
+
+    Returns:
+        labelmask_filtered: ndarray
+            Input labelmask with all pixels not corresponding to objects
+            within size range set to 0.
+    """
+    return max(min(maxn, n), minn)
+
+############################################################################
 def labelmask_filter_objsize(labelmask, size_min, size_max):
     """Filter objects in a labelmask by size.
 
@@ -739,13 +787,15 @@ def load_pickle(filename):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, order='default', figsize=6):
+def viewer(stacks, figsize=12, order='default'):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
         stack: list of ndarrays
             List of n-dimensional image stacks; last two dimensions must 
             be x-y to display. Image shapes must be identical.
+        figsize: int
+            Size of the figure to plot
         order: string
             String specifying order of image dimensions. Examples: 'ctzxy' 
             or 'tzxy'. Last two dimensions must be 'xy'.
@@ -987,7 +1037,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     return boxstack   
 
 ############################################################################
-def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12):
+def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=True):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -1010,7 +1060,10 @@ def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12):
         data = {spot_id:spot_data[spot_id]}
     substack = stack[channel]
     boxes = box_spots(substack, data, halfwidth_xy=8, linewidth=2)
-    viewer(boxes.max(axis=1), 'txy', figsize)
+    if MAX:
+        viewer(boxes.max(axis=1), figsize, 'txy')
+    else:
+        viewer(boxes, figsize, 'tzxy')
 
 ############################################################################
 def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=True):
@@ -2031,7 +2084,8 @@ def filter_ms2fits(fit_data, peakiness=4.5):
 ############################################################################
 def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10, 
     scale_xy=1, scale_z=1):
-    """Connect detected MS2 spots through multiple time frames.
+    """Connect detected MS2 spots in a single movie through multiple time 
+    frames.
     
     Spots detected in new frame are connected to spots in previous frames
     if they are within specified distance (max_jump). Spots can "disappear" 
@@ -2159,10 +2213,25 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         # If no suitable spot was found in previous frames, make a new spot.
         initialize_new_spot(this_spot_data, connected_data)
     
+    def z_inbounds(coords, nucmask):
+        """Ensure Z-coordinate is within the image for looking up nucleus ID
+        (Z-correction for re-focusing can result in out of bounds points)"""
+        coords = list(coords)
+        coords[1] = clamp(coords[1], 0, nucmask.shape[-3] - 1)
+        return tuple(coords)
+
+
     def add_time_nuc(this_spot_data, t, nucmask):
         """ Append the frame number (t) and nucleus ID to front of spot_data"""
-        spot_coords = tuple(np.append([t], this_spot_data[0:3]).astype(int))
-        nuc_id = nucmask[spot_coords]
+        # Combine frame number and zxy to for coordinate tuple, accounting for out-of-bounds z-coordinates due to re-focus adjustments.
+        spot_coords = tuple(np.concatenate((
+            [t], 
+            #[clamp(this_spot_data[0], 0, nucmask.shape[-3] - 1)],
+            #this_spot_data[1:3]
+            this_spot_data[0:3]
+            )).astype(int))
+        
+        nuc_id = nucmask[z_inbounds(spot_coords, nucmask)]
         # Add time and nuclear ID columns to spot data and call update to search 
         # for connected spots in previous frames.
         this_spot_data = np.append([t, nuc_id], this_spot_data)
@@ -2180,7 +2249,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
     # Main
     input_data = spot_data.copy()
     connected_data = initialize_connected_data(input_data[0])
-
+    
     # Go through each frame, attempt to connect each detected spot to previous spots.
     for t in range(1, len(input_data)):
         print(t)
@@ -2448,8 +2517,10 @@ def stitch_ms2(mv1, mv2):
     
     ### Connect spots ###
     
-    # Make dict of nucleus-spot connections in mv1.
+    # Make dict of nucleus-spot connections for both movies (longest trajectory per 
+    # nucleus).
     mv1_nuc_spot_links = link_nuc_spots(mv1.spot_data)
+    mv2_nuc_spot_links = link_nuc_spots(mv2.spot_data)
     # Get t (frame) number to adjust by.
     t_adjust = mv1.nucmask.shape[0]
     # Initialize stitched data with mv1 data.
@@ -2458,7 +2529,7 @@ def stitch_ms2(mv1, mv2):
     spot_ids = list(mv1.spot_data.keys())
     
     # For each spot in mv2, either connect to a spot in mv1 or initialize as new spot.
-    for spot in mv2.spot_data:
+    for spot in mv2_nuc_spot_links.values(): # Only attempt to connect longest trajectory in each nuc, discard others
         data = np.copy(mv2.spot_data[spot])
         # Update time.
         data[:,0] = data[:,0] + t_adjust
@@ -2469,10 +2540,12 @@ def stitch_ms2(mv1, mv2):
         nuc_id = int(nucs[0])
         # If linked to an mv1 spot, merge data for spot.
         if nuc_id in mv1_nuc_spot_links:
+            print('booga')
             linked_spot_id = mv1_nuc_spot_links[nuc_id]
             spot_data_stitched[linked_spot_id] = np.vstack((mv1.spot_data[linked_spot_id], data))
         # If unlinked, make a new spot.
         else:
+            print('booya')
             new_spot_id = max(spot_ids) + 1
             spot_data_stitched[new_spot_id] = data
             spot_ids.append(new_spot_id)
