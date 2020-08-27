@@ -2261,6 +2261,90 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
     return connected_data  
 
 ############################################################################
+def connect_ms2_fits_focuscorrect(fits_orig, z_frames, z_corrs, nucmask, 
+    max_frame_gap=1, max_jump=18, scale_xy=1, scale_z=1):
+    """Connect MS2 spots (from fits) across time frames and from multiple 
+    movies with different Z-focus points
+    
+    Args:
+        fits_orig:list of ndarrays
+            Output of fit_ms2 function. Each entry in the list is a time point 
+            (frame). Each row in array is a fit (a single local maxima), 
+            columns are: 0: center z-coordinate, 1: center x-coordinate, 
+            2: center y-coordinate, 3: fit_height, 4: width_z, 5: width_x, 
+            6: width_y).
+        z_frames: list-like
+            The frame numbers of the focus changes, with the number
+            corresponding to the first frame (0-based) of the new focal point.
+        z_corrs: list-like
+            The Z-corrections matching the frames in z_frames. This is the 
+            number that must be added (can be negative) to the new (frames 
+            after the re-focus) frames to match the old. So if the focus is
+            moved down by 2 Z-slices, the correction will be +2.
+        nucmask: ndarray
+            4D labelmask of dimensions [t,z,x,y] of segmented nuclei. 0 is 
+            background (not a nucleus) and nuclei have integer labels.
+        max_frame_gap: int
+            Maximum number of frames from which spot can be absent and still
+            connected across the gap. Example: for a value of 1, a spot
+            detected in frame 6 and absent from frame 7 can be connected to
+            a spot in frame 8, but a spot in frame 5 cannot be connected to
+            frame 8 if it is absent in frames 6 and 7.
+        max_jump: numeric
+            Maximum 3D displacement between frames for two spots to be connected
+        scale_xy: numeric
+            Distance scale for xy direction (typically: nm per pixel)
+        scale_z: numeric
+            Distance scale for z direction (typically: nm per pixel) 
+        
+    Returns:
+        spots_connected: dict of ndarrays
+            Each key is a unique spot tracked across 1 or more frames. Each row
+            of array is the spot's data for a single frame, with columns 0: frame
+            number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+            inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+            x_width, 8: fit y_width. Coordinates are relative to the original, 
+            uncorrected data (which will be correct for a concatenated image 
+            stack).
+    
+    """
+    ## FIRST PART: Create a single fits object (list of ndarrays) with the Z-coordinates
+    ## adjusted to correct for the refocusing.
+    
+    # Make a copy of fits to be altered.
+    fits_adj = deepcopy(fits_orig) 
+    # Make a vector of length equal to number of frames storing the z correction for each
+    # frame (relative to first, uncorrected segment).
+    frame_corrs = np.repeat(0, z_frames[0])  
+    corr = 0
+    
+    # Do Z-correction for each focus break.
+    for i in range(0, len(z_frames)):
+        start_frame = z_frames[i]
+        corr = corr + z_corrs[i]
+        if (i+1 < len(z_frames)):
+            end_frame = z_frames[i+1] - 1
+        else:
+            end_frame = len(fits_orig) - 1
+        # Adjust z-coordinates for each frame in the window.
+        for f in range(start_frame, end_frame + 1):
+            fits_adj[f][:,0] = fits_adj[f][:,0] + corr
+        # Add adjustment to frame_corrs vector.
+        frame_corrs = np.concatenate((frame_corrs, np.repeat(corr, end_frame - start_frame + 1)))
+    
+    ## SECOND PART: Run spot connection on "corrected" fits object.
+    spots_connected = connect_ms2_frames(fits_adj, nucmask, max_frame_gap, max_jump, scale_xy, scale_z)
+    
+    ## THIRD PART: Undo the adjustments in Z to make the spot coordinates match the concatenated
+    ## stack.
+    for spot in spots_connected:
+        arr = spots_connected[spot]
+        for i in range(0, len(arr)):
+            frame_num = int(arr[i,0])
+            arr[i,2] = arr[i,2] - frame_corrs[frame_num]
+    return spots_connected
+
+############################################################################
 def filter_spot_duration(connected_data, min_len):
     """Filter connected_data structure for spots lasting a minimum number
     of frames
@@ -2426,134 +2510,6 @@ def add_gaussian_integration(spot_data, wlength_xy=15, wlength_z=5):
             new_array[rownum] = np.append(row, [pix_mean])
         spot_data[spot_id] = new_array
     return spot_data
-
-############################################################################
-def stitch_ms2(mv1, mv2):
-    """Stitch two MS2 movies together across a focus break
-    
-    Connect two confocal MS2 movies together that are separated by a 
-    re-focusing break. First connects nuclear masks, then connects spots
-    based on nuclear ID (spots in the same nucleus are connected).
-    
-    Args:
-        mv1: movie object
-            First object of movie class with nucmask and spot_data features
-        mv2: movie object
-            Second object of movie class. Nucleus and spot IDs will be updated
-            to match those of mv1
-    
-    Returns:
-        mv_stitched: movie object
-            Movie object with nucmask and spot_data from mv1 and mv2 stitched
-            together
-    """
-    
-    def update_nucleus_id(data, mask):
-        """Update the nuclear ID field of a spot data array based on spot 
-        coordinates and updated nuclear mask."""
-        for i in range(0, data.shape[0]):
-            coords = tuple([int(data[i,0]), int(data[i,2]), int(data[i,3]), 
-                int(data[i,4])])
-            nuc = mask[coords]
-            data[i,1] = nuc
-            
-    def link_nuc_spots(data):
-        """Link nuclei to spots. Make dictionary with nucleus ID as key and 
-        spot ID as value."""
-        links = {}
-        for spot in data:
-            # Find modal nuclear ID for the spot.
-            nucs = sortfreq(data[spot][:,1])
-            if (nucs[0] != 0):
-                nuc_id = int(nucs[0])
-                if (nuc_id not in links):
-                    links[nuc_id] = spot
-                # If nuc already has a spot, select spot with longest trajectory.
-                else:
-                    curr_spot_id = links[nuc_id]
-                    len_curr_spot = len(data[curr_spot_id][:,1])
-                    len_this_spot = len(data[spot][:,1])
-                    if (len_this_spot > len_curr_spot):
-                        links[nuc_id] = int(spot)
-        return links
-    
-    def stitch_stacks(stack1, stack2):
-        """Put two [ctzxy] stacks together (arbitrary number of channels)"""
-        stack_stitched = np.vstack((stack1[0], stack2[0]))
-        for i in range(1, stack1.shape[0]):
-            channel_stitched = np.vstack((stack1[i], stack2[i]))
-            stack_stitched = np.stack((stack_stitched, channel_stitched))
-        return stack_stitched
-
-    # Main.
-    
-    ### Connect nuclei ###
-    
-    # Merge last two frames of mv1 and first two frames of mv2 to account for 
-    # potential dropout.
-    end1 = mv1.nucmask[-2:].max(axis=0)
-    start2 = mv2.nucmask[0:2].max(axis=0)
-    # Update labels from mv2 to match those of mv1
-    updated_mask2 = update_labels(end1, start2)
-    
-    # Generate an update table for old (mv2) to new (mv1) nuc IDs
-    convert = {}
-    for old in np.unique(start2)[1:]:
-        new = np.unique(updated_mask2[start2 == old])[0]
-        if (new != 0):
-            convert[old] = int(new)
-
-    # Update nucmask of mv2 with new labels, stitch mv1 and mv2 masks together.
-    labels = list(np.unique(mv1.nucmask))
-    newmask = np.zeros_like(mv2.nucmask)
-    for old in np.unique(mv2.nucmask)[1:]:
-        if (old in convert):
-            newmask[mv2.nucmask == old] = convert[old]
-        else:
-            new_id = max(labels) + 1
-            newmask[mv2.nucmask == old] = new_id
-            labels.append(new_id)
-    nucmask_stitched = np.vstack((mv1.nucmask, newmask))
-    
-    ### Connect spots ###
-    
-    # Make dict of nucleus-spot connections for both movies (longest trajectory per 
-    # nucleus).
-    mv1_nuc_spot_links = link_nuc_spots(mv1.spot_data)
-    mv2_nuc_spot_links = link_nuc_spots(mv2.spot_data)
-    # Get t (frame) number to adjust by.
-    t_adjust = mv1.nucmask.shape[0]
-    # Initialize stitched data with mv1 data.
-    spot_data_stitched = mv1.spot_data.copy()
-    # Keep track of spot_ids used.
-    spot_ids = list(mv1.spot_data.keys())
-    
-    # For each spot in mv2, either connect to a spot in mv1 or initialize as new spot.
-    for spot in mv2_nuc_spot_links.values(): # Only attempt to connect longest trajectory in each nuc, discard others
-        data = np.copy(mv2.spot_data[spot])
-        # Update time.
-        data[:,0] = data[:,0] + t_adjust
-        # Update nucleus ID using new mask (in place).
-        update_nucleus_id(data, nucmask_stitched)
-        # Get modal nucleus.
-        nucs = sortfreq(data[:,1])
-        nuc_id = int(nucs[0])
-        # If linked to an mv1 spot, merge data for spot.
-        if nuc_id in mv1_nuc_spot_links:
-            print('booga')
-            linked_spot_id = mv1_nuc_spot_links[nuc_id]
-            spot_data_stitched[linked_spot_id] = np.vstack((mv1.spot_data[linked_spot_id], data))
-        # If unlinked, make a new spot.
-        else:
-            print('booya')
-            new_spot_id = max(spot_ids) + 1
-            spot_data_stitched[new_spot_id] = data
-            spot_ids.append(new_spot_id)
-    
-    fits_stitched = mv1.fits + mv2.fits
-    stack_stitched = stitch_stacks(mv1.stack, mv2.stack)
-    mv_stitched = movie(stack_stitched, nucmask_stitched, fits_stitched, spot_data_stitched)
-    return mv_stitched
 
 ############################################################################
 def align_traces(df, locs, window_size=11, include_nan=True):
