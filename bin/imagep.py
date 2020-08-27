@@ -1909,7 +1909,7 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
 
 ############################################################################
 def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5, 
-                   sigma_big=4, bg_radius=4, fitwindow_rad_xy=5, 
+                   sigma_big=4, bg_radius=4, fitwindow_rad_xy=10, 
                    fitwindow_rad_z=9):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
@@ -2028,7 +2028,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5,
                 fitparams = np.vstack((fitparams, peak_fitparams))
             # If fit fails, add dummy entry for spot.
             else:
-                fitparams = np.vstack((fitparams, np.array([0,0,0,0,np.inf,np.inf,np.inf])))
+                fitparams = np.vstack((fitparams, np.array([z_adj,x_adj,y_adj,0,np.inf,np.inf,np.inf])))
         return fitparams
     
     #### Main ####
