@@ -148,7 +148,7 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
     return labelmask_filtered
 
 ############################################################################
-def imfill(mask, seed_pt='default', min_fraction_filled=0.1):
+def imfill(mask, seed_pt='default'):
     '''Fill holes within objects in a binary mask.
     
     Equivalent to matlab's imfill function. seed_pt needs to be a point in 
@@ -164,30 +164,18 @@ def imfill(mask, seed_pt='default', min_fraction_filled=0.1):
             Binary mask of n dimensions.
         seed_pt: tuple
             Pixel in mask to use for seeding "background". This is the equi-
-            valent of the point you click when filling in paint. Default
-            behavior is to select a random 0-valued point under the constraint
-            that the resulting fill covers a fraction of the total pixels
-            given by min_fraction_filled.
-        min_fraction_filled: numeric
-            Fraction of total pixels in the mask that must be filled for a 
-            randomly chosen seed point (from 'default' setting) to be 
-            accepted. 
+            valent of the point you click when filling in paint. 
     Returns:
         mask_filled: ndarray
             Binary mask filled    
     '''
     if (seed_pt == 'default'):
-        # Try 20 random seeds.
-        for i in range(0,20):
-            # Get a random 0-valued pixel.
-            seed_pt = find_background_point(mask)
-            # Try flooding background from this point.
-            mask_flooded = flood_fill(mask, seed_pt,1)
-            fraction_filled = np.count_nonzero(mask != mask_flooded) / mask.size
-            if (fraction_filled >= min_fraction_filled):
-                mask_filled = np.where(mask == mask_flooded, 1, 0)
-                return mask_filled
-        raise Error('Cannot find a seed point that satisfies minimum fraction filled')
+        # Get a random 0-valued background pixel.
+        seed_pt = find_background_point(mask)
+        # Try flooding background from this point.
+        mask_flooded = flood_fill(mask, seed_pt,1)
+        mask_filled = np.where(mask == mask_flooded, 1, 0)
+        return mask_filled
     else:
         mask_flooded = flood_fill(mask, seed_pt,1)
         mask_filled = np.where(mask == mask_flooded, 1, 0)
@@ -283,6 +271,7 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     local_peak_mask = np.zeros_like(img)
     local_peaks = []
     peak_num=1
+
     for id_ in np.unique(conn_comp)[1:]:
         centroid = get_object_centroid(conn_comp, id_)
         # If there is no already-added seed within the minimum distance,
@@ -444,8 +433,8 @@ def mesh_like(arr, n):
 def find_background_point(mask):
     """Find a background (value=0) pixel in a mask.
     
-    Searches for a background pixel in a mask, defined as a pixel with 
-    value 0. Background pixel is chosen at random from among all 0 pixels.
+    Background is defined as the largest contiguous block of 0 pixels. A 
+    random pixel coordinate from this background set is returned.
 
     Args:
         mask: ndarray
@@ -455,7 +444,16 @@ def find_background_point(mask):
         coord: tuple of ints
             Coordinates of a single background pixel.
     """
-    zerocoords = np.where(mask == 0)
+    # Label objects of contiguous background (0) pixels.
+    bglabelmask, _ = ndi.label(np.where(mask == 0, 1, 0))
+    # Count pixels in each background object.
+    labels, counts = np.unique(bglabelmask, return_counts=True)
+    # Get the indexes of sorted counts, descending.
+    ordered_indexes = np.argsort(counts)[::-1]
+    # Set largest contiguous 0 block as true background.
+    bg_label = labels[ordered_indexes[0]]
+    # Select random coordinate from background to be seed.
+    zerocoords = np.where(bglabelmask == bg_label)
     i = np.random.randint(0,len(zerocoords[0]))
     coord = zerocoords[0][i]
     for n in range(1, len(zerocoords)):
@@ -755,6 +753,28 @@ def read_czi(filename, trim=False, swapaxes=True):
     return stack
 
 ############################################################################
+def read_concat_5dczi(czis):
+    """Read a list of 5d czi files and combine into single stack
+    
+    Args:
+        czis: list-like (iterable)
+            List of filenames containing 5d .czi movies of dimension 
+            [c,t,z,x,y]. Shapes must be identical except for t dimension.
+            
+    Returns:
+        stack: 5d ndarray
+            Concatenation of input stacks
+        frames: list of ints
+            List of the frame numbers at which joins occur, with each entry
+            representing the 0-indexed location of the first frame of a new
+            stack.
+    """
+    stacks = []
+    for czi in czis:
+        stacks.append(read_czi(czi, True))
+    stack, frames = concatenate_5dstacks(stacks)
+    return stack, frames
+############################################################################
 def save_pickle(obj, filename):
     """Pickel (serialize) an object into a file
 
@@ -787,11 +807,11 @@ def load_pickle(filename):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, figsize=12, order='default'):
+def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
-        stack: list of ndarrays
+        stack: ndarray or list of ndarrays
             List of n-dimensional image stacks; last two dimensions must 
             be x-y to display. Image shapes must be identical.
         figsize: int
@@ -799,6 +819,10 @@ def viewer(stacks, figsize=12, order='default'):
         order: string
             String specifying order of image dimensions. Examples: 'ctzxy' 
             or 'tzxy'. Last two dimensions must be 'xy'.
+        zmax: bool
+            If True, displays a maximum projection on the Z axis.
+        color: string
+            [optional] set the initial color map.
             
     Returns: none
         
@@ -847,7 +871,7 @@ def viewer(stacks, figsize=12, order='default'):
         dropdown = Dropdown(
             options={'Greens', 'Reds', 'viridis', 'plasma', 'magma', 'inferno','cividis', 
             'gray', 'gray_r', 'prism'},
-            value='Greens',
+            value=color,
             description='Color',
         )
         return dropdown
@@ -890,14 +914,25 @@ def viewer(stacks, figsize=12, order='default'):
 
         # Make color and contrast widgets.
         interact(_update_view, order=fixed(order), **interact_call)
+    
     # Use first stack as reference for sizes, etc.
     if (type(stacks) is list):
         stack = stacks[0]
     else:
         stack = stacks
         stacks = [stack]
+    if zmax:
+        axis_max = stacks[0].ndim - 3
+        for i in range(0, len(stacks)):
+            stacks[i] = stacks[i].max(axis=axis_max)
+        stack = stacks[0]
+    #print(stacks[1].ndim)
     if (order == 'default'):
+        if zmax:
+            order = 'ctxy'[4-stacks[0].ndim:]
+        else:
             order = 'ctzxy'[5-stacks[0].ndim:]
+
     main(order)
 
 ############################################################################
@@ -973,8 +1008,6 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     Args: 
         stack: ndarray of uint16
             Multi-dimensional image stack of dimensions [t,z,x,y]
-        channel: int
-            Channel containing MS2 spots
         spot_data: dict of ndarrays
             Data containing tracking of spots detected. Dict entries are unique 
             spot IDs (numeric 1...), rows of ndarray are detections of the spot 
@@ -1028,16 +1061,22 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
         boxstack[t, z_min:z_max, (i_max-linewidth):i_max, j_min:j_max] = hival
     
     # Main.
-    for spot in spot_data:
-        arr = spot_data[spot]
-        for row in arr:
-            row = row.astype(int)
-            point = (row[[0,2,3,4]])
-            drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows)
+    if (type(spot_data) == dict):
+        for spot in spot_data:
+            arr = spot_data[spot]
+            for row in arr:
+                row = row.astype(int)
+                point = (row[[0,2,3,4]])
+                drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows)
+    elif (type(spot_data) == list):
+        for t in range(0, len(spot_data)):
+            for row in spot_data[t]:
+                point = tuple([t]) + tuple(row[0:3].astype(int))
+                drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows)
     return boxstack   
 
 ############################################################################
-def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=True):
+def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=True, halfwidth_xy=8, spotmode=False):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -1058,8 +1097,12 @@ def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=Tr
         data = spot_data.copy()
     else:
         data = {spot_id:spot_data[spot_id]}
+    
+    if spotmode:
+        halfwidth_xy = 3
+
     substack = stack[channel]
-    boxes = box_spots(substack, data, halfwidth_xy=8, linewidth=2)
+    boxes = box_spots(substack, data, halfwidth_xy=halfwidth_xy, linewidth=2)
     if MAX:
         viewer(boxes.max(axis=1), figsize, 'txy')
     else:
@@ -1266,6 +1309,8 @@ def object_circularity(labelmask, label):
     regions = regionprops(im)
     perimeter = regions[0].perimeter
     area = regions[0].area
+    if (perimeter == 0):
+        perimeter = 0.5
     circularity = 4 * np.pi * area / (perimeter ** 2) 
     return circularity
     
@@ -1687,9 +1732,10 @@ def segment_nuclei_4dstack(stack, seg_func, **kwargs):
     labelmask = np.array([frame0])
     # Segment subsequent frames, stack results together.
     for n in range(1, stack.shape[0]):
-        print(n)
+        print(n, end=' ')
         frame = seg_func(stack[n], **kwargs)
         labelmask = np.vstack((labelmask, [frame]))
+    print('')
     return labelmask
 
 ############################################################################
@@ -1792,7 +1838,7 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
     connected_mask[0] = maskstack[0]
     # Walk through subsequent frames, connecting them to previous frames.
     for n in range(1, maskstack.shape[0]):
-        print(n)
+        print(n, end=' ')
         newmask = maskstack[n]
         # Step sequentially backwards through frames, bound by max skip.
         for i in range(n-1, n-2-max_frames_skipped, -1):
@@ -1815,7 +1861,7 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
         for orphan in unmatched_labels:
             new_label = connected_mask.max() + 1
             connected_mask[n][newmask == orphan] = new_label
-            
+    print('')        
     return connected_mask
 
 ############################################################################
@@ -1908,9 +1954,9 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
     return newmask
 
 ############################################################################
-def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5, 
+def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1, 
                    sigma_big=4, bg_radius=4, fitwindow_rad_xy=10, 
-                   fitwindow_rad_z=9):  
+                   fitwindow_rad_z=2):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
     Alrigthm: bandbass filter -> background subtraction -> find local maxima
@@ -1926,7 +1972,8 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5,
         sigma_small: numeric
             Lower sigma for difference-of-gaussians bandpass filter
         sigma_small: numeric
-            Upper sigma for difference-of-gaussians bandpass filter
+            Upper sigma for difference-of-gaussians bandpass filter. Critical 
+            for this to be at least one, otherwise hot pixels create problems
         bg_radius: int
             Radius for minimum filter used for background subtraction
         fitwindow_rad_xy: int
@@ -1947,7 +1994,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5,
     """
 
     # Task: change size to minimum distance
-    def get_fitwindow(data, peak, xy_rad=5, z_rad=9):
+    def get_fitwindow(data, peak, xy_rad, z_rad):
         """Retrieve section of image stack corresponding to given
         window around a point and the coordinate adjustments necessary
         to convert window coordinates to coordinates in the original image"""
@@ -2041,7 +2088,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5,
     
     # Fit the rest of the frames, add their data to fit_data.
     for i in range(1, stack.shape[0]):
-        print(i)
+        print(i, end=' ')
         fit_data_thisframe = fit_frame(stack[i], min_distances, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z)
@@ -2050,7 +2097,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=0.5,
     return fit_data
 
 ############################################################################
-def filter_ms2fits(fit_data, peakiness=4.5):
+def filter_ms2fits(stack, fit_data, channel=1, peakiness=4.5):
     """Filter MS2 spot fit data based on fit parameters
     
     Select spots based on "peakiness", measured as the ratio of the height
@@ -2074,10 +2121,11 @@ def filter_ms2fits(fit_data, peakiness=4.5):
     fit_data = fit_data.copy()
     for t in range(0, len(fit_data)):
         frame_data = fit_data[t]
+        frame_med = np.median(stack[channel, t])
         xy_width_means = np.mean(frame_data[:,5:7], axis=1)
         peak_heights = frame_data[:,3]
         spot_peakiness = np.log(peak_heights / xy_width_means)
-        frame_data_filtered = frame_data[spot_peakiness > peakiness,:]
+        frame_data_filtered = frame_data[(peak_heights > frame_med) & (spot_peakiness > peakiness),:]
         fit_data[t] = frame_data_filtered
     return fit_data
 
@@ -2129,6 +2177,11 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         else:
             new_id = 1
         connected_data[new_id] = np.expand_dims(new_spot_data, 0)
+
+
+    def get_peakiness(spot_data):
+        """Determine peakiness for a spot from height and mean of x- and y- widths"""
+        return spot_data[3] / np.mean((spot_data[5], spot_data[6]))
 
     def sq_euc_distance(coords1, coords2, scale_z=1, scale_xy=1):
         """Find the squared euclidean distance between two points."""
@@ -2252,7 +2305,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
     
     # Go through each frame, attempt to connect each detected spot to previous spots.
     for t in range(1, len(input_data)):
-        print(t)
+        print(t, end=' ')
         frame_data = input_data[t]
         for this_spot_data in frame_data:
             this_spot_data = add_time_nuc(this_spot_data, t, nucmask)
@@ -2432,7 +2485,7 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
     for spot_id in spot_data:
         num_processed = num_processed + 1
         if (num_processed % 10 == 0):
-            print('Processed ' + str(num_processed))
+            print(num_processed, end=' ')
         spot_array = spot_data[spot_id]
         # Initialize new array with extra column.
         new_array = np.ndarray((spot_array.shape[0], spot_array.shape[1] + 1))
