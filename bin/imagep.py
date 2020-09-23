@@ -172,9 +172,9 @@ def imfill(mask, seed_pt='default'):
     if (seed_pt == 'default'):
         # Get a random 0-valued background pixel.
         seed_pt = find_background_point(mask)
-        # Try flooding background from this point.
-        mask_flooded = flood_fill(mask, seed_pt,1)
-        mask_filled = np.where(mask == mask_flooded, 1, 0)
+        # Flood background from this point.
+        mask_flooded = flood_fill(mask, seed_pt, 1)
+        mask_filled = np.where((mask == 0) & (mask_flooded == 1), 0, 1)
         return mask_filled
     else:
         mask_flooded = flood_fill(mask, seed_pt,1)
@@ -450,8 +450,10 @@ def find_background_point(mask):
     labels, counts = np.unique(bglabelmask, return_counts=True)
     # Get the indexes of sorted counts, descending.
     ordered_indexes = np.argsort(counts)[::-1]
-    # Set largest contiguous 0 block as true background.
+    # Set largest contiguous 0 block as true background.)
     bg_label = labels[ordered_indexes[0]]
+    if (bg_label == 0): # In this mask, 0 is the foreground (confusingly).
+        bg_label = labels[ordered_indexes[1]]
     # Select random coordinate from background to be seed.
     zerocoords = np.where(bglabelmask == bg_label)
     i = np.random.randint(0,len(zerocoords[0]))
