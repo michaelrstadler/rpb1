@@ -129,7 +129,7 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
 
     Args:
         labelmask: ndarray
-            Integer labelmask
+            Integer labelmask (background must be 0 or errors occur)
         size_min: int
             Minimum size, in pixels, of objects to retain
         size_max: int
@@ -1569,7 +1569,10 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
     grad = gradient_nD(im_smooth)
     ws = watershed(grad, seeds.astype(int))
     # Filter object size, relabel to set background to 0.
+    ws = relabel_labelmask(ws)
     labelmask = labelmask_filter_objsize(ws, size_min, size_max)
+    print(np.unique(ws))
+    print(np.unique(labelmask))
     labelmask = relabel_labelmask(labelmask)
     # Dilate segmented nuclei.
     labelmask = labelmask_apply_morphology(labelmask, 
@@ -1577,6 +1580,7 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
                     struct=np.ones((dilation_length, dilation_length)), 
                     expand_size=(dilation_length + 1, dilation_length + 1))
 
+    print(np.unique(labelmask))
     if (display):
         fig, ax = plt.subplots(3,2, figsize=(10,10))
         # Display mask.
