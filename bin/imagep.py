@@ -9,6 +9,7 @@ __author__ = 'Michael Stadler'
 
 
 import numpy as np
+import matplotlib as mpl
 import os
 from os import listdir
 from os.path import isfile, join
@@ -46,8 +47,18 @@ To fix:
 # Classes
 ############################################################################
 class movie():
+    """'
+    spot_data: dict of ndarrays
+        Each key is a unique spot tracked across 1 or more frames. Each row
+        of array is the spot's data for a single frame, with columns 0: frame
+        number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+        inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+        x_width, 8: fit y_width, 9: integrated volume for MS2, 10: integrated
+        gaussian fit of MS2 spots, 11: integrated volume for protein signal.
+    """
     # Class attributes    
     # Initializer
+
     @staticmethod
     def make_spot_table(spot_data, nucmask, colnum):
         """"""
@@ -809,7 +820,7 @@ def load_pickle(filename):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
+def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens", coordfile=None):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -825,6 +836,9 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
             If True, displays a maximum projection on the Z axis.
         color: string
             [optional] set the initial color map.
+        coordfile: string
+            [Optional] File to which to write coordinates of mouse clicks.
+            Only works in %matplotlib notebook mode.
             
     Returns: none
         
@@ -837,9 +851,12 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
     """
     # Update the displayed image with inputs from widgets.
     def _update_view(order, **kwargs):
+
         numplots = len(stacks)
         indexes = []
         colmap = kwargs['colmap']
+        if (colmap == 'Gators'):
+            colmap = combine_colormaps(plt.cm.Blues_r, plt.cm.YlOrBr)
         min_ = kwargs['contrast'][0]
         max_ = kwargs['contrast'][1]
         
@@ -851,6 +868,8 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
         
         # Set up frame for plots.
         fig, ax = plt.subplots(1, numplots, figsize=(figsize * numplots, figsize * numplots))
+        if (coordfile != None):
+            cid = fig.canvas.mpl_connect('button_press_event', lambda event: click_coord(event, indexes[-1], indexes[-2]))
         # If only one plot, pack ax into list
         if (type(ax) is not np.ndarray):
             ax = [ax]
@@ -862,17 +881,31 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
             ax[n].imshow(stack_local[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
             vmax=max_);    
     
+    # Write clicked coordinates to file.
+    def click_coord(event, z, t):
+            f = open(coordfile, 'a')
+            f.write(str(t) + '\t' + str(z) + '\t' + str(event.ydata) + '\t' + str(event.xdata) + '\n')
+            f.close()
+
     # Make a new slider object for dimension selection and return it
     def _make_slider(n):
         widget = IntSlider(min=0, max=(stack.shape[n] - 1), step=1, 
             continuous_update=False,)
         return(widget)
     
+    # Combine two colormaps.
+    def combine_colormaps(cm1, cm2):
+        """Combine two mpl colormaps."""
+        colors1 = cm1(np.linspace(0., 1, 128))
+        colors2 = cm2(np.linspace(0, 1, 128))
+        colors = np.vstack((colors1, colors2))
+        return(mpl.colors.LinearSegmentedColormap.from_list('my_colormap', colors))
+
     # Make a dropdown widget for selecting the colormap.
     def _make_cmap_dropdown():
         dropdown = Dropdown(
             options={'Greens', 'Reds', 'viridis', 'plasma', 'magma', 'inferno','cividis', 
-            'gray', 'gray_r', 'prism'},
+            'gray', 'gray_r', 'prism', 'Gators'},
             value=color,
             description='Color',
         )
@@ -928,12 +961,18 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens"):
         for i in range(0, len(stacks)):
             stacks[i] = stacks[i].max(axis=axis_max)
         stack = stacks[0]
-    #print(stacks[1].ndim)
+
     if (order == 'default'):
         if zmax:
             order = 'ctxy'[4-stacks[0].ndim:]
         else:
             order = 'ctzxy'[5-stacks[0].ndim:]
+
+    # Open coordfile for appending.
+    if (coordfile is not None):
+        f = open(coordfile, 'w')
+        f.write('#\n')
+        f.close()
 
     main(order)
 
@@ -2272,11 +2311,14 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         # If no suitable spot was found in previous frames, make a new spot.
         initialize_new_spot(this_spot_data, connected_data)
     
-    def z_inbounds(coords, nucmask):
-        """Ensure Z-coordinate is within the image for looking up nucleus ID
-        (Z-correction for re-focusing can result in out of bounds points)"""
+    def inbounds(coords, nucmask):
+        """Ensure coordinates are within the image for looking up nucleus ID
+        (Z-correction for re-focusing can result in out of bounds points, and XY-correction
+        for nuclear movement can do the same)"""
         coords = list(coords)
         coords[1] = clamp(coords[1], 0, nucmask.shape[-3] - 1)
+        coords[2] = clamp(coords[2], 0, nucmask.shape[-2] - 1)
+        coords[3] = clamp(coords[3], 0, nucmask.shape[-1] - 1)
         return tuple(coords)
 
 
@@ -2285,12 +2327,10 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         # Combine frame number and zxy to for coordinate tuple, accounting for out-of-bounds z-coordinates due to re-focus adjustments.
         spot_coords = tuple(np.concatenate((
             [t], 
-            #[clamp(this_spot_data[0], 0, nucmask.shape[-3] - 1)],
-            #this_spot_data[1:3]
             this_spot_data[0:3]
             )).astype(int))
         
-        nuc_id = nucmask[z_inbounds(spot_coords, nucmask)]
+        nuc_id = nucmask[inbounds(spot_coords, nucmask)]
         # Add time and nuclear ID columns to spot data and call update to search 
         # for connected spots in previous frames.
         this_spot_data = np.append([t, nuc_id], this_spot_data)
