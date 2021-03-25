@@ -820,7 +820,7 @@ def load_pickle(filename):
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens", coordfile=None):
+def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, init_maxval=None, color="Greens", coordfile=None):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -834,6 +834,10 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens", coor
             or 'tzxy'. Last two dimensions must be 'xy'.
         zmax: bool
             If True, displays a maximum projection on the Z axis.
+        init_minval: int
+            Initial value for minimum on contrast slider
+        init_maxval: int
+            Initial value for maximum on contrast slider
         color: string
             [optional] set the initial color map.
         coordfile: string
@@ -915,8 +919,14 @@ def viewer(stacks, figsize=12, order='default', zmax=False, color="Greens", coor
     def _make_constrast_slider():
         min_ = stack.min()
         max_ = stack.max()
+        init_min = min_
+        init_max = max_
+        if (init_minval != None):
+            init_min = init_minval
+        if (init_maxval != None):
+            init_max = init_maxval
         contrast_slider = IntRangeSlider(
-            value=[min_, max_],
+            value=[init_min, init_max],
             min=min_,
             max=max_,
             step=1,
@@ -1117,7 +1127,8 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     return boxstack   
 
 ############################################################################
-def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=True, halfwidth_xy=8, spotmode=False):
+def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, halfwidth_xy=8, 
+    spotmode=False, spot_id='all', color='cividis', init_minval=0, init_maxval=1000000):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -1129,10 +1140,24 @@ def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=Tr
             in a single frame. Time must be column 0, [z,x,y] in columns 2:4.
         channel: int
             Channel (dimension 0) to be viewed
-        spot_id: int 
-            (optional) ID of spot to box. Default boxes all detected spots.
         figsize: int
             Size of figure to display via viewer
+        MAX: bool
+            Display max projection in Z.
+        halfwidth_xy: int
+            Halfwidth in pixels of the boxes in xy direction (sides will be 
+            2*halfwidth)
+        spotmode: bool
+            (optional) display a spot instead of a box
+        spot_id: int 
+            (optional) ID of spot to box. Default boxes all detected spots.
+        color: string or color object
+            Starting colormap for viewer
+        init_minval: int
+            Initial value for minimum on contrast slider
+        init_maxval: int
+            Initial value for maximum on contrast slider
+
     """
     if (spot_id == 'all'):
         data = spot_data.copy()
@@ -1145,9 +1170,9 @@ def quickview_ms2(stack, spot_data, channel=0, spot_id='all', figsize=12, MAX=Tr
     substack = stack[channel]
     boxes = box_spots(substack, data, halfwidth_xy=halfwidth_xy, linewidth=2)
     if MAX:
-        viewer(boxes.max(axis=1), figsize, 'txy')
+        viewer(boxes.max(axis=1), figsize, 'txy', color=color, init_minval=init_minval, init_maxval=init_maxval)
     else:
-        viewer(boxes, figsize, 'tzxy')
+        viewer(boxes, figsize, 'tzxy', color=color, init_minval=init_minval, init_maxval=init_maxval)
 
 ############################################################################
 def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=True):
@@ -2142,7 +2167,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
     return fit_data
 
 ############################################################################
-def filter_ms2fits(stack, fit_data, channel=1, peakiness=4.5):
+def filter_ms2fits(fit_data, peakiness=4.5, stack=None, channel=1):
     """Filter MS2 spot fit data based on fit parameters
     
     Select spots based on "peakiness", measured as the ratio of the height
@@ -2157,6 +2182,12 @@ def filter_ms2fits(stack, fit_data, channel=1, peakiness=4.5):
         peakiness: numeric
             Spots whose log (natural) ratio of height to width exceeds this
             are kept.
+        stack: ndarray
+            [Optional] 5D stack from which fits are derived. If supplied,
+            fits will be filtered for those whose peak surpasses the median
+            value for the frame in this stack.
+        channel: int
+            Channel in the stack on which fits were performed.
             
     Returns:
         fit_data: list of ndarrays
@@ -2166,7 +2197,10 @@ def filter_ms2fits(stack, fit_data, channel=1, peakiness=4.5):
     fit_data = fit_data.copy()
     for t in range(0, len(fit_data)):
         frame_data = fit_data[t]
-        frame_med = np.median(stack[channel, t])
+        if stack is not None:
+            frame_med = np.median(stack[channel, t])
+        else:
+            frame_med = -np.inf
         xy_width_means = np.mean(frame_data[:,5:7], axis=1)
         peak_heights = frame_data[:,3]
         spot_peakiness = np.log(peak_heights / xy_width_means)
