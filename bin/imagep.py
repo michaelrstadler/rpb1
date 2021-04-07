@@ -1127,8 +1127,9 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
     return boxstack   
 
 ############################################################################
-def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, halfwidth_xy=8, 
-    spotmode=False, spot_id='all', color='cividis', init_minval=0, init_maxval=1000000):
+def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, 
+    halfwidth_xy=8, halfwidth_z=8, spotmode=False, spot_id='all', 
+    color='cividis', init_minval=0, init_maxval=1000000, shadows=True):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -1147,6 +1148,9 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, halfwidth_x
         halfwidth_xy: int
             Halfwidth in pixels of the boxes in xy direction (sides will be 
             2*halfwidth)
+        halfwidth_z: int
+            Halfwidth in pixels of the boxes in z direction (sides will be 
+            2*halfwidth)
         spotmode: bool
             (optional) display a spot instead of a box
         spot_id: int 
@@ -1157,6 +1161,8 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, halfwidth_x
             Initial value for minimum on contrast slider
         init_maxval: int
             Initial value for maximum on contrast slider
+        shadows: bool
+            If true, show dark boxes in out of focus Z slices.
 
     """
     if (spot_id == 'all'):
@@ -1168,7 +1174,7 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, halfwidth_x
         halfwidth_xy = 3
 
     substack = stack[channel]
-    boxes = box_spots(substack, data, halfwidth_xy=halfwidth_xy, linewidth=2)
+    boxes = box_spots(substack, data, halfwidth_xy=halfwidth_xy, halfwidth_z=halfwidth_z, linewidth=2, shadows=shadows)
     if MAX:
         viewer(boxes.max(axis=1), figsize, 'txy', color=color, init_minval=init_minval, init_maxval=init_maxval)
     else:
@@ -1263,7 +1269,7 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, vi
     if(view):
         #viewer(movies.mean(axis=2), 'itxy')
         viewer(np.nanmean(movies, axis=2), 'itxy')
-    return movies
+    return movies[1:]
 
 ############################################################################    
 ############################################################################
