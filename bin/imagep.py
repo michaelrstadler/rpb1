@@ -1181,7 +1181,7 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True,
         viewer(boxes, figsize, 'tzxy', color=color, init_minval=init_minval, init_maxval=init_maxval)
 
 ############################################################################
-def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=True):
+def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=False):
     """Make image stack for viewing MS2 spot raw data
     
     Given spot coordinates and original movie, builds an image stack with 
@@ -1641,8 +1641,6 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
     # Filter object size, relabel to set background to 0.
     ws = relabel_labelmask(ws)
     labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    print(np.unique(ws))
-    print(np.unique(labelmask))
     labelmask = relabel_labelmask(labelmask)
     # Dilate segmented nuclei.
     labelmask = labelmask_apply_morphology(labelmask, 
@@ -1650,7 +1648,6 @@ def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15,
                     struct=np.ones((dilation_length, dilation_length)), 
                     expand_size=(dilation_length + 1, dilation_length + 1))
 
-    print(np.unique(labelmask))
     if (display):
         fig, ax = plt.subplots(3,2, figsize=(10,10))
         # Display mask.
@@ -2554,9 +2551,29 @@ def add_volume_mean(spot_data, stack, channel, ij_rad, z_rad, ij_scale=1, z_scal
         # Equation: (x-x0)^2 + (y-y0)^2 + a(z-z0)^2 = r^2
         r = ij_rad # r is just more intuitive for me to think about...
         a = (r ** 2) / (z_rad ** 2)
-        z0, i0, j0 = coords
-        valsgrid = np.sqrt((a * ((meshgrid[0] - z0) ** 2)) + ((meshgrid[1] - i0) ** 2) + ((meshgrid[2] - j0) ** 2))
-        pixels = stack[valsgrid <= r]
+        z0, i0, j0 = [int(x) for x in coords]
+
+        # Ellipsoid will be bounded by a box of dimensions defined by the radii 
+        # (2 * r + 1 on each side). Performing the matrix operations only on this
+        # box, rather than the whole stack, makes it way way faster.
+
+        # Define a box around the coordinates in both the meshgrid and the stack.
+        z_start = int(np.max([0, z0 - z_rad]))
+        z_end = int(np.min([stack.shape[-3] - 1, z0 + z_rad]))
+        i_start = int(np.max([0, i0 - ij_rad]))
+        i_end = int(np.min([stack.shape[-2] - 1, i0 + ij_rad]))
+        j_start = int(np.max([0, j0 - ij_rad]))
+        j_end = int(np.min([stack.shape[-1] - 1, j0 + ij_rad]))
+
+        substack = stack[z_start:(z_end+1), i_start:(i_end+1), j_start:(j_end+1)]
+
+        submeshgrid = meshgrid.copy()
+        for i in range(0, len(submeshgrid)):
+            submeshgrid[i] = submeshgrid[i][z_start:(z_end+1), i_start:(i_end+1), j_start:(j_end+1)]
+        
+        # Use meshgrid to select pixels within the ellipsoid.
+        valsgrid = np.sqrt((a * ((submeshgrid[0] - z0) ** 2)) + ((submeshgrid[1] - i0) ** 2) + ((submeshgrid[2] - j0) ** 2))
+        pixels = substack[valsgrid <= r]
         return pixels.mean()
     
     spot_data = spot_data.copy()
