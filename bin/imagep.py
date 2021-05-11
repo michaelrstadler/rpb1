@@ -537,7 +537,51 @@ def sortfreq(x, descending=True):
     return items[ordered_indexes]
 
 ############################################################################
-# Function implementing filters
+def df_filter_minlen(df, minlen, renumber=False):
+    """Filter pandas dataframe columns for minimum number of non-nan entries.
+
+    Args:
+        df: pandas dataframe
+
+        minlen: int
+            Minimum number of non-nan entries for a column to be retained
+        renumber: bool
+            If true, renumber columns sequentially from 1
+
+    Returns:
+        new_df: pandas dataframe
+            Contains columns of input dataframe with sufficient entries
+    """
+    new_df =  df.loc[:,df.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
+    if (renumber):
+        new_df.columns = np.arange(1, len(new_df.columns) + 1)
+    return new_df
+
+############################################################################
+def df_deriv(df, windowsize, stepsize):
+    """Take the discrete derivative of each column in a pandas df.
+
+    The (centered) mean is first taken using windows of size windowsize, and 
+    derivates are computed as the  difference between means at offsets of 
+    stepsize.
+
+    Args:
+        df: pandas dataframe
+            Pandas df to take the derivative of
+        windowsize: int
+            Size of window for taking mean for use in derivative calculation
+        stepsize: int
+            Offset size used in derivative
+
+    Returns:
+        df_deriv: Pandas dataframe
+            Derivative of input df
+    """
+    df_deriv = df.rolling(windowsize, center=True).mean().diff(stepsize)
+    return df_deriv
+
+############################################################################
+# Functions implementing filters
 ############################################################################
 
 def gradient_nD(stack):
@@ -2733,5 +2777,110 @@ def align_traces(df, locs, window_size=11, include_nan=True):
             data.append(vals)
     
     return pd.DataFrame(data)
+
+############################################################################
+def spotdf_bleach_correct(df, stack4d, sigma=10):
+    """Perform bleach correction on a 4d image stack using the (smoothed) 
+    frame average, apply correction to columns of a pandas df.
+
+    Args:
+        df: pandas dataframe
+            Spot values, rows are time frames and columns are spots
+        stack4d: ndarray
+            4D image stack to use for bleach correction
+        sigma: number-like
+            Sigma value for gaussian filtering of frame means
+
+    Returns:
+        df_corr: pandas dataframe
+            Input dataframe with bleaching correction applied 
+
+
+    """
+    frame_means = np.mean(stack4d, axis=(1,2,3))
+    frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
+    means_norm = frame_means_smooth / frame_means_smooth[0]
+    df_corr = df.apply(lambda x: x / means_norm, axis=0)
+    return df_corr
+
+############################################################################
+def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
+    """Plot individual traces from MS2 spot pandas dfs with a minimum 
+    trajectory length filter.
+    
+    Args:
+        df1: pandas df
+            First dataset to plot
+        df2: pandas df
+            Second dataset to plot
+        minlen: int
+            Minimum length (number of non-nan values) of trajectories to plot
+        sigma: numeric
+            Sigma for gaussian smoothing of traces
+        norm: bool
+            If true, traces are normalized between the 5th and 95th percentile
+            of all non-nan values in the dataset
+    
+    Returns: none 
+    """
+    
+    def norm_trace(df, x, lower, upper):
+        """Normalize traces given upper and lower bounds"""
+        return (df.iloc[:,x] - lower) / (upper - lower)
+    def df_filter_trajlen(df, df_to_count, minlen):
+        """Filter pandas df columns for minimum number of non-nan entries."""
+        return  df.loc[:,df_to_count.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
+    
+    # Filter input dfs for trajectory length.
+    df1_processed = df_filter_trajlen(df1, df1, minlen)
+    df2_processed = df_filter_trajlen(df2, df1, minlen)
+    
+    # Get limits for normalization.
+    if norm:
+        df1_lower, df1_upper = np.nanpercentile(df1_processed.to_numpy().flatten(), [5, 95])
+        df2_lower, df2_upper = np.nanpercentile(df2_processed.to_numpy().flatten(), [5, 95])
+    
+    num_to_plot=df1_processed.shape[1]
+    
+    # Define function for making each plot.
+    def plot_function(x):
+        if norm:
+            plt.plot(ndi.gaussian_filter1d(norm_trace(df1_processed, x, df1_lower, df1_upper), sigma))
+            plt.plot(ndi.gaussian_filter1d(norm_trace(df2_processed, x, df2_lower, df2_upper), sigma))
+        else:
+            plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma))
+            plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
+        plt.title(df1_processed.columns[x])
+    
+    # Multiplot using plot_ps.
+    plot_ps(plot_function, range(0,num_to_plot))
+
+############################################################################
+def spotdf_plot_traces_bleachcorrect(df1, df2, minlen, stack4d, sigma=0.8, 
+        norm=True):
+    """Plot individual traces from MS2 spot pandas dfs with a minimum 
+    trajectory length filter and bleaching correction with the 
+    spotdf_bleach_correct function.
+    
+    Args:
+        df1: pandas df
+            First dataset to plot
+        df2: pandas df
+            Second dataset to plot
+        minlen: int
+            Minimum length (number of non-nan values) of trajectories to plot
+        stack4d: 4d ndarray
+            Stack used for bleaching correction
+        sigma: numeric
+            Sigma for gaussian smoothing of traces
+        norm: bool
+            If true, traces are normalized between the 5th and 95th percentile
+            of all non-nan values in the dataset
+    
+    Returns: none 
+    """
+    spotdf_plot_traces(spotdf_bleach_correct(df1, stack4d), spotdf_bleach_correct(df2, stack4d), minlen, sigma, norm)
+
+
 
 
