@@ -2881,6 +2881,71 @@ def spotdf_plot_traces_bleachcorrect(df1, df2, minlen, stack4d, sigma=0.8,
     """
     spotdf_plot_traces(spotdf_bleach_correct(df1, stack4d), spotdf_bleach_correct(df2, stack4d), minlen, sigma, norm)
 
-
+############################################################################
+def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66, 
+    cols=[9,10,11], return_dfs=False):
+    """Correct a spot_data object for z depth (scattering)
+    
+    Scattering effects are assumed to be linear (empirically true at typical
+    depths of embryonic nuclei). A function must be independently derived for
+    the decay of fluorescence intensity as a function of embryo depth. 
+    
+    Args:
+        spot_data: dict of ndarrays
+            Each key is a unique spot tracked across 1 or more frames. Each row
+            of array is the spot's data for a single frame, with columns 0: frame
+            number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+            inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+            x_width, 8: fit y_width, 9: integrated volume for MS2, 10: integrated
+            gaussian fit of MS2 spots, 11: integrated volume for protein signal,
+            additional columns if added.
+        slope: numeric
+            The slope of the intensity function, in units of intensity (a.u.)
+            per micron.
+        slice_thickness: numeric
+            Thickness, in microns, of Z slices
+        cols: array-like of ints
+            Numbers of the columns to correct (typically the columns containing 
+            fluorescence intensity values)
+        return_dfs: bool
+            If true, creates pandas dataframes for each of the indicated columns
+            using make_spot_table function.
+    
+    Returns:
+        corr_spot_data: dict of ndarrays
+            If return_dfs is false, corrected version of input spot_data
+        dfs: list of pandas dfs
+            If return_dfs is true, spot tables corresponding to the corrected
+            columns of the input spot_data table
+    """
+    
+    corr_spot_data = {}
+    max_frame = 0
+    # Correct the data for each spot in spot_data.
+    for spot_id in spot_data:
+        arr = spot_data[spot_id].copy()
+        # Correction vector determines intensity to "add" to each row based
+        # on its Z slice
+        corr_vector = arr[:,2] * slice_thickness * slope
+        # Apply correction to each indicated column.
+        for col in cols:
+            arr[:,col] = arr[:,col] - corr_vector
+        corr_spot_data[spot_id] = arr
+        # Track maximum time frame in dataset.
+        max_frame_thisspot = np.max(arr[:,0])
+        if (max_frame_thisspot > max_frame):
+            max_frame = max_frame_thisspot
+    
+    # Create and return pandas dfs, if indicated.
+    if return_dfs:
+        dfs = []
+        for col in cols:
+            df = imp.movie.make_spot_table(corr_spot_data, np.zeros(int(max_frame)+1), col)
+            dfs.append(df)
+        return dfs
+    
+    # If dfs not requested, return corrected spot data.
+    else:
+        return corr_spot_data
 
 
