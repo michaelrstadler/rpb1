@@ -1471,6 +1471,13 @@ def filter_labelmask(labelmask, func, above=0, below=1e6):
     labelmask_filtered = np.where(np.isin(labelmask, labels), labelmask, 0)
     return labelmask_filtered
 
+def filter_labelmask_apply4d(labelmask, func, above=0, below=1e6):
+    labelmask_filtered = np.zeros_like(labelmask)
+    for n in range(0, labelmask.shape[0]):
+        print(n, end=' ')
+        labelmask_filtered[n] = filter_labelmask(labelmask[n], func, above=above, below=below)
+    return labelmask_filtered
+
 ############################################################################
 def zstack_normalize_mean(instack):
     """Normalize each Z-slice in a Z-stack to by dividing by its mean
@@ -1524,322 +1531,14 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     return bgsub
 
 ############################################################################
-def segment_nuclei3D_5(instack, sigma1=3, sigma_dog_small=5, sigma_dog_big=40, seed_window=(70,100,100),
-                       erosion_length=5, dilation_length=10, sensitivity=0.5, size_min=1e4, 
-                       size_max=5e5, circularity_min=0.5, display=False):
-    """Segment nuclei from a 3D imaging stack
-   
-    Args:
-        instack: ndarray
-            3D image stack of dimensions [z, x, y].
-        sigma1: int
-            Sigma for initial Gaussian filter, for making initial mask
-        sigma_dog_small: int
-            Smaller sigma for DoG filter used as input to gradient for watershed
-        sigma_dog_big: int
-            Larger sigma for DoG filter used as input to gradient for watershed
-        seed_window: tuple of three ints
-            Size in [x, y] for window for determining local maxes in distance
-            transform. Generally want size to be a little less than 2x the distance
-            between nuclear centers. Centers closer than this will not produce two
-            seeds.
-        erosion_length: int
-            Size in x and y of structuring element for erosion of initial mask.
-        dilation_length: int
-            Size in x and y of structuring element for dilating objects after
-            final segmentation.
-        size_min: int
-            Minimum size, in pixels, of objects to retain
-        size_max: int
-            Maximum size, in pixels, of objects to retain
-        circularity_min: float
-            Minimum circularity measure of objects to retain
-    
-    Returns:
-        labelmask: ndarray
-            Mask of same shape as input stack with nuclei segmented and labeled
-    
-    """
-
-
-    def smart_dilate(stack, labelmask, sensitivity, dilation_length):
-        """
-        Dilate nuclei, then apply a threshold to the newly-added pixels and
-        only retains pixels that cross it. Change mask in place.
-        """
-        # Get mean pixel values of foreground and background and define threshold.
-        bg_mean = np.mean(stack[labelmask == 0])
-        fg_mean = np.mean(stack[labelmask > 0])
-        t = bg_mean + ((fg_mean - bg_mean) * sensitivity)
-        # Dilate labelmask, return as new mask.
-        labelmask_dilated = labelmask_apply_morphology(labelmask, 
-                mfunc=ndi.morphology.binary_dilation, 
-                struct=np.ones((1, dilation_length, dilation_length)), 
-                expand_size=(1, dilation_length + 1, dilation_length + 1))
-        # Remove any pixels from dilated mask that are below threshhold.
-        labelmask_dilated[stack < t] = 0
-        # Add pixels matching nuc in dilated mask to old mask, pixels in old mask that are n
-        # and 0 in dilated mask are kept at n. So dilation doesn't remove any nuclear pixels.
-        for n in np.unique(labelmask)[1:]:
-            if (n != 0):
-                labelmask[labelmask_dilated == n] = n
-
-    # Normalize each Z-slice to mean intensity to account for uneven illumination.
-    stack = zstack_normalize_mean(instack)
-    # Apply gaussian filter.
-    stack_smooth = ndi.filters.gaussian_filter(stack, sigma=sigma1)
-    # Threshold, make binary mask, fill.
-    t = threshold_otsu(stack_smooth)
-    mask = np.where(stack_smooth >= t, 1, 0)
-    mask = imfill(mask, find_background_point(mask))
-    # Use morphological erosion to remove spurious connections between objects.
-    mask = ndi.morphology.binary_erosion(mask, structure=np.ones((1, erosion_length, erosion_length)))
-    # Perform distance transform of mask.
-    dist = ndi.distance_transform_edt(mask)
-    # Find local maxima for watershed seeds.
-    seeds, _ = peak_local_max_nD(dist, size=seed_window)
-    # Add a background seed.
-    seeds[find_background_point(mask)] = seeds.max() + 1
-    # Re-smooth, do gradient transform to get substrate for watershedding.
-    dog = dog_filter(stack, sigma_dog_small, sigma_dog_big)
-    grad = gradient_nD(dog)
-    # Remove nan from grad, replace with non-nan max values.
-    grad[np.isnan(grad)] = grad[~np.isnan(grad)].max()
-    # Segment by watershed algorithm.
-    ws = watershed(grad, seeds.astype(int))
-    # Filter nuclei for size and circularity.
-    labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
-    # Dilate labeled structures.
-    smart_dilate(stack_smooth, labelmask, sensitivity, dilation_length)
-
-    if (display):
-        middle_slice = int(stack.shape[0] / 2)
-        fig, ax = plt.subplots(3,2, figsize=(10,10))
-        # Display mask.
-        ax[0][0].imshow(mask.max(axis=0))
-        ax[0][0].set_title('Initial Mask')
-        # Display watershed seeds.
-        seeds_vis = ndi.morphology.binary_dilation(seeds, structure=np.ones((1,8,8)))
-        ax[0][1].imshow(stack_smooth.max(axis=0), alpha=0.5)
-        ax[0][1].imshow(seeds_vis.max(axis=0), alpha=0.5)
-        ax[0][1].set_title('Watershed seeds')
-        # Display gradient.
-        ax[1][0].imshow(grad[middle_slice])
-        ax[1][0].set_title('Gradient')
-        # Display watershed output.
-        ax[1][1].imshow(ws.max(axis=0))
-        ax[1][1].set_title('Watershed')
-        # Display final mask.
-        ax[2][0].imshow(labelmask.max(axis=0))
-        ax[2][0].set_title('Final Segmentation')
-        
-    return labelmask
-
-############################################################################
-def segment_nuclei3D_monolayer(stack, sigma1=3, sigma_dog_big=15, 
-        sigma_dog_small=5, seed_window=(30,30), min_seed_dist=25, 
-        dilation_length=5, size_min=0, size_max=np.inf, display=False):
-    """Segment nuclei from confocal nuclear monolayers
-    
-    Segment nuclei from nuclear monolayers, such as standard MS2 confocal
-    stacks. Monolayers don't generally require 3D segmentation, so this
-    function uses the max projection in Z to define the domain of each 
-    nucleus in XY. 
-    
-    Args:
-        stack: ndarray
-            3D image stack of dimensions [z, x, y].
-        sigma1: int
-            Sigma for Gaussian smoothing used to make gradient input to watershed
-        sigma_dog_small: int
-            Smaller sigma for DoG filter used to create initial mask
-        sigma_dog_big: int
-            Larger sigma for DoG filter used to create initial mask
-        seed_window: tuple of three ints
-            Size in [x, y] for window for determining local maxes in distance
-            transform. Generally want size to be a little less than 2x the distance
-            between nuclear centers. Centers closer than this will not produce two
-            seeds.
-        min_seed_dist: numeric
-            The minimum euclidean distance (in pixels) allowed between watershed
-            seeds. Typically set as ~the diameter of the nuclei.
-        size_min: int
-            Minimum size, in pixels, of objects to retain
-        size_max: int
-            Maximum size, in pixels, of objects to retain
-        dilation_length: int
-            Size in x and y of structuring element for dilating objects after
-            final segmentation.
-        
-    Returns:
-        labelmask: ndarray
-            2D labelmask of nuclei.
-    """
-    # Make max projection on Z.
-    maxp = stack.max(axis=0)
-    # Filter with DoG to make nuclei into blobs.
-    dog = dog_filter(maxp, sigma_dog_small, sigma_dog_big)
-    # Get threshold, use thresh to make initial mask and fill holes.
-    t = threshold_otsu(dog)
-    mask = np.where(dog > t, 1, 0)
-    mask = imfill(mask)
-    # Perform distance transform, find local maxima for watershed seeds.
-    dist = ndi.distance_transform_edt(mask)
-    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
-    # Smooth image and take gradient, use as input for watershed.
-    im_smooth = ndi.filters.gaussian_filter(maxp, sigma=sigma1)
-    grad = gradient_nD(im_smooth)
-    ws = watershed(grad, seeds.astype(int))
-    # Filter object size, relabel to set background to 0.
-    ws = relabel_labelmask(ws)
-    labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    labelmask = relabel_labelmask(labelmask)
-    # Dilate segmented nuclei.
-    labelmask = labelmask_apply_morphology(labelmask, 
-                    mfunc=ndi.morphology.binary_dilation, 
-                    struct=np.ones((dilation_length, dilation_length)), 
-                    expand_size=(dilation_length + 1, dilation_length + 1))
-
-    if (display):
-        fig, ax = plt.subplots(3,2, figsize=(10,10))
-        # Display mask.
-        ax[0][0].imshow(mask)
-        ax[0][0].set_title('Initial Mask')
-        # Display watershed seeds.
-        seeds_vis = ndi.morphology.binary_dilation(seeds, structure=np.ones((8,8)))
-        ax[0][1].imshow(im_smooth, alpha=0.5)
-        ax[0][1].imshow(seeds_vis, alpha=0.5)
-        ax[0][1].set_title('Watershed seeds')
-        # Display gradient.
-        ax[1][0].imshow(grad)
-        ax[1][0].set_title('Gradient')
-        # Display watershed output.
-        ws = relabel_labelmask(ws)
-        ax[1][1].imshow(ws.astype('bool'))
-        ax[1][1].set_title('Watershed')
-        # Display final mask.
-        ax[2][0].imshow(labelmask.astype('bool'))
-        ax[2][0].set_title('Final Segmentation')
-    
-    # Make 2D labelmask into 3D mask by repeating.
-    labelmask = np.repeat([labelmask], stack.shape[0], axis=0)
-    return labelmask
-
-############################################################################
-def segment_nuclei3D_monolayer_rpb1(stack, sigma1=3, sigma_dog_big=15, 
-        sigma_dog_small=5, seed_window=(30,30), min_seed_dist=25, 
-        dilation_length=5, dilation_length_foci=10, size_min=0, 
-        circularity_min=0, size_max=np.inf, display=False):
-    """Segment nuclei from confocal nuclear monolayers based on Rpb1 signal
-    
-    Segment nuclei using Rpb1 signal. The segment_nuclei3D_monolayer function runs
-    into problems because of the strong Rpb1 foci (presumed histone locus bodies)
-    that create problems in the gradient used as input for watershed segmentation.
-    This function has an additional masking step that segments these foci and masks
-    them out of the gradient image, and also adds an object circularity filter.
-    
-    Args:
-        stack: ndarray
-            3D image stack of dimensions [z, x, y].
-        sigma1: int
-            Sigma for Gaussian smoothing used to make gradient input to watershed
-        sigma_dog_small: int
-            Smaller sigma for DoG filter used to create initial mask
-        sigma_dog_big: int
-            Larger sigma for DoG filter used to create initial mask
-        seed_window: tuple of two ints
-            Size in [x, y] for window for determining local maxes in distance
-            transform. Generally want size to be a little less than 2x the distance
-            between nuclear centers. Centers closer than this will not produce two
-            seeds.
-        min_seed_dist: numeric
-            The minimum euclidean distance (in pixels) allowed between watershed
-            seeds. Typically set as ~the diameter of the nuclei.
-        size_min: int
-            Minimum size, in pixels, of objects to retain
-        size_max: int
-            Maximum size, in pixels, of objects to retain
-        dilation_length: int
-            Size in x and y of structuring element for dilating objects after
-            final segmentation.
-        dilation_length_foci: int
-            Size in x and y of structuring element for dilating nuclear foci (HLB)
-            mask.
-        circularity_min: float 0 to 1
-            Minimum circularity for objects to be retained in final mask
-        
-    Returns:
-        labelmask: ndarray
-            2D labelmask of nuclei.
-    """
-    # Make max projection on Z.
-    maxp = stack.max(axis=0)
-    # Filter with DoG to make nuclei into blobs.
-    dog = dog_filter(maxp, sigma_dog_small, sigma_dog_big)
-    # Get threshold, use thresh to make initial mask and fill holes.
-    t = threshold_otsu(dog)
-    mask = np.where(dog > t, 1, 0)
-    mask = imfill(mask)
-    # Perform distance transform, find local maxima for watershed seeds.
-    dist = ndi.distance_transform_edt(mask)
-    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
-    # Smooth image and take gradient, use as input for watershed.
-    im_smooth = ndi.filters.gaussian_filter(maxp, sigma=sigma1)
-    grad = gradient_nD(im_smooth)
-    # Make second mask of pol2 foci (presumed HLBs) by re-thresholding within nuclei.
-    t_foci = threshold_otsu(im_smooth[mask.astype('bool')])
-    mask_foci = np.where(im_smooth > t_foci, True, False)
-    mask_foci = ndi.morphology.binary_dilation(mask_foci, structure=np.ones((dilation_length_foci, dilation_length_foci)))
-    # Mask out pol2 foci in gradient.
-    grad = np.where(mask_foci, 0, grad)
-    # Perform watershed segmentation.
-    ws = watershed(grad, seeds.astype(int))
-    # Filter object size and circularity, relabel to set background to 0.
-    labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    # Note: object_circularity works on 3D labelmasks, requiring adding (expand_dims) and removing (squeeze) a dimension.
-    labelmask = np.squeeze(filter_labelmask(np.expand_dims(labelmask, axis=0), object_circularity, circularity_min, 1000))
-    labelmask = relabel_labelmask(labelmask)
-    # Dilate segmented nuclei.
-    labelmask = labelmask_apply_morphology(labelmask, 
-                    mfunc=ndi.morphology.binary_dilation, 
-                    struct=np.ones((dilation_length, dilation_length)), 
-                    expand_size=(dilation_length + 1, dilation_length + 1))
-
-    if (display):
-        fig, ax = plt.subplots(3,2, figsize=(10,10))
-        # Display mask.
-        ax[0][0].imshow(mask)
-        ax[0][0].set_title('Initial Mask')
-        # Display watershed seeds.
-        seeds_vis = ndi.morphology.binary_dilation(seeds, structure=np.ones((8,8)))
-        ax[0][1].imshow(im_smooth, alpha=0.5)
-        ax[0][1].imshow(seeds_vis, alpha=0.5)
-        ax[0][1].set_title('Watershed seeds')
-        # Display gradient.
-        ax[1][0].imshow(grad)
-        ax[1][0].set_title('Gradient')
-        # Display watershed output.
-        ws = relabel_labelmask(ws)
-        ax[1][1].imshow(ws.astype('bool'))
-        ax[1][1].set_title('Watershed')
-        # Display final mask.
-        ax[2][0].imshow(labelmask.astype('bool'))
-        ax[2][0].set_title('Final Segmentation')
-    
-    # Make 2D labelmask into 3D mask by repeating.
-    labelmask = np.repeat([labelmask], stack.shape[0], axis=0)
-    return labelmask
-
-############################################################################
 def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
-    min_seed_dist=25, size_min=0, size_max=50000, circularity_min=0.3, 
-    sigma=5, usemax=False, display=False, return_intermediates=False):
+    min_seed_dist=25, sigma=5, usemax=False, display=False, 
+    return_intermediates=False):
     """Segment nuclei from Rpb1 fluorescence in confocal data.
     
     Algorithm is smooth -> threshold -> distance transform to find seeds ->
-    take gradient on binary mask -> watershed on gradient -> filter segmented
-    objects for size and circularity
+    take gradient on binary mask -> watershed on gradient. Does not do
+    any filtering on resulting segmented objects.
    
     Args:
         stack: ndarray
@@ -1854,14 +1553,12 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
         min_seed_dist: numeric
             The minimum euclidean distance (in pixels) allowed between watershed
             seeds. Typically set as ~the diameter of the nuclei.   
-        size_min: int
-            Minimum size, in pixels, of objects to retain
-        size_max: int
-            Maximum size, in pixels, of objects to retain
-        circularity_min: float
-            Minimum circularity measure of objects to retain
         sigma: numeric
             Sigma for use in initial gaussian smoothing
+        usemax: bool
+            Use maximum intensity projection (in Z) for segmenting
+        return_intermediates: bool
+            Return (mask, grad, seeds, ws) for troubleshooting
     
     Returns:
         labelmask: ndarray
@@ -1882,21 +1579,16 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
     #print('mask')
     # Take the gradient of the mask to produce outlines for use in watershed algorithm.
     grad = gradient_nD(mask)
-    #print('grad')
     # Perform distance transform and run local max finder to determine watershed seeds.
     dist = ndi.distance_transform_edt(mask)
-    #print('dist')
     seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
-    #print('seeds')
     # Perform watershed segmentation.
     ws = watershed(grad, seeds.astype(int))
-    #print('ws')
     # Filter object size and circularity, relabel to set background to 0.
     if usemax:
         ws = np.repeat(np.expand_dims(ws, axis=0), stack.shape[0], axis=0)
     labelmask = ws
     #labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    #print('labelmask')
     #labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
 
     if (display):
@@ -1921,7 +1613,7 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
         ax[2][0].set_title('Final Segmentation')
 
     if return_intermediates:
-        return (mask, grad, seeds, ws, labelmask)
+        return (mask, grad, seeds, ws)
     return labelmask
 
 ############################################################################
