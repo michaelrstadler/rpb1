@@ -15,20 +15,50 @@ sys.path.append('/Users/michaelstadler/Bioinformatics/Projects/rpb1/bin')
 import imagep as imp
 reload(imp)
 
-def df_filter_trajlen(df, minlen, renumber=False):
-    """Filter pandas df columns for minimum number of non-nan entries."""
+def df_filter_minlen(df, minlen, renumber=False):
+    """Filter pandas dataframe columns for minimum number of non-nan entries.
+
+    Args:
+        df: pandas dataframe
+
+        minlen: int
+            Minimum number of non-nan entries for a column to be retained
+        renumber: bool
+            If true, renumber columns sequentially from 1
+
+    Returns:
+        new_df: pandas dataframe
+            Contains columns of input dataframe with sufficient entries
+    """
     new_df =  df.loc[:,df.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
     if (renumber):
         new_df.columns = np.arange(1, len(new_df.columns) + 1)
     return new_df
 
-def bleach_corr(df, stack4d, sigma=10):
-    """Perform bleach correction using the (smoothed) frame average of 
-    the rpb1 channel, apply to columns of a pandas df."""
+############################################################################
+def spotdf_bleach_corr(df, stack4d, sigma=10):
+    """Perform bleach correction on a 4d image stack using the (smoothed) 
+    frame average, apply correction to columns of a pandas df.
+
+    Args:
+        df: pandas dataframe
+            Spot values, rows are time frames and columns are spots
+        stack4d: ndarray
+            4D image stack to use for bleach correction
+        sigma: number-like
+            Sigma value for gaussian filtering of frame means
+
+    Returns:
+        df_corr: pandas dataframe
+            Input dataframe with bleaching correction applied 
+
+
+    """
     frame_means = np.mean(stack4d, axis=(1,2,3))
     frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
     means_norm = frame_means_smooth / frame_means_smooth[0]
-    return df.apply(lambda x: x / means_norm, axis=0)
+    df_corr = df.apply(lambda x: x / means_norm, axis=0)
+    return df_corr
 
 def findrises_norm_all(df_in, windowsize, lag, minlen, min_, max_, sigma=1, rise=True, norm=True, display=False):
     """Find points in signal where a 'rise' occurs of magnitude between min_ and max_.
@@ -70,10 +100,30 @@ def findrises_norm_all(df_in, windowsize, lag, minlen, min_, max_, sigma=1, rise
     print(len(events))
     return events
 
+############################################################################
 def df_deriv(df, windowsize, stepsize):
-    return df.rolling(windowsize, center=True).mean().diff(stepsize)
+    """Take the discrete derivative of each column in a pandas df.
 
-def plot_traces(df1, df2, stack, minlen, sigma=0.8, norm=True):
+    The (centered) mean is first taken using windows of size windowsize, and 
+    derivates are computed as the  difference between means at offsets of 
+    stepsize.
+
+    Args:
+        df: pandas dataframe
+            Pandas df to take the derivative of
+        windowsize: int
+            Size of window for taking mean for use in derivative calculation
+        stepsize: int
+            Offset size used in derivative
+
+    Returns:
+        df_deriv: Pandas dataframe
+            Derivative of input df
+    """
+    df_deriv = df.rolling(windowsize, center=True).mean().diff(stepsize)
+    return df_deriv
+
+def spotdf_plot_traces(df1, df2, stack, minlen, sigma=0.8, norm=True):
     """Plot individual traces with smoothing, bleach correction, and 
     a minimum trajectory length filter."""
     def norm_trace(df, x, lower, upper):
@@ -97,6 +147,7 @@ def plot_traces(df1, df2, stack, minlen, sigma=0.8, norm=True):
             plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
         plt.title(df1_processed.columns[x])
     imp.plot_ps(test, range(0,num_to_plot))
+
 
 from imagep import get_object_centroid
 def df_find_peaks_thresh(df, thresh, sigma=1, display=False):
@@ -171,7 +222,14 @@ def df_cross_corr_intvol_prot(mv, window=5, step=3, minlen=0, pad=30, plot=True,
     plt.axvline(spread, alpha=0.3, color="orange")
     return crosscorr_norm
 
-
+def bleach_corr2(df, stack4d, nucmask, sigma=10):
+    """Perform bleach correction on a pandas df using the segmented 
+    nuclear signal."""
+    nucs_only = np.where(nucmask.astype(bool), stack4d, np.nan)
+    frame_means = np.nanmean(nucs_only, axis=(1,2,3))
+    frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
+    means_norm = frame_means_smooth / frame_means_smooth[0]
+    return df.apply(lambda x: x / means_norm, axis=0)
 
 
 

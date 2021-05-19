@@ -791,7 +791,7 @@ def read_czi(filename, trim=False, swapaxes=True):
         filename: string
             Path to czi file
         trim: bool
-            If true, remove last frame
+            If true, remove last frame if it contains blank slices
         swapaxes: bool
             If true, switches first two axes to produce a stack order ctzxy
             
@@ -800,11 +800,18 @@ def read_czi(filename, trim=False, swapaxes=True):
             Image stack in dimensions [t,c,z,x,y] (no swap) or 
             [c,t,z,x,y] (swapped)
     """
+    def frame_incomplete(stack3d):
+        for slice in stack3d:
+            # If only value in slice is 0, frame is incomplete.
+            if ((np.min(slice) == 0) & (np.max(slice) == 0)):
+                return True
+        return False
     stack = czifile.imread(filename)
     stack = np.squeeze(stack)
     # Trim off last frame 
     if trim:
-        stack = stack[0:stack.shape[0]-1]
+        if frame_incomplete(stack[-1,0]):
+            stack = stack[:-1]
     if (swapaxes):
         stack = np.swapaxes(stack,0,1)
     return stack
@@ -1313,7 +1320,7 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, vi
     if(view):
         #viewer(movies.mean(axis=2), 'itxy')
         viewer(np.nanmean(movies, axis=2), 'itxy')
-    return movies[1:]
+    return movies
 
 ############################################################################    
 ############################################################################
@@ -1405,6 +1412,8 @@ def object_circularity(labelmask, label):
     """Calculate circularity for and object in a labelmask
     
     Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
+    Circularity calculation is 2D, using the single Z slice in which the
+    lebeled object has the most pixels.
     
     Args:
         labelmask: ndarray
@@ -1820,6 +1829,99 @@ def segment_nuclei3D_monolayer_rpb1(stack, sigma1=3, sigma_dog_big=15,
     
     # Make 2D labelmask into 3D mask by repeating.
     labelmask = np.repeat([labelmask], stack.shape[0], axis=0)
+    return labelmask
+
+############################################################################
+def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
+    min_seed_dist=25, size_min=0, size_max=50000, circularity_min=0.3, 
+    sigma=5, usemax=False, display=False, return_intermediates=False):
+    """Segment nuclei from Rpb1 fluorescence in confocal data.
+    
+    Algorithm is smooth -> threshold -> distance transform to find seeds ->
+    take gradient on binary mask -> watershed on gradient -> filter segmented
+    objects for size and circularity
+   
+    Args:
+        stack: ndarray
+            3D image stack of dimensions [z, x, y].
+        seed_window: tuple of three ints
+            Size in [z, x, y] for window for determining local maxes in 
+            distance transform. A point is retained as a seed if there
+            exists some window of this size in the image for which the point
+            is the max value. Generally want size to be a little less than 2x 
+            the distance between nuclear centers. Centers closer than this 
+            will not produce two seeds.
+        min_seed_dist: numeric
+            The minimum euclidean distance (in pixels) allowed between watershed
+            seeds. Typically set as ~the diameter of the nuclei.   
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+        circularity_min: float
+            Minimum circularity measure of objects to retain
+        sigma: numeric
+            Sigma for use in initial gaussian smoothing
+    
+    Returns:
+        labelmask: ndarray
+            Mask of same shape as input stack with nuclei segmented and labeled
+    
+    """
+    # Smooth stack using a Gaussian filter.
+    if usemax:
+        stack_smooth = ndi.gaussian_filter(stack.max(axis=0), sigma)
+    else:
+        stack_smooth = ndi.gaussian_filter(stack, sigma)
+    #print('smooth')
+    # Define a threshold for nuclear signal.
+    thresh = threshold_otsu(stack_smooth)
+    #print('thresh')
+    # Make a binary mask using threshold.
+    mask = np.where(stack_smooth > thresh, 1, 0)
+    #print('mask')
+    # Take the gradient of the mask to produce outlines for use in watershed algorithm.
+    grad = gradient_nD(mask)
+    #print('grad')
+    # Perform distance transform and run local max finder to determine watershed seeds.
+    dist = ndi.distance_transform_edt(mask)
+    #print('dist')
+    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
+    #print('seeds')
+    # Perform watershed segmentation.
+    ws = watershed(grad, seeds.astype(int))
+    #print('ws')
+    # Filter object size and circularity, relabel to set background to 0.
+    if usemax:
+        ws = np.repeat(np.expand_dims(ws, axis=0), stack.shape[0], axis=0)
+    labelmask = ws
+    #labelmask = labelmask_filter_objsize(ws, size_min, size_max)
+    #print('labelmask')
+    #labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
+
+    if (display):
+        fig, ax = plt.subplots(3,2, figsize=(10,10))
+        # Display mask.
+        ax[0][0].imshow(mask.max(axis=0))
+        ax[0][0].set_title('Initial Mask')
+        # Display watershed seeds.
+        seeds_vis = ndi.morphology.binary_dilation(seeds.max(axis=0), structure=np.ones((8,8)))
+        ax[0][1].imshow(stack_smooth.max(axis=0), alpha=0.5)
+        ax[0][1].imshow(seeds_vis, alpha=0.5)
+        ax[0][1].set_title('Watershed seeds')
+        # Display gradient.
+        ax[1][0].imshow(grad.max(axis=0))
+        ax[1][0].set_title('Gradient')
+        # Display watershed output.
+        ws = relabel_labelmask(ws)
+        ax[1][1].imshow(ws.astype('bool').max(axis=0))
+        ax[1][1].set_title('Watershed')
+        # Display final mask.
+        ax[2][0].imshow(labelmask.astype('bool').max(axis=0))
+        ax[2][0].set_title('Final Segmentation')
+
+    if return_intermediates:
+        return (mask, grad, seeds, ws, labelmask)
     return labelmask
 
 ############################################################################
@@ -2259,7 +2361,7 @@ def filter_ms2fits(fit_data, peakiness=4.5, stack=None, channel=1):
 def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10, 
     scale_xy=1, scale_z=1):
     """Connect detected MS2 spots in a single movie through multiple time 
-    frames.
+    frames based on the distance between spots.
     
     Spots detected in new frame are connected to spots in previous frames
     if they are within specified distance (max_jump). Spots can "disappear" 
@@ -2523,6 +2625,105 @@ def connect_ms2_fits_focuscorrect(fits_orig, z_frames, z_corrs, nucmask,
             frame_num = int(arr[i,0])
             arr[i,2] = arr[i,2] - frame_corrs[frame_num]
     return spots_connected
+
+############################################################################
+def connect_ms2_frames_via_nuclei(frame_data, nucmask, nucmask_dilation=5):
+    """Connect MS2 spots detected in separate time frames based on nucleus
+    ID.
+    
+    Args:
+        frame_data: list of ndarrays
+            Output from fitting. Each entry in the list is a time point 
+            (frame). Each row in array is a fit (a single local maxima), 
+            columns are: 0: center z-coordinate, 1: center x-coordinate, 
+            2: center y-coordinate, 3: fit_height, 4: width_z, 5: width_x,
+            6: width_y). 
+        nucmask: ndarray
+            4d labelmask of segmented nuclei
+        nucmask_dilation: int
+            Distance to dilate (in x and y directions) nuclear labelmask for
+            looking up the nuclear ID of detected spots.
+    
+    Returns:
+        spot_data: dict of ndarrays
+            Each key is a unique spot tracked across 1 or more frames. Each row
+            of array is the spot's data for a single frame, with columns 0: frame
+            number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+            inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+            x_width, 8: fit y_width
+    """
+    def find_nuc_id(coords, t, nucmask_lookup):
+        """Find object in nuclear mask at particular coordinate."""
+        # Make 4d coordinates as a list.
+        coords_nucmask = np.concatenate([[t], coords])
+        # Convert coordinates to a tuple of ints.
+        coords_nucmask = tuple([int(n) for n in coords_nucmask])
+        nuc_id = nucmask_lookup[coords_nucmask]
+        return nuc_id
+    
+    def add_row(row, spot_data):
+        """Add a new row (spot data for a single frame) to spot data 
+        object."""
+        # Pull nuc_id and t off of row.
+        t, nuc_id = row[0:2].astype(int)
+        # If this nucleus is already in spot data, add to existing data.
+        if (nuc_id in spot_data):
+            # Check to see if there is already a spot for this nucleus and time.
+            if (spot_data[nuc_id][-1,0] == t):
+                # If spot_data for this nucleus has a previous entry, choose
+                # closest spot. Otherwise just leave current.
+                if (spot_data[nuc_id].shape[0] > 1):
+                    # Find the euclidean distance between the spot position in the
+                    # most recent frame and both the candidate spots in the new
+                    # frame.
+                    coords_previous_frame = spot_data[nuc_id][-2,2:5]
+                    coords_existing = spot_data[nuc_id][-1,2:5]
+                    coords_new = row[2:5]
+                    # full function: scipy.spatial.distance.euclidean
+                    dist_existing = distance.euclidean(coords_previous_frame, coords_existing)
+                    dist_new = distance.euclidean(coords_previous_frame, coords_new)
+                    # Select closest spot to previous to go into spot data.
+                    if (dist_new < dist_existing):
+                        spot_data[nuc_id][-1] = row
+            # If no spot already, just add new row to end.
+            else:
+                spot_data[nuc_id] = np.vstack([spot_data[nuc_id], row])
+        # If nucleus isn't in spot data, initialize new entry.   
+        else:
+            spot_data[nuc_id] = np.expand_dims(row, axis=0)
+            
+    def renumber_spots(spot_data):
+        """Renumber the spots in spot_data sequentially from 1."""
+        spot_data_renumbered = {}
+        spot_number_new = 1
+        for spot_number_old in spot_data:
+            spot_data_renumbered[spot_number_new] = spot_data[spot_number_old]
+            spot_number_new += 1
+        return spot_data_renumbered
+    
+    # Make a new lookup version of nuclear mask that dilates (expands in all 
+    # directions) the nucleus objects.
+    
+    nucmask_lookup = labelmask_apply_morphology(nucmask, ndi.morphology.binary_dilation, 
+        struct=np.ones((1,1,nucmask_dilation,nucmask_dilation)), 
+        expand_size=(1,1,nucmask_dilation,nucmask_dilation)) 
+   
+    #nucmask_lookup = nucmask
+    
+    # Go through all frames of input data, lookup nuclei for each detected spot,
+    # Add data to spot_data.
+    spot_data = {}
+    nframes = len(frame_data)
+    for t in range(0, nframes):
+        print (t, end=' ')
+        for row in frame_data[t]:
+            coords = row[0:3]
+            nuc_id = find_nuc_id(coords, t, nucmask_lookup)
+            if (nuc_id != 0):
+                new_row = np.concatenate([[t, nuc_id], row])
+                add_row(new_row, spot_data)
+                
+    return renumber_spots(spot_data)
 
 ############################################################################
 def filter_spot_duration(connected_data, min_len):
@@ -2845,8 +3046,10 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
     # Define function for making each plot.
     def plot_function(x):
         if norm:
-            plt.plot(ndi.gaussian_filter1d(norm_trace(df1_processed, x, df1_lower, df1_upper), sigma))
-            plt.plot(ndi.gaussian_filter1d(norm_trace(df2_processed, x, df2_lower, df2_upper), sigma))
+            #plt.plot(ndi.gaussian_filter1d(norm_trace(df1_processed, x, df1_lower, df1_upper), sigma))
+            #plt.plot(ndi.gaussian_filter1d(norm_trace(df2_processed, x, df2_lower, df2_upper), sigma))
+            plt.plot(norm_trace(df1_processed, x, df1_lower, df1_upper))
+            plt.plot(norm_trace(df2_processed, x, df2_lower, df2_upper))
         else:
             plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma))
             plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
@@ -2940,7 +3143,7 @@ def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66,
     if return_dfs:
         dfs = []
         for col in cols:
-            df = imp.movie.make_spot_table(corr_spot_data, np.zeros(int(max_frame)+1), col)
+            df = movie.make_spot_table(corr_spot_data, np.zeros(int(max_frame)+1), col)
             dfs.append(df)
         return dfs
     
