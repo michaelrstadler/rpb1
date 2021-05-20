@@ -14,6 +14,7 @@ import os
 from os import listdir
 from os.path import isfile, join
 import re
+import xml.etree.ElementTree as ET
 from skimage import filters, io
 from ipywidgets import interact, IntSlider, Dropdown, IntRangeSlider, fixed
 import matplotlib.pyplot as plt
@@ -156,6 +157,13 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
     # Select and keep only objects within size range.
     labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
     labelmask_filtered = np.where(np.isin(labelmask, labels_selected), labelmask, 0)
+    return labelmask_filtered
+
+def labelmask_filter_objsize_apply4d(labelmask, size_min, size_max):
+    labelmask_filtered = np.zeros_like(labelmask)
+    for n in range(0, labelmask.shape[0]):
+        print(n, end=' ')
+        labelmask_filtered[n] = labelmask_filter_objsize(labelmask[n], size_min, size_max)    
     return labelmask_filtered
 
 ############################################################################
@@ -801,14 +809,16 @@ def read_czi(filename, trim=False, swapaxes=True):
             [c,t,z,x,y] (swapped)
     """
     def frame_incomplete(stack3d):
+        """Determine if frame is incomplete."""
         for slice in stack3d:
             # If only value in slice is 0, frame is incomplete.
             if ((np.min(slice) == 0) & (np.max(slice) == 0)):
                 return True
         return False
+
     stack = czifile.imread(filename)
     stack = np.squeeze(stack)
-    # Trim off last frame 
+    # Trim off last frame if incomplete.
     if trim:
         if frame_incomplete(stack[-1,0]):
             stack = stack[:-1]
@@ -817,8 +827,9 @@ def read_czi(filename, trim=False, swapaxes=True):
     return stack
 
 ############################################################################
-def read_concat_5dczi(czis):
-    """Read a list of 5d czi files and combine into single stack
+def read_czi_multiple(czi_files):
+    """Read a list of 5d czi files, combine into single stack, record
+    frame junctions and positions of first Z slice.
     
     Args:
         czis: list-like (iterable)
@@ -832,12 +843,26 @@ def read_concat_5dczi(czis):
             List of the frame numbers at which joins occur, with each entry
             representing the 0-indexed location of the first frame of a new
             stack.
+        starting_positions: list of floats
+            List of the position, in meters, of the first slice in the Z
+            stack of each file, taken from czi file metadata.
     """
+    def get_starting_position(czi_file_):
+        metadata = czifile.CziFile(czi_file_).metadata()
+        root = ET.fromstring(metadata)
+        first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
+        #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
+        return first_dist
+
     stacks = []
-    for czi in czis:
-        stacks.append(read_czi(czi, True))
+    starting_positions = []
+    for czi_file_ in czi_files:
+        stacks.append(read_czi(czi_file_, trim=True))
+        starting_positions.append(get_starting_position(czi_file_))
+        
     stack, frames = concatenate_5dstacks(stacks)
-    return stack, frames
+    return stack, frames, starting_positions
+
 ############################################################################
 def save_pickle(obj, filename):
     """Pickel (serialize) an object into a file
@@ -1438,7 +1463,60 @@ def object_circularity(labelmask, label):
         perimeter = 0.5
     circularity = 4 * np.pi * area / (perimeter ** 2) 
     return circularity
-    
+ 
+def filter_labelmask_circularity(labelmask, slicenum, circularity_min=0.5):
+    """
+
+        label: int
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            output of circularity calculation 
+    """
+    # Calculate circularity from object perimeter and area.
+    good_objs = []
+    im = labelmask[slicenum]
+    regions = regionprops(im)
+    for n in range(0, len(regions)):
+        perimeter = regions[n].perimeter
+        area = regions[n].area
+        if (perimeter == 0):
+            perimeter = 0.5
+        circularity = 4 * np.pi * area / (perimeter ** 2)
+        if (circularity >= circularity_min):
+            good_objs.append(regions[n].label)
+    labelmask_filtered = np.where(np.isin(labelmask, good_objs), labelmask, 0)
+        
+    return labelmask_filtered
+
+def filter_labelmask_circularity_apply4d(labelmask, slicenum, circularity_min=0.5):
+    labelmask_filtered = np.zeros_like(labelmask)
+    for n in range(0, labelmask.shape[0]):
+        labelmask_filtered[n] = filter_labelmask_circularity(labelmask[n], slicenum=slicenum, circularity_min=circularity_min)
+        
+    return labelmask_filtered
+
+############################################################################
+def filter_3dlabelmask_circularity(labelmask, slice):
+    """
+
+        label: int
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            output of circularity calculation 
+    """
+    # Calculate circularity from object perimeter and area.
+    im = labelmask[slice]
+    regions = regionprops(im)
+    perimeter = regions[0].perimeter
+    area = regions[0].area
+    if (perimeter == 0):
+        perimeter = 0.5
+    circularity = 4 * np.pi * area / (perimeter ** 2) 
+    return circularity   
 ############################################################################
 def filter_labelmask(labelmask, func, above=0, below=1e6):
     """Filter objects from a labelmask based on object properties
@@ -1681,7 +1759,7 @@ def update_labels(mask1, mask2):
     # (as a fraction of the objects pixels in mask1)
     def get_max_overlap(mask1, mask2, label1):
         # Count overlapping pixels.
-        labels, counts = np.unique(mask2[mask1 == label1], return_counts=True)
+        labels, counts = np.unique(mask2[mask1 == label1], return_counts=True) # The slow step in this function is actually the mask2[mask1 == label1].
         # Sort labels by counts (ascending).
         labels_sorted = labels[np.argsort(counts)]
         counts_sorted = counts[np.argsort(counts)]
