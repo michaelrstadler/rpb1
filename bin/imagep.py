@@ -28,14 +28,14 @@ from skimage.measure import label, regionprops
 from scipy.spatial import distance
 import pickle
 import czifile
+import sys
 import pandas as pd
 from copy import deepcopy
 # Bug in skimage: skimage doesn't bring modules with it in some environments.
 # Importing directly from submodules (above) gets around this.
 
 # Import my packages.
-import sys
-sys.path.append('/Users/MStadler/Bioinformatics/Projects/Zelda/Quarantine_analysis/bin')
+sys.path.append(os.getcwd())
 from fitting import fitgaussian3d, gaussian3d
 
 
@@ -48,7 +48,7 @@ To fix:
 # Classes
 ############################################################################
 class movie():
-    """'
+    """
     spot_data: dict of ndarrays
         Each key is a unique spot tracked across 1 or more frames. Each row
         of array is the spot's data for a single frame, with columns 0: frame
@@ -57,7 +57,7 @@ class movie():
         x_width, 8: fit y_width, 9: integrated volume for MS2, 10: integrated
         gaussian fit of MS2 spots, 11: integrated volume for protein signal.
     """
-    # Class attributes    
+    # Class attributes  
     # Initializer
 
     @staticmethod
@@ -160,6 +160,21 @@ def labelmask_filter_objsize(labelmask, size_min, size_max):
     return labelmask_filtered
 
 def labelmask_filter_objsize_apply4d(labelmask, size_min, size_max):
+    """Filter objects in a 4D labelmask by size.
+
+    Args:
+        labelmask: ndarray
+            4D Integer labelmask (background must be 0 or errors occur)
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+
+    Returns:
+        labelmask_filtered: ndarray
+            Input labelmask with all pixels not corresponding to objects
+            within size range set to 0.
+    """
     labelmask_filtered = np.zeros_like(labelmask)
     for n in range(0, labelmask.shape[0]):
         print(n, end=' ')
@@ -589,6 +604,25 @@ def df_deriv(df, windowsize, stepsize):
     return df_deriv
 
 ############################################################################
+def expand_mip(mask, n):
+        """Expand a 3d maximum intensity projection by repeating in Z (-3)
+        dimension n times.
+        
+        Main use: using a MIP for speed to do something like create a nuclear
+        mask, but then you want to expand it in the Z dimension to match the
+        original, non-MIP stack.
+
+        Args:
+            mask: ndarray
+                n-dimensional 
+
+        """
+        expanded_mask = np.zeros([mask.shape[0], n, mask.shape[1], mask.shape[2]])
+        for t in range(0, mask.shape[0]):
+            expanded_mask[t] = np.repeat([mask[t]], n, axis=0)
+        return expanded_mask
+
+############################################################################
 # Functions implementing filters
 ############################################################################
 
@@ -827,7 +861,7 @@ def read_czi(filename, trim=False, swapaxes=True):
     return stack
 
 ############################################################################
-def read_czi_multiple(czi_files):
+def read_czi_multiple(czi_files, folder):
     """Read a list of 5d czi files, combine into single stack, record
     frame junctions and positions of first Z slice.
     
@@ -835,6 +869,8 @@ def read_czi_multiple(czi_files):
         czis: list-like (iterable)
             List of filenames containing 5d .czi movies of dimension 
             [c,t,z,x,y]. Shapes must be identical except for t dimension.
+        folder: path
+            Path to folder containing czi files
             
     Returns:
         stack: 5d ndarray
@@ -857,8 +893,9 @@ def read_czi_multiple(czi_files):
     stacks = []
     starting_positions = []
     for czi_file_ in czi_files:
-        stacks.append(read_czi(czi_file_, trim=True))
-        starting_positions.append(get_starting_position(czi_file_))
+        czi_file_path = os.path.join(folder, czi_file_)
+        stacks.append(read_czi(czi_file_path, trim=True))
+        starting_positions.append(get_starting_position(czi_file_path))
         
     stack, frames = concatenate_5dstacks(stacks)
     return stack, frames, starting_positions
@@ -1465,14 +1502,23 @@ def object_circularity(labelmask, label):
     return circularity
  
 def filter_labelmask_circularity(labelmask, slicenum, circularity_min=0.5):
-    """
+    """Filter a 3D labelmask for object circularity.
 
-        label: int
+    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
+    Circularity calculation is 2D, using the single Z slice in which the
+    lebeled object has the most pixels.
+
+    Args:
+        labelmask: ndarray
+            3d integer labelmask
+        slicenum: int
+            Z slice to use for circularity calculations
+        circularity_min: float
             ID of object for which to calculate circularity
             
     Return:
         circularity: float
-            output of circularity calculation 
+            Minimum circularity for objects to pass filter
     """
     # Calculate circularity from object perimeter and area.
     good_objs = []
@@ -1491,8 +1537,25 @@ def filter_labelmask_circularity(labelmask, slicenum, circularity_min=0.5):
     return labelmask_filtered
 
 def filter_labelmask_circularity_apply4d(labelmask, slicenum, circularity_min=0.5):
+    """Filter a 3D labelmask for object circularity.
+
+    Wrapper for filter_labelmask_circularity
+
+    Args:
+        labelmask: ndarray
+            4d integer labelmask
+        slicenum: int
+            Z slice to use for circularity calculations
+        circularity_min: float
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            Minimum circularity for objects to pass filter
+    """
     labelmask_filtered = np.zeros_like(labelmask)
     for n in range(0, labelmask.shape[0]):
+        print(n, end=' ')
         labelmask_filtered[n] = filter_labelmask_circularity(labelmask[n], slicenum=slicenum, circularity_min=circularity_min)
         
     return labelmask_filtered
@@ -1788,8 +1851,8 @@ def update_labels(mask1, mask2):
     return main(mask1, mask2)
 
 ############################################################################
-def connect_nuclei(maskstack, max_frames_skipped=2, 
-                             update_func=update_labels):
+def connect_nuclei(maskstack_in, max_frames_skipped=2, 
+                             update_func=update_labels, usemax=False):
     """Match labels in a labelmask to masks from previous frames
     
     Takes a stack of nuclear masks, for each frame, walk backward in time 
@@ -1815,13 +1878,24 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
         update_func: function
             Function that takes two label masks, updates labels in the second
             based on matches in the first. Default is to use update_labels.
+        usemax: bool
+            If true, uses the maximum intensity projection of the input mask
+            to do connecting. This has huge speed benefits. The mask returned
+            is still 4d, with the 2D results repeated in the Z dimension.
     
     Returns:
         connected_mask: ndarray
             4D labelmask of same shape as maskstack with object labels connected
             between frames. 
     """
-    # Initialize blank mask.
+
+    # Take maximum intensity projection in Z, if indicated.
+    if usemax:
+        maskstack = maskstack_in.max(axis=-3)
+    else:
+        maskstack = maskstack_in.copy()
+
+    # Initialize blank mask.    
     connected_mask = np.zeros_like(maskstack)
     # Add first frame.
     connected_mask[0] = maskstack[0]
@@ -1849,12 +1923,14 @@ def connect_nuclei(maskstack, max_frames_skipped=2,
         unmatched_labels = np.unique(unmatched)
         for orphan in unmatched_labels:
             new_label = connected_mask.max() + 1
-            connected_mask[n][newmask == orphan] = new_label
-    print('')        
+            connected_mask[n][newmask == orphan] = new_label    
+    # If needed, expand mask in the Z dimension to match dimensions of stack.
+    if usemax:
+        connected_mask = expand_mip(connected_mask, maskstack_in.shape[-3]) 
     return connected_mask
 
 ############################################################################
-def interpolate_nuclear_mask(mask, max_missing_frames=2):
+def interpolate_nuclear_mask(mask_in, max_missing_frames=2, usemax=True):
     """Fill-in frames of nuclear mask to compensate for dropout.
     
     So far all nuclear segmentation routines I've tried are susceptible to
@@ -1874,6 +1950,8 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
         max_missing_frames: int
             Maximum allowable number of consecutive frames missing a nucleus for
             interpolation to be executed.
+        usemax: bool
+            If true, perform interpolation using maximum projection in Z.
             
     Returns:
         newmask: ndarray
@@ -1926,9 +2004,13 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
         newmask[interp_coords] = label
 
     # Main.
+    mask = mask_in
+    if usemax:
+        mask = mask_in.max(axis=-3)
+    t_frames = np.arange(0,mask.shape[0])
     newmask = np.copy(mask)
     labels = np.unique(mask)[1:]
-    t_frames = np.arange(0,mask.shape[0])
+
     for label in labels:
         # Find all point coordinates with the label.
         coords = np.where(np.isin(mask, label))
@@ -1940,6 +2022,10 @@ def interpolate_nuclear_mask(mask, max_missing_frames=2):
             frame_before, frame_after, num_consecutive_skipped = find_surrounding_frames(frame, frames_with)
             if (num_consecutive_skipped <= max_missing_frames):
                 interpolate(mask, newmask, label, frame, frames_with, coords, frame_before, frame_after)
+    # Only accept interpolations in regions of the original mask that were 0.
+    newmask = np.where((newmask > 0) & (mask == 0), newmask, mask)
+    if usemax:
+        newmask = expand_mip(newmask, mask_in.shape[-3])
     return newmask
 
 ############################################################################
