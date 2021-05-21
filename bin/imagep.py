@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 """
-Insert description here.
-
+Library of functions for image processing of both confocal and lattice light 
+sheet movies of fly embryos.
 """
 __version__ = '1.2.0'
 __author__ = 'Michael Stadler'
@@ -49,20 +49,54 @@ To fix:
 ############################################################################
 class movie():
     """
-    spot_data: dict of ndarrays
-        Each key is a unique spot tracked across 1 or more frames. Each row
-        of array is the spot's data for a single frame, with columns 0: frame
-        number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
-        inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
-        x_width, 8: fit y_width, 9: integrated volume for MS2, 10: integrated
-        gaussian fit of MS2 spots, 11: integrated volume for protein signal.
+    A class to store data (processed and unprocessed) for confocal movies
+    from fly embryos.
+
+    Style note: movie should be capitalized, but I did not know this style
+    convention when I made it and I am leaving it for compatability reasons
+
+    Attributes:
+        stack: ndarray
+            N-dimensional image stack of the original data.
+        nucmask: ndarray
+            Labelmask of segmented nuclei
+        fits: list of ndarrays
+            3D gaussian fits generated in MS2 spot detection as output of 
+            function fit_ms2. Each entry in the list is a time point (frame). 
+            Each row in array is a fit (a single local maxima), columns are: 
+            0: center z-coordinate, 1: center x-coordinate, 2: center 
+            y-coordinate, 3: fit_height, 4: width_z, 5: width_x, 6: width_y). 
+            Coordinates are adjusted so that if fit center lies outside the 
+            image, center is moved to the edge.
+        spot_data: dict of ndarrays
+            Each key is a unique spot tracked across 1 or more frames. Each row
+            of array is the spot's data for a single frame, with columns 0: frame
+            number (t), 1: nucleus ID, 2: center Z-coordinate, 3: center X-coord-
+            inate, 4: center Y-coordinate, 5: fit height, 6: fit z_width, 7: fit
+            x_width, 8: fit y_width, 9: integrated volume for MS2, 10: integrated
+            gaussian fit of MS2 spots, 11: integrated volume for protein signal.
+        intvol: pandas df
+            Intensity values for spots (over time) derived from the mean signal
+            within ellipsoid volumes around detected spot centers.
+        intfit: pandas df
+            Intensity values for spots (over time) derived from integrating the 
+            fitted 3D gaussian parameters.
+        prot: pandas df
+            Equivalent to intvol except integrations performed in the protein
+            (nuclear) channel
+
+    Methods:
+        make_spot_table:
+            Converts a column in spot_data to a pandas df with axes spot_id and 
+            frame (time)
     """
     # Class attributes  
     # Initializer
 
     @staticmethod
     def make_spot_table(spot_data, nucmask, colnum):
-        """"""
+        """Make a spot_id x time_frame pandas df from a given column
+        of spot_data."""
         nframes = nucmask.shape[0]
         data = {}
         for spot in spot_data:
@@ -2053,7 +2087,7 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
             Radius for minimum filter used for background subtraction
         fitwindow_rad_xy: int
             Radius in pixels in the xy-dimension of the window around local
-            maxima peaks within which to do gaussian fitting.
+            maxima peaks within which `to do gaussian fitting.
         fitwindow_rad_z: int
             Radius in pixels in the z-dimension of the window around local
             maxima peaks within which to do gaussian fitting.
