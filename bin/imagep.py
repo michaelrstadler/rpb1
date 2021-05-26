@@ -339,7 +339,7 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     local_peak_mask = np.zeros_like(img)
     local_peaks = []
     peak_num=1
-
+    #props = regionprops(conn_comp)
     for id_ in np.unique(conn_comp)[1:]:
         centroid = get_object_centroid(conn_comp, id_)
         # If there is no already-added seed within the minimum distance,
@@ -922,17 +922,20 @@ def read_czi_multiple(czi_files, folder):
         root = ET.fromstring(metadata)
         first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
         #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
-        return first_dist
+        z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
+        return first_dist, z_interval
 
     stacks = []
     starting_positions = []
     for czi_file_ in czi_files:
         czi_file_path = os.path.join(folder, czi_file_)
         stacks.append(read_czi(czi_file_path, trim=True))
-        starting_positions.append(get_starting_position(czi_file_path))
+        first_dist, z_interval = get_starting_position(czi_file_path)
+        starting_positions.append(first_dist)
+
         
     stack, frames = concatenate_5dstacks(stacks)
-    return stack, frames, starting_positions
+    return stack, frames, starting_positions, z_interval
 
 ############################################################################
 def save_pickle(obj, filename):
@@ -3041,4 +3044,288 @@ def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66,
     else:
         return corr_spot_data
 
+############################################################################
+# Functions for ratiometric quantitation
+############################################################################
 
+############################################################################
+def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):  
+    """Find the centroids of all connected objects in a binary mask, perform
+    3D gaussian fitting on each object.
+
+    Args:
+        stack: ndarray
+            4D image stack
+        mask: ndarray
+            4D binary mask of same dimensions as stack
+        fitwindow_rad_xy: int
+            'Radius' in pixels of fit window in xy plane
+        fitwindow_rad_z: int
+            'Radius' in pixels of fit window in z plane
+
+    Returns:
+        fit_data: list of ndarrays
+            Output of gaussian fitting on objects in mask.
+            Each entry in list is a distinct frame (in time), rows in array
+            are individual spot fits and columns are 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y. 
+
+    """
+    def get_fitwindow(data, peak, xy_rad, z_rad):
+        """Retrieve section of image stack corresponding to given
+        window around a point and the coordinate adjustments necessary
+        to convert window coordinates to coordinates in the original image"""
+        
+        # Set the start points for windows and "adjust" them if they get 
+        # to negative numbers.
+        zmin = peak[0] - z_rad
+        xmin = peak[1] - xy_rad
+        ymin = peak[2] - xy_rad
+        # Initialize adjustments to values that are correct if no edge problems 
+        # are encountered.
+        z_adj = -z_rad
+        x_adj = -xy_rad
+        y_adj = -xy_rad
+        # Update mins and adjustments if windows start at negative coordinates.
+        if (zmin < 0):
+            zmin = 0
+            z_adj = -peak[0]
+        if (xmin < 0):
+            xmin = 0
+            x_adj = -peak[1]
+        if (ymin < 0):
+            ymin = 0
+            y_adj = -peak[2]
+
+        # Get end points, constained by max coordinate in data.
+        zmax = min(data.shape[0] - 1, peak[0] + z_rad)
+        xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
+        ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
+
+        return (data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj)
+    
+    def get_centroids(labelmask):
+        """Get the centroids of all unique ofjects in mask."""
+        centroids = []
+        props = regionprops(labelmask)
+        for id_ in range(0, len(props)):
+            centroids.append(props[id_].centroid)
+        #for id_ in np.unique(labelmask):
+        #    
+        #    centroids.append(get_object_centroid(labelmask, id_))
+        return centroids
+    
+    def fit_frame(substack, submask, fitwindow_rad_xy, fitwindow_rad_z):
+        """Perform 3D gaussian fitting on all connected objects in a binary 3D mask."""
+
+        # Label objects in mask and find centroids of resulting objects.
+        labelmask = ndi.label(submask)[0]
+        peaks = get_centroids(labelmask)
+        count = 0
+        
+        # Fit 3D gaussian in window surrounding each centroid.
+        fitparams = np.ndarray((0,7))
+        for peak in peaks:
+            count += 1
+            if ((count % 100) == 0):
+                print(count, end=' ')
+            # Get subset of data (a 3D box centered on the point) and the adjustments needed
+            # to convert from the coordinates of that box to coordinates in the original data.
+            fitwindow, z_adj, x_adj, y_adj = get_fitwindow(substack, peak, fitwindow_rad_xy, 
+                fitwindow_rad_z)
+            # Perform gaussian fitting.
+            opt = fitgaussian3d(fitwindow)
+            if opt.success:
+                peak_fitparams = opt.x
+                # Move center coordinates to match center of gaussian fit, ensure they're within image. 
+                # If they're outside the image, coordinate is assigned as the edge of the image.
+                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] + z_adj), 0, substack.shape[-3]-1)))
+                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] + x_adj), 0, substack.shape[-2]-1)))
+                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] + y_adj), 0, substack.shape[-1]-1)))
+                fitparams = np.vstack((fitparams, peak_fitparams))
+            # If fit fails, add dummy entry for spot.
+            else:
+                fitparams = np.vstack((fitparams, np.array([z_adj,x_adj,y_adj,0,np.inf,np.inf,np.inf])))
+        return fitparams
+    
+    # Run fit_frame on all frames in mask/image.
+    fit_data = []
+    for t in range(0, stack.shape[0]):
+        print(t)
+        fit_data.append(fit_frame(stack[t], mask[t], fitwindow_rad_xy, fitwindow_rad_z))
+    
+    return fit_data
+
+############################################################################
+def calculate_spot_intensities_fg_bg(spot_stack, inner_length_ij=5, 
+    inner_length_z=1, outter_length_ij=7, outter_length_z=3, 
+    bg_subtract=True):
+    """Calculate the intensity of segmented spots in a 4d image using 
+    foreground-background comparison.
+
+    For each spot, define an inner box and a larger outter box, 
+    find the mean pixel value in the inner box and then take the mean value
+    of pixels that are in the outter box but not in inner box ('background'), 
+    return the differences as a list.
+
+    Args:
+        spot_stack: ndarray
+            4d image stack of 3D boxes centered on detected spots. First
+            dimension is spot id.
+        inner_length_ij: int
+            Length of sides of "inner" (foreground) box in ij dimension
+        inner_length_z: int
+            Length of sides of "inner" (foreground) box in z dimension
+        outter_length_ij: int
+            Length of sides of "outter" (background) box in ij dimension
+        outter_length_z: int
+            Length of sides of "outter" (background) box in z dimension
+        bg_subtract: bool
+            If true, perform background subtraction. If false, just 
+            return mean of inner box
+
+    Returns:
+        intensities: list
+            List of calculated intensities
+    """
+    # Get points for ij:
+    midpoint = int(spot_stack.shape[-1] / 2)
+    inner_rad_ij = int(inner_length_ij / 2)
+    outter_rad_ij = int(outter_length_ij / 2)
+    inner_start_ij = midpoint - inner_rad_ij
+    inner_end_ij = midpoint + inner_rad_ij + 1
+    outter_start_ij = midpoint - outter_rad_ij
+    outter_end_ij = midpoint + outter_rad_ij + 1
+    # Get points for z:
+    midpoint_z = int(spot_stack.shape[-3] / 2)
+    inner_rad_z = int(inner_length_z / 2)
+    outter_rad_z = int(outter_length_z / 2)
+    inner_start_z = midpoint_z - inner_rad_z
+    inner_end_z = midpoint_z + inner_rad_z + 1
+    outter_start_z = midpoint_z - outter_rad_z
+    outter_end_z = midpoint_z + outter_rad_z + 1
+    
+    # Perform calculations on boxes, add intensities to list.
+    intensities = []
+    for box in spot_stack:
+        inner_box = box[inner_start_z:inner_end_z, inner_start_ij:inner_end_ij, inner_start_ij:inner_end_ij]
+        if (bg_subtract):
+            outter_box = box[outter_start_z:outter_end_z, outter_start_ij:outter_end_ij, outter_start_ij:outter_end_ij] 
+            outter_mean = (np.sum(outter_box) - np.sum(inner_box)) / (outter_box.size - inner_box.size)
+            inner_mean = np.mean(inner_box)
+            bgsub_diff = inner_mean - outter_mean
+            intensities.append(bgsub_diff)
+        else:
+            intensities.append(np.mean(inner_box))
+    return intensities  
+
+############################################################################
+def calculate_spot_intensities_fg_bg_byz(spots_byz, inner_length_ij=5, 
+    outter_length_ij=9, inner_length_z=1, outter_length_z=1, bg_subtract=True, 
+    return_mean=True, min_spots_for_mean=4):
+
+    """Call calculate_spot_intensities_fg_bg on stack for each z slice output 
+    by bundle_fitdata_byz.
+
+    Args:
+        spots_byz: list of ndarrays
+            Output of bundle_fitdata_byz List entries are Z slices, arrays
+            are fitting outputs, each row is a spot, columns: 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
+        inner_length_ij: int
+            Length of sides of "inner" (foreground) box in ij dimension
+        inner_length_z: int
+            Length of sides of "inner" (foreground) box in z dimension
+        outter_length_ij: int
+            Length of sides of "outter" (background) box in ij dimension
+        outter_length_z: int
+            Length of sides of "outter" (background) box in z dimension
+        bg_subtract: bool
+            If true, perform background subtraction. If false, just 
+            return mean of inner box
+        return_mean: bool
+            If true, return the mean intensity value for each z slice
+        min_spots_for_mean: int
+            The minimum number of spots detected in a z slice for
+            a mean to be calculated for that slice. If fewer spots
+            are detected, mean is assigned np.nan.
+
+    Returns:
+        x: list
+            Vector of Z slice numbers
+        y: list
+            Vector of spot values corresponding to z slices in x
+
+    """
+    # Initialize x and y vectors for plotting.
+    y = []
+    x = []
+    n = len(spots_byz)
+    # Perform fg/bg intensity calculation for each z slice, put results into list.
+    for z in range(0, n):
+        vals = calculate_spot_intensities_fg_bg(spots_byz[z], inner_length_ij=
+            inner_length_ij, outter_length_ij=outter_length_ij, inner_length_z=
+            inner_length_z, outter_length_z=outter_length_z, bg_subtract=bg_subtract)
+        # Convert list to np.array.
+        vals = np.array(vals)
+        # Throw out upper and lower 10 percent to avoid outliers.
+        low_cut, high_cut = np.percentile(vals, [10,90])
+        vals_middle = vals[(vals >= low_cut) & (vals <= high_cut)]
+        if (return_mean):
+            if (len(vals) > min_spots_for_mean):
+                y.append(np.mean(vals_middle))
+            else:
+                y.append(np.nan)
+            x.append(z)
+        else:
+            y = y + list(vals_middle)
+            x = x + ([z] * len(vals_middle))
+    return x,y
+
+############################################################################
+def bundle_fitdata_byz(stack4d, fits, len_ij=31, len_z=5):
+    """Take a set of fitting data, make 4d spot movie structures for each
+    Z slice, bundle these into a list where the index is the z slice number.
+    
+    Args:
+        stack4d: ndarray
+            4d image stack
+        fits: list of ndarrays
+            Output of gaussian fitting on objects in mask.
+            Each entry in list is a distinct frame (in time), rows in array
+            are individual spot fits and columns are 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
+        len_ij: int
+            Length in ij dimension of the box for making spot movies.
+        len_z: int
+            Length in z dimension of the box for making spot movies.
+
+    Returns:
+        spots_byz: list of ndarrays
+            Each entry in list is a spot array for a different z slice,
+            first dimension of array is spot id.
+
+    """
+    # Create 5D version of stack to feed to spot_movies.
+    stack5d = np.expand_dims(stack4d, axis=0)
+    spots_byz = []
+    # Go through each Z slice.
+    for i in range(0, stack4d.shape[-3]-1):
+        # Make boolean vector for this z slice.
+        # NOTE: only using first frame of fits.
+        zslice_bool = fits[0][:,0] == i
+        # If there are any fit entries for this slice:
+        if (np.count_nonzero(zslice_bool) > 0):
+            fits_zslice = [fits[0][zslice_bool]]
+            # Use connect_ms2_fits_focuscorrect function to produce spot_data object.
+            spot_data = connect_ms2_fits_focuscorrect(fits_zslice, [0], [0], np.zeros_like(stack4d))
+            spots = spot_movies(stack5d, spot_data, fill=0, len_ij=len_ij, len_z=len_z, view=False)
+            spots = np.squeeze(spots, axis=1)
+            spots_byz.append(spots)
+        else:
+            spots_byz.append(np.zeros((1,len_z, len_ij, len_ij)))
+        
+    return spots_byz
