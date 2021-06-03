@@ -26,6 +26,8 @@ from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
 from scipy.spatial import distance
+from scipy.interpolate import CloughTocher2DInterpolator
+from scipy.optimize import curve_fit
 import pickle
 import czifile
 import sys
@@ -339,9 +341,11 @@ def peak_local_max_nD(img, size=(70,100,100), min_dist=0):
     local_peak_mask = np.zeros_like(img)
     local_peaks = []
     peak_num=1
-    #props = regionprops(conn_comp)
-    for id_ in np.unique(conn_comp)[1:]:
-        centroid = get_object_centroid(conn_comp, id_)
+    props = regionprops(conn_comp)
+    for id_ in range(0, len(props)):
+        centroid = props[id_].centroid
+        # Convert floats to ints.
+        centroid = tuple([int(x) for x in centroid])
         # If there is no already-added seed within the minimum distance,
         # add this seed to the mask and list.
         if (not has_neighbor(centroid, local_peaks, min_dist)):
@@ -860,7 +864,7 @@ def read_tiff_lattice(tif_folder, **kwargs):
         raise ValueError('Unequal number of CamA and CamB files.')
 
 ############################################################################
-def read_czi(filename, trim=False, swapaxes=True):
+def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
     """Read a czi file into an ndarray
     
     Args:
@@ -892,7 +896,16 @@ def read_czi(filename, trim=False, swapaxes=True):
             stack = stack[:-1]
     if (swapaxes):
         stack = np.swapaxes(stack,0,1)
-    return stack
+
+    if return_metadata:
+        metadata = czifile.CziFile(filename).metadata()
+        root = ET.fromstring(metadata)
+        first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
+        #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
+        z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
+        return stack, first_dist, z_interval
+    else:
+        return stack
 
 ############################################################################
 def read_czi_multiple(czi_files, folder):
@@ -3110,10 +3123,8 @@ def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):
         centroids = []
         props = regionprops(labelmask)
         for id_ in range(0, len(props)):
-            centroids.append(props[id_].centroid)
-        #for id_ in np.unique(labelmask):
-        #    
-        #    centroids.append(get_object_centroid(labelmask, id_))
+            centroid = tuple([int(x) for x in props[id_].centroid])
+            centroids.append(centroid)
         return centroids
     
     def fit_frame(substack, submask, fitwindow_rad_xy, fitwindow_rad_z):
@@ -3122,13 +3133,14 @@ def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):
         # Label objects in mask and find centroids of resulting objects.
         labelmask = ndi.label(submask)[0]
         peaks = get_centroids(labelmask)
+        print('# to fit: ' + str(len(peaks)) + '\n# fit: ', end=' ')
         count = 0
         
         # Fit 3D gaussian in window surrounding each centroid.
         fitparams = np.ndarray((0,7))
         for peak in peaks:
             count += 1
-            if ((count % 100) == 0):
+            if ((count % 1000) == 0):
                 print(count, end=' ')
             # Get subset of data (a 3D box centered on the point) and the adjustments needed
             # to convert from the coordinates of that box to coordinates in the original data.
@@ -3158,134 +3170,7 @@ def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):
     return fit_data
 
 ############################################################################
-def calculate_spot_intensities_fg_bg(spot_stack, inner_length_ij=5, 
-    inner_length_z=1, outter_length_ij=7, outter_length_z=3, 
-    bg_subtract=True):
-    """Calculate the intensity of segmented spots in a 4d image using 
-    foreground-background comparison.
-
-    For each spot, define an inner box and a larger outter box, 
-    find the mean pixel value in the inner box and then take the mean value
-    of pixels that are in the outter box but not in inner box ('background'), 
-    return the differences as a list.
-
-    Args:
-        spot_stack: ndarray
-            4d image stack of 3D boxes centered on detected spots. First
-            dimension is spot id.
-        inner_length_ij: int
-            Length of sides of "inner" (foreground) box in ij dimension
-        inner_length_z: int
-            Length of sides of "inner" (foreground) box in z dimension
-        outter_length_ij: int
-            Length of sides of "outter" (background) box in ij dimension
-        outter_length_z: int
-            Length of sides of "outter" (background) box in z dimension
-        bg_subtract: bool
-            If true, perform background subtraction. If false, just 
-            return mean of inner box
-
-    Returns:
-        intensities: list
-            List of calculated intensities
-    """
-    # Get points for ij:
-    midpoint = int(spot_stack.shape[-1] / 2)
-    inner_rad_ij = int(inner_length_ij / 2)
-    outter_rad_ij = int(outter_length_ij / 2)
-    inner_start_ij = midpoint - inner_rad_ij
-    inner_end_ij = midpoint + inner_rad_ij + 1
-    outter_start_ij = midpoint - outter_rad_ij
-    outter_end_ij = midpoint + outter_rad_ij + 1
-    # Get points for z:
-    midpoint_z = int(spot_stack.shape[-3] / 2)
-    inner_rad_z = int(inner_length_z / 2)
-    outter_rad_z = int(outter_length_z / 2)
-    inner_start_z = midpoint_z - inner_rad_z
-    inner_end_z = midpoint_z + inner_rad_z + 1
-    outter_start_z = midpoint_z - outter_rad_z
-    outter_end_z = midpoint_z + outter_rad_z + 1
-    
-    # Perform calculations on boxes, add intensities to list.
-    intensities = []
-    for box in spot_stack:
-        inner_box = box[inner_start_z:inner_end_z, inner_start_ij:inner_end_ij, inner_start_ij:inner_end_ij]
-        if (bg_subtract):
-            outter_box = box[outter_start_z:outter_end_z, outter_start_ij:outter_end_ij, outter_start_ij:outter_end_ij] 
-            outter_mean = (np.sum(outter_box) - np.sum(inner_box)) / (outter_box.size - inner_box.size)
-            inner_mean = np.mean(inner_box)
-            bgsub_diff = inner_mean - outter_mean
-            intensities.append(bgsub_diff)
-        else:
-            intensities.append(np.mean(inner_box))
-    return intensities  
-
-############################################################################
-def calculate_spot_intensities_fg_bg_byz(spots_byz, inner_length_ij=5, 
-    outter_length_ij=9, inner_length_z=1, outter_length_z=1, bg_subtract=True, 
-    return_mean=True, min_spots_for_mean=4):
-
-    """Call calculate_spot_intensities_fg_bg on stack for each z slice output 
-    by bundle_fitdata_byz.
-
-    Args:
-        spots_byz: list of ndarrays
-            Output of bundle_fitdata_byz List entries are Z slices, arrays
-            are fitting outputs, each row is a spot, columns: 0: center 
-            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
-            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
-        inner_length_ij: int
-            Length of sides of "inner" (foreground) box in ij dimension
-        inner_length_z: int
-            Length of sides of "inner" (foreground) box in z dimension
-        outter_length_ij: int
-            Length of sides of "outter" (background) box in ij dimension
-        outter_length_z: int
-            Length of sides of "outter" (background) box in z dimension
-        bg_subtract: bool
-            If true, perform background subtraction. If false, just 
-            return mean of inner box
-        return_mean: bool
-            If true, return the mean intensity value for each z slice
-        min_spots_for_mean: int
-            The minimum number of spots detected in a z slice for
-            a mean to be calculated for that slice. If fewer spots
-            are detected, mean is assigned np.nan.
-
-    Returns:
-        x: list
-            Vector of Z slice numbers
-        y: list
-            Vector of spot values corresponding to z slices in x
-
-    """
-    # Initialize x and y vectors for plotting.
-    y = []
-    x = []
-    n = len(spots_byz)
-    # Perform fg/bg intensity calculation for each z slice, put results into list.
-    for z in range(0, n):
-        vals = calculate_spot_intensities_fg_bg(spots_byz[z], inner_length_ij=
-            inner_length_ij, outter_length_ij=outter_length_ij, inner_length_z=
-            inner_length_z, outter_length_z=outter_length_z, bg_subtract=bg_subtract)
-        # Convert list to np.array.
-        vals = np.array(vals)
-        # Throw out upper and lower 10 percent to avoid outliers.
-        low_cut, high_cut = np.percentile(vals, [10,90])
-        vals_middle = vals[(vals >= low_cut) & (vals <= high_cut)]
-        if (return_mean):
-            if (len(vals) > min_spots_for_mean):
-                y.append(np.mean(vals_middle))
-            else:
-                y.append(np.nan)
-            x.append(z)
-        else:
-            y = y + list(vals_middle)
-            x = x + ([z] * len(vals_middle))
-    return x,y
-
-############################################################################
-def bundle_fitdata_byz(stack4d, fits, len_ij=31, len_z=5):
+def spotstacks_fromfits_byz(stack4d, fits, len_ij=31, len_z=5):
     """Take a set of fitting data, make 4d spot movie structures for each
     Z slice, bundle these into a list where the index is the z slice number.
     
@@ -3329,3 +3214,306 @@ def bundle_fitdata_byz(stack4d, fits, len_ij=31, len_z=5):
             spots_byz.append(np.zeros((1,len_z, len_ij, len_ij)))
         
     return spots_byz
+
+############################################################################
+def calculate_spot_intensities_fg_bg(spot_stack, inner_length_ij=5, 
+    inner_length_z=1, outter_length_ij=7, outter_length_z=3, 
+    mode='bg_subtract'):
+    """Calculate the intensity of segmented spots in a 4d image stack.
+
+    For each spot, define an inner box and a larger outter box.
+    For bg_subtract mode, find the mean pixel value in the inner box and then 
+    take the mean valueof pixels that are in the outter box but not in inner 
+    box ('background'), return the differences as a list. Alternate modes
+    return the mean pixel intensity of the inner box of the mean of the 
+    3 brightest pixels in the inner box.
+
+    Args:
+        spot_stack: ndarray
+            4d image stack of 3D boxes centered on detected spots. First
+            dimension is spot id.
+        inner_length_ij: int
+            Length of sides of "inner" (foreground) box in ij dimension
+        inner_length_z: int
+            Length of sides of "inner" (foreground) box in z dimension
+        outter_length_ij: int
+            Length of sides of "outter" (background) box in ij dimension
+        outter_length_z: int
+            Length of sides of "outter" (background) box in z dimension
+        mode: string
+            'bg_subtract': Perform background subtraction of mean of 
+            background from mean of inner box
+            'mean_intensity': Simply return mean of inner box
+            'top3_max': Return max of top 3 pixels in inner box
+
+    Returns:
+        intensities: list
+            List of calculated intensities
+    """
+    if (mode not in ['bg_subtract', 'mean_intensity', 'top3_max']):
+        raise ValueError('Not a valid mode.')
+    # Get points for ij:
+    midpoint = int(spot_stack.shape[-1] / 2)
+    inner_rad_ij = int(inner_length_ij / 2)
+    outter_rad_ij = int(outter_length_ij / 2)
+    inner_start_ij = midpoint - inner_rad_ij
+    inner_end_ij = midpoint + inner_rad_ij + 1
+    outter_start_ij = midpoint - outter_rad_ij
+    outter_end_ij = midpoint + outter_rad_ij + 1
+    # Get points for z:
+    midpoint_z = int(spot_stack.shape[-3] / 2)
+    inner_rad_z = int(inner_length_z / 2)
+    outter_rad_z = int(outter_length_z / 2)
+    inner_start_z = midpoint_z - inner_rad_z
+    inner_end_z = midpoint_z + inner_rad_z + 1
+    outter_start_z = midpoint_z - outter_rad_z
+    outter_end_z = midpoint_z + outter_rad_z + 1
+    
+    # Perform calculations on boxes, add intensities to list.
+    intensities = []
+    for box in spot_stack:
+        inner_box = box[inner_start_z:inner_end_z, inner_start_ij:inner_end_ij, inner_start_ij:inner_end_ij]
+        if (mode == 'bg_subtract'):
+            outter_box = box[outter_start_z:outter_end_z, outter_start_ij:outter_end_ij, outter_start_ij:outter_end_ij] 
+            outter_mean = (np.sum(outter_box) - np.sum(inner_box)) / (outter_box.size - inner_box.size)
+            inner_mean = np.mean(inner_box)
+            bgsub_diff = inner_mean - outter_mean
+            intensities.append(bgsub_diff)
+        elif (mode == 'mean_intensity'):
+            intensities.append(np.mean(inner_box))
+        elif(mode == 'top3_max'):
+            top3 = np.sort(inner_box.flatten())[-3:]
+            intensities.append(np.mean(top3))
+    return intensities  
+
+############################################################################
+def calculate_spot_intensities_fg_bg_byz(spots_byz, inner_length_ij=5, 
+    outter_length_ij=9, inner_length_z=1, outter_length_z=1, 
+    return_mean=False, mode='bg_subtract', min_spots_for_mean=4):
+
+    """Call calculate_spot_intensities_fg_bg on stack for each z slice output 
+    from spotstacks_fromfits_byz.
+
+    Args:
+        spots_byz: list of ndarrays
+            Output of spotstacks_fromfits_byz List entries are Z slices, arrays
+            are fitting outputs, each row is a spot, columns: 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y.
+        inner_length_ij: int
+            Length of sides of "inner" (foreground) box in ij dimension
+        inner_length_z: int
+            Length of sides of "inner" (foreground) box in z dimension
+        outter_length_ij: int
+            Length of sides of "outter" (background) box in ij dimension
+        outter_length_z: int
+            Length of sides of "outter" (background) box in z dimension
+        mode: string
+            'bg_subtract': Perform background subtraction of mean of 
+            background from mean of inner box
+            'mean_intensity': Simply return mean of inner box
+            'top3_max': Return max of top 3 pixels in inner box
+        return_mean: bool
+            If true, return the mean intensity value for each z slice
+        min_spots_for_mean: int
+            The minimum number of spots detected in a z slice for
+            a mean to be calculated for that slice. If fewer spots
+            are detected, mean is assigned np.nan.
+
+    Returns:
+        z_slices: list
+            Vector of Z slice numbers
+        intensities: list
+            Vector of spot values corresponding to z slices in x
+
+    """
+    # Initialize x and y vectors for plotting.
+    z_slices = []
+    intensities = []
+    n = len(spots_byz)
+    # Perform fg/bg intensity calculation for each z slice, put results into list.
+    for z in range(0, n):
+        vals = calculate_spot_intensities_fg_bg(spots_byz[z], inner_length_ij=
+            inner_length_ij, outter_length_ij=outter_length_ij, inner_length_z=
+            inner_length_z, outter_length_z=outter_length_z, mode=mode)
+        # Convert list to np.array.
+        vals = np.array(vals)
+        # Throw out upper and lower 10 percent to avoid outliers.
+        low_cut, high_cut = np.percentile(vals, [10,90])
+        vals_middle = vals[(vals >= low_cut) & (vals <= high_cut)]
+        if (return_mean):
+            if (len(vals) > min_spots_for_mean):
+                intensities.append(np.mean(vals_middle))
+            else:
+                intensities.append(np.nan)
+            z_slices.append(z)
+        else:
+            intensities = intensities + list(vals_middle)
+            z_slices = z_slices + ([z] * len(vals_middle))
+    return z_slices, intensities
+
+############################################################################
+def make_depth_vs_intensity_vectors(datasets, surface, start, interval, 
+    inner_length_ij=5, outter_length_ij=9, inner_length_z=1, 
+    outter_length_z=1, mode='bg_subtract', return_mean=False, 
+    min_spots_for_mean=4):
+    """Build vectors of spot intensity values vs embryo depth from
+    multiple datasets.
+    
+    Args:
+        datasets: iterable
+            List (or equivalent) of spots_byz data structures, outputs of 
+            spotstacks_fromfits_byz. List entries are Z slices, arrays are 
+            fitting outputs
+        surface: iterable
+            Locations, in µm, of the embryo surface for each dataset
+        start: iterable
+            Locations in µm of the starting position of each Z stack 
+            (obtainable from first_dist in metadata)
+        interval: float
+            Size, in µm, of Z slices (obtainable from z_interval in metadata)
+        inner_length_ij: int
+            Length of sides of "inner" (foreground) box in ij dimension
+        inner_length_z: int
+            Length of sides of "inner" (foreground) box in z dimension
+        outter_length_ij: int
+            Length of sides of "outter" (background) box in ij dimension
+        outter_length_z: int
+            Length of sides of "outter" (background) box in z dimension
+        mode: string
+            'bg_subtract': Perform background subtraction of mean of 
+            background from mean of inner box
+            'mean_intensity': Simply return mean of inner box
+            'top3_max': Return max of top 3 pixels in inner box
+        return_mean: bool
+            If true, return the mean intensity value for each z slice
+        min_spots_for_mean: int
+            The minimum number of spots detected in a z slice for
+            a mean to be calculated for that slice. If fewer spots
+            are detected, mean is assigned np.nan.
+    
+    Return: 
+        depths: list of np.arrays
+            Each list item is an array corresponding to an input dataset.
+            Array contains embryo depth for each intensity value in intensities
+        intensities: list
+            Each list item is an array corresponding to an input dataset.
+            Array contains spot intensities (or mean spot intensities)
+    
+    """
+    depths = []
+    intensities = []
+    for i in range(0, len(datasets)):
+        # Calculate intensities.
+        z_slices, intensities_thisdataset = calculate_spot_intensities_fg_bg_byz(datasets[i], mode=mode, return_mean=return_mean, min_spots_for_mean=min_spots_for_mean, inner_length_ij=inner_length_ij)
+        # Add intensities from this dataset to overall list.
+        #intensities = intensities + intensities_thisdataset
+        intensities.append(np.array(intensities_thisdataset))
+        # Convert Z slice to depth.
+        depths_thisdataset = (np.array(z_slices) * interval) + start[i] - surface[i]
+        # Add depths to overall depths list.
+        #depths = depths + list(depths_thisdataset)
+        depths.append((depths_thisdataset))
+    return depths, intensities
+
+############################################################################
+def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0, 
+    xgrid_end=20, xgrid_incr=0.1, ygrid_start=0, ygrid_end=30000, 
+    ygrid_incr=100, fitfunc='exponential', guess=(0,1,3500), display=False):
+    """Fit depth-intensity data with exponential functions, interpolate
+    parameters in depth-intensity space for use in depth correction.
+    
+    Depth-intensity data for each dataset is independently fit with an 
+    exponential function (y = a * exp(-b * x) + c), giving a series of 
+    curves at different intensities. From these curves, a 2D grid is 
+    interpolated for each exponential parameter. 
+    
+    Args:
+        depths: list of np.arrays
+            Output from make_depth_vs_intensity_vectors. List items are
+            input datasets, array values are embryo depths in µm.
+        intensities: list of np.arrays
+            Output from make_depth_vs_intensity_vectors. List items are
+            input datasets, array values are spot intensities.
+        xgrid_start: numeric
+            Start position for embryo depth axis of grid used for 
+            interpolation.
+        xgrid_end: numeric
+            End position for embryo depth axis of grid used for 
+            interpolation.
+        xgrid_incr: numeric
+            Increment value for embryo depth axis of grid used for 
+            interpolation.
+        ygrid_start: numeric
+            Start position for spot intensity axis of grid used for 
+            interpolation.
+        ygrid_end: numeric
+            End position for spot intensity axis of grid used for 
+            interpolation.
+        ygrid_incr: numeric
+            Increment value for spot intensity axis of grid used for 
+            interpolation.
+        fitfunc: string
+            Currently only 'exponential' is valid
+        guess: tuple of numeric
+            Initial parameters used for exponential fit
+        display: bool
+            If true, plot depth vs. intensity fits for range between 4
+            and 15 µm
+    Returns: 
+        paramgrid_a, paramgrid_b, paramgrid_c: ndarray
+            2D grids (depth, intensity) of exponential parameters a, b, c
+    
+    """
+    
+    def exp_func(x, a, b, c):
+        return a * np.exp(-b * x) + c
+    
+    # Not currently implemented.
+    def lin_func(x,m,b):
+        return (m * x) + b
+    
+    if fitfunc not in ['exponential']:
+        raise ValueError('fitfunc not valid')
+    elif fitfunc == 'exponential':
+        fitfunc = exp_func
+    
+    # Create vectors of x positions, y positions, and values for exponential
+    # parameters a, b, and c.
+    x_all = np.zeros(0)
+    y_all = np.zeros(0)
+    a_all = np.zeros(0)
+    b_all = np.zeros(0)
+    c_all = np.zeros(0)
+    
+    # Step through the depths and intensities for each dataset, build 'all'
+    # vectors.
+    for n in range(0, len(depths)):
+        # Get vectors of depths and intensities for this dataset.
+        depth_means,intensity_means = np.array(depths[n]), np.array(intensities[n])
+        # Fit curve with exponential function.
+        (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=guess, maxfev=100000)
+        # Create x and y values from exponential function with fitted parameters.
+        x = np.arange(xgrid_start, xgrid_end, 0.1)
+        y = (a * np.exp(-b * x)) + c
+        # Add x, y, and exponential parameters to existing 'all' vectors.
+        x_all = np.concatenate([x_all, x])
+        y_all = np.concatenate([y_all, y])
+        a_all = np.concatenate([a_all, np.repeat(a, len(x))])
+        b_all = np.concatenate([b_all, np.repeat(b, len(x))])
+        c_all = np.concatenate([c_all, np.repeat(c, len(x))])
+    
+    # Create meshgrids to define regions over which to perform interpolation.
+    grid_x, grid_y = np.mgrid[xgrid_start:xgrid_end:xgrid_incr, ygrid_start:ygrid_end:ygrid_incr]
+    # Perform interpolation for each parameter of exponential function.
+    # Syntax note: CloughTocher function returns a CloughTocher function, this
+    # function is called on the meshgrids to produce the interpolated grid.
+    paramgrid_a = CloughTocher2DInterpolator((x_all, y_all), a_all)(grid_x, grid_y)
+    paramgrid_b = CloughTocher2DInterpolator((x_all, y_all), b_all)(grid_x, grid_y)
+    paramgrid_c = CloughTocher2DInterpolator((x_all, y_all), c_all)(grid_x, grid_y)
+    
+    if display:
+        plt.scatter(x_all[(x_all > 4) & (x_all < 15)], y_all[(x_all > 4) & 
+                (x_all < 15)])
+    
+    return paramgrid_a, paramgrid_b, paramgrid_c
