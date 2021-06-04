@@ -348,6 +348,8 @@ def mesh_like(arr, n):
             Array-like object that has a shape parameter
         n: int
             Number of dimensions, from the right, for which to make meshgrid.
+            So if arr is a (2,10,16,256,256) array, and n is 3, it will make 
+            a mesh of size (16,256,256).
     
     Returns:
         meshes: list of ndarrays
@@ -439,7 +441,8 @@ def relabel_labelmask(labelmask, preserve_order=True):
 
 ############################################################################
 def sortfreq(x, descending=True):
-    """Sort the items of a list by the frequency with which they occur
+    """Sort the items of a list by the frequency with which they occur,
+    return sorted list of unique items.
     
     Args:
         x: list-like
@@ -449,7 +452,7 @@ def sortfreq(x, descending=True):
     
     Returns:
         items_sorted: array
-            List of items from original array sorted by frequency  
+            List of unique items from original array sorted by frequency  
     """
     # Get unique items from list and their frequencies of occurence (counts).
     items, counts = np.unique(x, return_counts=True)
@@ -477,7 +480,7 @@ def df_filter_minlen(df, minlen, renumber=False):
         new_df: pandas dataframe
             Contains columns of input dataframe with sufficient entries
     """
-    new_df =  df.loc[:,df.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
+    new_df =  df.loc[:,df.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) >= minlen]
     if (renumber):
         new_df.columns = np.arange(1, len(new_df.columns) + 1)
     return new_df
