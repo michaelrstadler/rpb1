@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology
 from .fitting import fitgaussian3d
+
 ############################################################################
 def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1, 
                    sigma_big=4, bg_radius=4, fitwindow_rad_xy=10, 
@@ -183,8 +184,14 @@ def filter_ms2fits(fit_data, peakiness=4.5, stack=None, channel=1):
             frame_med = np.median(stack[channel, t])
         else:
             frame_med = -np.inf
+        # Take the mean of the x and y widths.
         xy_width_means = np.mean(frame_data[:,5:7], axis=1)
         peak_heights = frame_data[:,3]
+        # Rare fits have 0 height and inf width; take care of these to
+        # avoid 0 division errors.
+        xy_width_means[xy_width_means == np.inf] = 0.5
+        peak_heights[peak_heights == 0] = 0.5
+        # Calculate peakiness as the log ratio of height to width.
         spot_peakiness = np.log(peak_heights / xy_width_means)
         frame_data_filtered = frame_data[(peak_heights > frame_med) & (spot_peakiness > peakiness),:]
         fit_data[t] = frame_data_filtered

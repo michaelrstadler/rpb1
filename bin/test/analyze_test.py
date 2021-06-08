@@ -253,16 +253,5 @@ class TestLogFilter(unittest.TestCase):
 
 #---------------------------------------------------------------------------
 
-class TestZstackNormalizeMean(unittest.TestCase):
-
-	def test_zstack_normalize_mean(self):
-		orig = np.ones((5,5,5))
-		orig[3] = 2
-		output = zstack_normalize_mean(orig)
-
-		self.assertEqual(np.unique(zstack_normalize_mean(orig)), 1.2, "Should be equal")
-
-#---------------------------------------------------------------------------
-
 if __name__ == '__main__':
 	unittest.main()

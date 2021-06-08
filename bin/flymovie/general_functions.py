@@ -510,17 +510,25 @@ def df_deriv(df, windowsize, stepsize):
 
 ############################################################################
 def expand_mip(mask, n):
-        """Expand a 3d maximum intensity projection by repeating in Z (-3)
-        dimension n times.
+        """Expand a mask made from a maximum intensity projection by 
+        repeating in Z (-3) dimension n times.
         
-        Main use: using a MIP for speed to do something like create a nuclear
-        mask, but then you want to expand it in the Z dimension to match the
-        original, non-MIP stack.
+        Main use: A maximum intensity projection (in Z) is used for doing 
+        some work, and you want to recover the Z dimension to match the 
+        shape of the original (no MIP) stack.
 
         Args:
             mask: ndarray
-                n-dimensional 
+                3-dimensional binary mask, time (frame) is the first 
+                dimension
+            n: int
+                Number of Z slices to create (will repeat 2D mask n times
+                in the Z dimension)
 
+        Returns:
+            expanded_mask: ndarray
+                4d binary mask of dimensions equal to input except with
+                n inserted as the second dimension.
         """
         expanded_mask = np.zeros([mask.shape[0], n, mask.shape[1], mask.shape[2]])
         for t in range(0, mask.shape[0]):
@@ -591,3 +599,22 @@ def log_filter(stack, sigma):
     gauss = ndi.filters.gaussian_filter(stack_cp, sigma=sigma)
     log = ndi.filters.laplace(gauss)
     return log
+
+############################################################################
+def zstack_normalize_mean(instack):
+    """Normalize each Z-slice in a Z-stack to by dividing by its mean
+
+    Args:
+        instack: ndarray
+            Image stack in order [z, x, y]
+
+    Returns:
+        stack: ndarray
+            Image stack of same shape as instack.
+    """
+    stack = np.copy(instack)    
+    stackmean = stack.mean()
+    for x in range(0,stack.shape[0]):
+        immean = stack[x].mean()
+        stack[x] = stack[x] / immean * stackmean
+    return(stack)

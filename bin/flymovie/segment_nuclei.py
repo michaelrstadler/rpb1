@@ -7,301 +7,16 @@ from skimage.filters.thresholding import threshold_li, threshold_otsu
 from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
+from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand_mip
 
-from .analyze import *
-from .detect_spots import *
-from .fitting import *
-from .general_functions import *
-from .load_save import *
-from .movieclass import *
-from .ratiometric_quantitation import *
-from .viewers import *
 ############################################################################    
 ############################################################################
 # Functions for segmenting nuclei
 ############################################################################
 ############################################################################
 
-def segment_embryo(stack, channel=0, sigma=5, walkback = 50):
-    """Segment the embryo from extra-embryo space in lattice data.
-    
-    Details: Crudely segments the embryo from extra-embryonic space in 5-
-    dimensional stacks. The mean projection across all time slices is first
-    taken, followed by performing a gaussian smoothing, then thresholding,
-    then using morphological filtering to fill holes and then "walking
-    back" from right-to-left, based on the observation that segmentation 
-    tends to extend too far, and lattice images always have the sample on
-    the left.
-    
-    Args:
-        stack: ndarray
-            Image stack in order [c, t, z, x, y]
-        channel: int
-            Channel to use for segmentation (channel definted as first
-            dimension of the stack)
-        sigma: int
-            Sigma factor for gaussian smoothing
-        walkback: int
-            Length in pixels to "walk back" from right
-            
-    Returns:
-        stack_masked: ndarray
-            Input stack with masked (extra-embryo) positions set to 0
-    """
-    # Create a 3D mask from the mean projection of a 4D stack.
-    def _make_mask(stack, channel, sigma, walkback):
-        # Make a mean projection (on time axis) for desired channel. 
-        im = stack[channel].mean(axis=0)
-        # Smooth with gaussian kernel.
-        im_smooth = ndi.filters.gaussian_filter(im, sigma=sigma)
-        # Find threshold with minimum method.
-        t = ski.filters.threshold_minimum(im_smooth)
-        # Make binary mask with threshold.
-        mask = np.where(im_smooth > t, im, 0)
-        mask = mask.astype('bool')
-        # Fill holes with morphological processing.
-        mask = ndi.morphology.binary_fill_holes(mask, structure=np.ones((1,2,2)))
-        # Build structure for "walking back" from right via morphological processing.
-        struc = np.ones((1,1, walkback))
-        midpoint = int(walkback / 2)
-        struc[0, 0, 0:midpoint] = 0
-        # Walk back mask from right.
-        mask = ndi.morphology.binary_erosion(mask, structure=struc)
-        return mask
-    
-    def main(stack, channel, sigma, walkback):
-        mask = _make_mask(stack, channel, sigma, walkback)
-        stack_masked = np.where(mask, stack, 0) # Broadcasting mask onto stack
-        return(stack_masked)
-    
-    return main(stack, channel, sigma, walkback)
 
-############################################################################
-def labelmask_filter_objsize(labelmask, size_min, size_max):
-    """Filter objects in a labelmask for size
-    
-    Args:
-        labelmask: ndarray
-            n-dimensional integer labelmask
-        size_min: int
-            Minimum size in total pixels, of the smallest object
-        size_max: int
-            Maximum size, in total pixels, of the largest object
-    
-    Return:
-        labelmask_filtered: ndarray
-            Labelmask of same shape as input mask, containing only objects
-            between minimum and maximum sizes.
-    """
-    # Count pixels in each object.
-    (labels, counts) = np.unique(labelmask, return_counts=True)
-    # Select objects in desired size range, update filtered mask.
-    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
-    labelmask_filtered = np.where(np.isin(labelmask, labels_selected), 
-        labelmask, 0)
-    return labelmask_filtered
 
-############################################################################
-def object_circularity(labelmask, label):
-    """Calculate circularity for and object in a labelmask
-    
-    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
-    Circularity calculation is 2D, using the single Z slice in which the
-    lebeled object has the most pixels.
-    
-    Args:
-        labelmask: ndarray
-            n-dimensional integer labelmask
-        label: int
-            ID of object for which to calculate circularity
-            
-    Return:
-        circularity: float
-            output of circularity calculation 
-    """
-    # Find z slice with most pixels from object.
-    z, i, j = np.where(labelmask == label)
-    zmax = mode(z)[0][0]
-    # Select 2D image representing object's max Z-slice.
-    im = np.where(labelmask[zmax] == label, 1, 0)
-    # Calculate circularity from object perimeter and area.
-    regions = regionprops(im)
-    perimeter = regions[0].perimeter
-    area = regions[0].area
-    if (perimeter == 0):
-        perimeter = 0.5
-    circularity = 4 * np.pi * area / (perimeter ** 2) 
-    return circularity
- 
-def filter_labelmask_circularity(labelmask, slicenum, circularity_min=0.5):
-    """Filter a 3D labelmask for object circularity.
-
-    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
-    Circularity calculation is 2D, using the single Z slice in which the
-    lebeled object has the most pixels.
-
-    Args:
-        labelmask: ndarray
-            3d integer labelmask
-        slicenum: int
-            Z slice to use for circularity calculations
-        circularity_min: float
-            ID of object for which to calculate circularity
-            
-    Return:
-        circularity: float
-            Minimum circularity for objects to pass filter
-    """
-    # Calculate circularity from object perimeter and area.
-    good_objs = []
-    im = labelmask[slicenum]
-    regions = regionprops(im)
-    for n in range(0, len(regions)):
-        perimeter = regions[n].perimeter
-        area = regions[n].area
-        if (perimeter == 0):
-            perimeter = 0.5
-        circularity = 4 * np.pi * area / (perimeter ** 2)
-        if (circularity >= circularity_min):
-            good_objs.append(regions[n].label)
-    labelmask_filtered = np.where(np.isin(labelmask, good_objs), labelmask, 0)
-        
-    return labelmask_filtered
-
-def filter_labelmask_circularity_apply4d(labelmask, slicenum, circularity_min=0.5):
-    """Filter a 3D labelmask for object circularity.
-
-    Wrapper for filter_labelmask_circularity
-
-    Args:
-        labelmask: ndarray
-            4d integer labelmask
-        slicenum: int
-            Z slice to use for circularity calculations
-        circularity_min: float
-            ID of object for which to calculate circularity
-            
-    Return:
-        circularity: float
-            Minimum circularity for objects to pass filter
-    """
-    labelmask_filtered = np.zeros_like(labelmask)
-    for n in range(0, labelmask.shape[0]):
-        print(n, end=' ')
-        labelmask_filtered[n] = filter_labelmask_circularity(labelmask[n], slicenum=slicenum, circularity_min=circularity_min)
-        
-    return labelmask_filtered
-
-############################################################################
-def filter_3dlabelmask_circularity(labelmask, slice):
-    """
-
-        label: int
-            ID of object for which to calculate circularity
-            
-    Return:
-        circularity: float
-            output of circularity calculation 
-    """
-    # Calculate circularity from object perimeter and area.
-    im = labelmask[slice]
-    regions = regionprops(im)
-    perimeter = regions[0].perimeter
-    area = regions[0].area
-    if (perimeter == 0):
-        perimeter = 0.5
-    circularity = 4 * np.pi * area / (perimeter ** 2) 
-    return circularity   
-############################################################################
-def filter_labelmask(labelmask, func, above=0, below=1e6):
-    """Filter objects from a labelmask based on object properties
-    
-    Applies a user-supplied function that returns a numeric value for an
-    object in a labelmask, filters mask to contain only objects between
-    minimum and maximum values.
-    
-    Args:
-        labelmask: ndarray
-            n-dimensional integer labelmask
-        func: function
-            Function that accepts a labelmask as its first argument, object
-            ID as second argument, and returns a numeric value.
-        above: numeric
-            Lower limit for object's value returned from the function.
-        below: numeric
-            Upper limit for object's value returned from the function.
-            
-    Return:
-        labelmask_filtered: ndarray
-            Labelmask of same shape as input mask, containing only objects
-            between minimum and maximum values from supplied function.
-    """
-    labels = []
-    for x in np.unique(labelmask):
-        prop = func(labelmask, x)
-        if (prop >= above and prop <= below):
-            labels.append(x)
-    labelmask_filtered = np.where(np.isin(labelmask, labels), labelmask, 0)
-    return labelmask_filtered
-
-def filter_labelmask_apply4d(labelmask, func, above=0, below=1e6):
-    labelmask_filtered = np.zeros_like(labelmask)
-    for n in range(0, labelmask.shape[0]):
-        print(n, end=' ')
-        labelmask_filtered[n] = filter_labelmask(labelmask[n], func, above=above, below=below)
-    return labelmask_filtered
-
-############################################################################
-def zstack_normalize_mean(instack):
-    """Normalize each Z-slice in a Z-stack to by dividing by its mean
-
-    Args:
-        instack: ndarray
-            Image stack in order [z, x, y]
-
-    Returns:
-        stack: ndarray
-            Image stack of same shape as instack.
-    """
-    stack = np.copy(instack)    
-    stackmean = stack.mean()
-    for x in range(0,stack.shape[0]):
-        immean = stack[x].mean()
-        stack[x] = stack[x] / immean * stackmean
-    return(stack)
-
-############################################################################
-def stack_bgsub(stack, bgchannel=0, fgchannel=1):
-    """Use one channel of image stack to background subtract a second channel.
-
-    Built for 2-color lattice MS2 stacks. Observation is that low-frequency
-    features in MS2 channel (typically red) are almost all shared background
-    structures, particularly the embryo boundary. Subtraction is a very 
-    effective method of removing this boundary and other non-specific signals.
-    The mean projection in time of the background channel is used for
-    subtraction.
-    
-    Args:
-        stack: ndarray
-            5D image stack of dimensions [c,t,z,x,y].
-        bgchannel: int
-            Channel to use for background (to be subtracted)
-        fgchannel: int
-            Channel to use for foreground (to be subtracted from)
-    
-    Returns:
-        bgsub: ndarray
-            Background-subtracted stack in same shape as input stack
-    """
-    # Generate background from mean projection in time.
-    bg = stack[bgchannel].mean(axis=0)
-    # Find scale factor to equalize mean intensities.
-    scale = stack[fgchannel].mean() / bg.mean()
-    # Subtract background (broadcast to whole array, in both channels)
-    bgsub = stack - (scale * bg)
-    # Set minimum value to 0 (remove negative values).
-    bgsub = bgsub + abs(bgsub.min())
-    return bgsub
 
 ############################################################################
 def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
@@ -659,3 +374,147 @@ def interpolate_nuclear_mask(mask_in, max_missing_frames=2, usemax=True):
     if usemax:
         newmask = expand_mip(newmask, mask_in.shape[-3])
     return newmask
+
+
+############################################################################
+def labelmask_filter_objsize(labelmask, size_min, size_max):
+    """Filter objects in a labelmask for size
+    
+    Args:
+        labelmask: ndarray
+            n-dimensional integer labelmask
+        size_min: int
+            Minimum size in total pixels, of the smallest object
+        size_max: int
+            Maximum size, in total pixels, of the largest object
+    
+    Return:
+        labelmask_filtered: ndarray
+            Labelmask of same shape as input mask, containing only objects
+            between minimum and maximum sizes.
+    """
+    # Count pixels in each object.
+    (labels, counts) = np.unique(labelmask, return_counts=True)
+    # Select objects in desired size range, update filtered mask.
+    labels_selected = labels[(counts >= size_min) & (counts <= size_max)]
+    labelmask_filtered = np.where(np.isin(labelmask, labels_selected), 
+        labelmask, 0)
+    return labelmask_filtered
+
+############################################################################
+def labelmask_filter_objsize_apply4d(labelmask, size_min, size_max):
+    """Filter objects in a 4D labelmask by size.
+
+    Args:
+        labelmask: ndarray
+            4D Integer labelmask (background must be 0 or errors occur)
+        size_min: int
+            Minimum size, in pixels, of objects to retain
+        size_max: int
+            Maximum size, in pixels, of objects to retain
+
+    Returns:
+        labelmask_filtered: ndarray
+            Input labelmask with all pixels not corresponding to objects
+            within size range set to 0.
+    """
+    labelmask_filtered = np.zeros_like(labelmask)
+    for n in range(0, labelmask.shape[0]):
+        print(n, end=' ')
+        labelmask_filtered[n] = labelmask_filter_objsize(labelmask[n], size_min, size_max)    
+    return labelmask_filtered
+
+
+############################################################################
+def object_circularity(labelmask, label):
+    """Calculate circularity for and object in a labelmask
+    
+    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
+    Circularity calculation is 2D, using the single Z slice in which the
+    lebeled object has the most pixels.
+    
+    Args:
+        labelmask: ndarray
+            n-dimensional integer labelmask
+        label: int
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            output of circularity calculation 
+    """
+    # Find z slice with most pixels from object.
+    z, i, j = np.where(labelmask == label)
+    zmax = mode(z)[0][0]
+    # Select 2D image representing object's max Z-slice.
+    im = np.where(labelmask[zmax] == label, 1, 0)
+    # Calculate circularity from object perimeter and area.
+    regions = regionprops(im)
+    perimeter = regions[0].perimeter
+    area = regions[0].area
+    if (perimeter == 0):
+        perimeter = 0.5
+    circularity = 4 * np.pi * area / (perimeter ** 2) 
+    return circularity
+
+############################################################################ 
+def filter_labelmask_circularity(labelmask, slicenum, circularity_min=0.5):
+    """Filter a 3D labelmask for object circularity.
+
+    Implements imageJ circularity measure: 4pi(Area)/(Perimeter^2).
+    Circularity calculation is 2D, using the single Z slice in which the
+    lebeled object has the most pixels.
+
+    Args:
+        labelmask: ndarray
+            3d integer labelmask
+        slicenum: int
+            Z slice to use for circularity calculations
+        circularity_min: float
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            Minimum circularity for objects to pass filter
+    """
+    # Calculate circularity from object perimeter and area.
+    good_objs = []
+    im = labelmask[slicenum]
+    regions = regionprops(im)
+    for n in range(0, len(regions)):
+        perimeter = regions[n].perimeter
+        area = regions[n].area
+        if (perimeter == 0):
+            perimeter = 0.5
+        circularity = 4 * np.pi * area / (perimeter ** 2)
+        if (circularity >= circularity_min):
+            good_objs.append(regions[n].label)
+    labelmask_filtered = np.where(np.isin(labelmask, good_objs), labelmask, 0)
+        
+    return labelmask_filtered
+
+############################################################################
+def filter_labelmask_circularity_apply4d(labelmask, slicenum, circularity_min=0.5):
+    """Filter a 3D labelmask for object circularity.
+
+    Wrapper for filter_labelmask_circularity
+
+    Args:
+        labelmask: ndarray
+            4d integer labelmask
+        slicenum: int
+            Z slice to use for circularity calculations
+        circularity_min: float
+            ID of object for which to calculate circularity
+            
+    Return:
+        circularity: float
+            Minimum circularity for objects to pass filter
+    """
+    labelmask_filtered = np.zeros_like(labelmask)
+    for n in range(0, labelmask.shape[0]):
+        print(n, end=' ')
+        labelmask_filtered[n] = filter_labelmask_circularity(labelmask[n], slicenum=slicenum, circularity_min=circularity_min)
+        
+    return labelmask_filtered
+
