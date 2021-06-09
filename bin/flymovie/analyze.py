@@ -1,6 +1,10 @@
 import numpy as np
 from scipy import ndimage as ndi
 import pandas as pd
+import matplotlib.pyplot as plt
+from flymovie.general_functions import mesh_like
+from flymovie.fitting import gaussian3d
+from flymovie.viewers import plot_ps
 
 
 ############################################################################

@@ -75,10 +75,6 @@ def read_tiff_folder(tif_folder):
             tif_folder: string
                 Directory containing multiple TIFF files. Must be sortable
                 asciibetically.
-            span: tuple of ints
-                Optional key-word argument specifying first and last file to 
-                load, both inclusive. Example: span=(0, 5) loads the first 6 
-                images, numbers 0 through 5.
         
         Returns:
             stack: ndarray
@@ -98,7 +94,7 @@ def read_tiff_folder(tif_folder):
     # Sort the files: asciibetical sorting produces files ascending in time 
     # (sorting is *in place*)
     tif_files.sort()
-    return _read_tiff_stack(tif_folder, tif_files)
+    return read_tiff_stack(tif_folder, tif_files)
 
 ############################################################################
 def read_tiff_lattice(tif_folder, **kwargs):
@@ -140,8 +136,8 @@ def read_tiff_lattice(tif_folder, **kwargs):
     camA_files.sort()
     camB_files.sort()
     # Read both sets of files, combine if they are of same dimensions.
-    camA_stack = _read_tiff_stack(tif_folder, camA_files, **kwargs)
-    camB_stack = _read_tiff_stack(tif_folder, camB_files, **kwargs)
+    camA_stack = read_tiff_stack(tif_folder, camA_files, **kwargs)
+    camB_stack = read_tiff_stack(tif_folder, camB_files, **kwargs)
     if camA_stack.shape == camB_stack.shape:
         return np.stack((camA_stack, camB_stack), axis=0)
     else:
@@ -182,11 +178,13 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
         stack = np.swapaxes(stack,0,1)
 
     if return_metadata:
-        metadata = czifile.CziFile(filename).metadata()
+        handle = czifile.CziFile(czi_file_)
+        metadata = handle.metadata()
         root = ET.fromstring(metadata)
         first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
         #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
         z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
+        handle.close()
         return stack, first_dist, z_interval
     else:
         return stack
@@ -213,13 +211,17 @@ def read_czi_multiple(czi_files, folder):
         starting_positions: list of floats
             List of the position, in meters, of the first slice in the Z
             stack of each file, taken from czi file metadata.
+        z_interval: float
+            Size of Z slice, in microns, taken from czi metadata
     """
     def get_starting_position(czi_file_):
-        metadata = czifile.CziFile(czi_file_).metadata()
+        handle = czifile.CziFile(czi_file_)
+        metadata = handle.metadata()
         root = ET.fromstring(metadata)
         first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
         #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
         z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
+        handle.close()
         return first_dist, z_interval
 
     stacks = []

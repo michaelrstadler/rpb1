@@ -9,7 +9,7 @@ class TestData():
     def __init__(self):
         pass
 
-test_data = load_pickle(os.path.join(os.getcwd(), 'test_data.pkl'))
+test_data = load_pickle(os.path.join(os.getcwd(), 'test_data', 'test_data.pkl'))
 
 #---------------------------------------------------------------------------
 
@@ -49,20 +49,6 @@ class TestFilterMS2Fits(unittest.TestCase):
 class TestConnectMS2FramesViaNuclei(unittest.TestCase):
 	
 	def test_connect_ms2_frames_via_nuclei(self):
-		input_ = test_data.filter_ms2fits_output
-		nucmask = test_data.filter_labelmask_circularity_apply4d_output
-		correct_output = test_data.connect_ms2_frames_via_nuclei_output
-		test_output = connect_ms2_frames_via_nuclei(input_, nucmask)
-
-		for n in correct_output.keys():
-			self.assertTrue(np.array_equal(test_output[n], correct_output[n]), 
-				'Should be the same')
-
-#---------------------------------------------------------------------------
-
-class Test(unittest.TestCase):
-	
-	def test_(self):
 		input_ = test_data.filter_ms2fits_output
 		nucmask = test_data.filter_labelmask_circularity_apply4d_output
 		correct_output = test_data.connect_ms2_frames_via_nuclei_output

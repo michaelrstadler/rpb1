@@ -10,7 +10,7 @@ class TestData():
 from flymovie.segment_nuclei import *
 from flymovie.load_save import load_pickle
 
-test_data = load_pickle(os.path.join(os.getcwd(), 'test_data.pkl'))
+test_data = load_pickle(os.path.join(os.getcwd(), 'test_data', 'test_data.pkl'))
 
 
 #---------------------------------------------------------------------------
