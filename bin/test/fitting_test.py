@@ -2,15 +2,23 @@ import unittest
 import numpy as np
 import pandas as pd
 import os
+import sys
 
 from flymovie.fitting import *
 from flymovie.load_save import load_pickle
+
+# Workaround for github file size limits...needed to split 
+# test data into multiple files. To do this I load them with
+# load_test_data function in test package.
+wkdir = os.getcwd()
+sys.path.append(wkdir)
+from load_test_data import load_test_data
 
 class TestData():
     def __init__(self):
         pass
 
-test_data = load_pickle(os.path.join(os.getcwd(), 'test_data', 'test_data.pkl'))
+test_data = load_test_data(wkdir)
 
 #---------------------------------------------------------------------------
 
