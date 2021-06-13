@@ -16,8 +16,6 @@ from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand
 ############################################################################
 
 
-
-
 ############################################################################
 def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
     min_seed_dist=25, sigma=5, usemax=False, display=False, 

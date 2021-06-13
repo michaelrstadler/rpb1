@@ -4,7 +4,7 @@ from scipy import ndimage as ndi
 from scipy.spatial import distance
 from copy import deepcopy
 
-from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology
+from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology, clamp
 from .fitting import fitgaussian3d
 
 ############################################################################
@@ -93,10 +93,6 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
             spot_data[peak_num] = paramsnew[[1,2,3,0,4,5,6]]
             peak_num = peak_num + 1
         return spot_data
-
-    def clamp(n, minn, maxn):
-        """Bound a number between two constants"""
-        return max(min(maxn, n), minn)
     
     def fit_frame(substack, min_distances, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 

@@ -178,7 +178,7 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
         stack = np.swapaxes(stack,0,1)
 
     if return_metadata:
-        handle = czifile.CziFile(czi_file_)
+        handle = czifile.CziFile(filename)
         metadata = handle.metadata()
         root = ET.fromstring(metadata)
         first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text

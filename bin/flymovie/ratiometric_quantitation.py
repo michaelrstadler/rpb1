@@ -3,9 +3,13 @@ import os
 import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 from skimage.measure import label, regionprops
-from scipy.interpolate import CloughTocher2DInterpolator
+from scipy.interpolate import CloughTocher2DInterpolator, RegularGridInterpolator, interp2d, RectBivariateSpline
 from scipy.optimize import curve_fit
 
+from flymovie.fitting import fitgaussian3d
+from flymovie.general_functions import clamp
+from flymovie.detect_spots import connect_ms2_fits_focuscorrect
+from flymovie.viewers import spot_movies
 
 
 ############################################################################
@@ -13,7 +17,8 @@ from scipy.optimize import curve_fit
 ############################################################################
 
 ############################################################################
-def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):  
+def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, 
+    fitwindow_rad_z=2, sample_size=None):  
     """Find the centroids of all connected objects in a binary mask, perform
     3D gaussian fitting on each object.
 
@@ -84,6 +89,10 @@ def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10, fitwindow_rad_z=2):
         # Label objects in mask and find centroids of resulting objects.
         labelmask = ndi.label(submask)[0]
         peaks = get_centroids(labelmask)
+        # Sample peaks if desired.
+        if sample_size != None:
+            idxs = np.random.choice(np.arange(0, len(peaks)), sample_size, replace=False)
+            peaks = [peaks[n] for n in idxs]
         print('# to fit: ' + str(len(peaks)) + '\n# fit: ', end=' ')
         count = 0
         
@@ -443,7 +452,12 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
         # Get vectors of depths and intensities for this dataset.
         depth_means,intensity_means = np.array(depths[n]), np.array(intensities[n])
         # Fit curve with exponential function.
-        (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=guess, maxfev=100000)
+        if (len(x_all) == 0):
+            (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=guess, maxfev=100000)
+        else:
+            (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=(a_all[-1], b_all[-1], c_all[-1]), maxfev=100000,
+            bounds=((a_all[-1], b_all[-1], c_all[-1]), (np.inf, np.inf, np.inf)))
+        print(c)
         # Create x and y values from exponential function with fitted parameters.
         x = np.arange(xgrid_start, xgrid_end, 0.1)
         y = (a * np.exp(-b * x)) + c
@@ -459,6 +473,9 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
     # Perform interpolation for each parameter of exponential function.
     # Syntax note: CloughTocher function returns a CloughTocher function, this
     # function is called on the meshgrids to produce the interpolated grid.
+    #paramgrid_a = RectBivariateSpline((x_all, y_all), a_all)(x, y)
+    #paramgrid_b = RectBivariateSpline((x_all, y_all), b_all)(x, y)
+    #paramgrid_c = RectBivariateSpline((x_all, y_all), c_all)(x, y)
     paramgrid_a = CloughTocher2DInterpolator((x_all, y_all), a_all)(grid_x, grid_y)
     paramgrid_b = CloughTocher2DInterpolator((x_all, y_all), b_all)(grid_x, grid_y)
     paramgrid_c = CloughTocher2DInterpolator((x_all, y_all), c_all)(grid_x, grid_y)
@@ -466,5 +483,6 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
     if display:
         plt.scatter(x_all[(x_all > 4) & (x_all < 15)], y_all[(x_all > 4) & 
                 (x_all < 15)])
+        plt.grid(color='black', linestyle='-', linewidth=0.5)
     
     return paramgrid_a, paramgrid_b, paramgrid_c

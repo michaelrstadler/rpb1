@@ -13,8 +13,8 @@ test_data = load_pickle(os.path.join(os.getcwd(), 'test_data', 'test_data.pkl'))
 
 #---------------------------------------------------------------------------
 
-class TestFitMs2(unittest.TestCase):
-	
+class TestDetectSpots(unittest.TestCase):
+
 	def test_fit_ms2(self):
 		stack = test_data.stack[1]
 		min_distances = (stack.shape[-2], 25, 25)
@@ -29,10 +29,6 @@ class TestFitMs2(unittest.TestCase):
 			# Fitting is not deterministic, so some tolerance must be allowed.
 			self.assertTrue(np.allclose(test_output[n], correct_output[n], 
 				atol=0.5), 'Should be the same')
-
-#---------------------------------------------------------------------------
-
-class TestFilterMS2Fits(unittest.TestCase):
 	
 	def test_filter_ms2fits(self):
 		input_ = test_data.fit_ms2_output
@@ -43,10 +39,6 @@ class TestFilterMS2Fits(unittest.TestCase):
 		for n in range(0, len(test_output)):
 			self.assertTrue(np.array_equal(test_output[n], correct_output[n]), 
 				'Should be the same')
-
-#---------------------------------------------------------------------------
-
-class TestConnectMS2FramesViaNuclei(unittest.TestCase):
 	
 	def test_connect_ms2_frames_via_nuclei(self):
 		input_ = test_data.filter_ms2fits_output
@@ -57,6 +49,13 @@ class TestConnectMS2FramesViaNuclei(unittest.TestCase):
 		for n in correct_output.keys():
 			self.assertTrue(np.array_equal(test_output[n], correct_output[n]), 
 				'Should be the same')
+		
+	def test_connect_ms2_fits_focuscorrect(self):
+		input_ = test_data.filter_ms2fits_output
+		nucmask = test_data.filter_labelmask_circularity_apply4d_output
+		# This function is potentially soon for deprecation, 
+		# so just check if it runs for now.
+		connect_ms2_fits_focuscorrect(input_, [0], [0], nucmask) 
 
 #---------------------------------------------------------------------------
 

@@ -49,6 +49,19 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		# Test if it runs.
 		spotdf_plot_traces_bleachcorrect(test_data.df, test_data.df, 0, 
 			test_data.df_stack[1])	
+
+	def test_threshold_w_slope(self):
+		input_ = np.ones((5,10,10)) * 10
+		test_output_1 = threshold_w_slope(input_, 0, 2, 0)
+		test_output_2 = threshold_w_slope(input_, 10, 2, -1)
+		test_output_3 = threshold_w_slope(input_, 10, 2, 1)
+
+		self.assertTrue(np.array_equal(test_output_1, np.ones((1,5,10,10))), "Should be equal")
+		self.assertTrue(np.array_equal(test_output_2[0,0], np.zeros((10,10))), "Should be equal")
+		self.assertTrue(np.array_equal(test_output_2[0,4], np.ones((10,10))), "Should be equal")
+		self.assertTrue(np.array_equal(test_output_3[0,0], np.ones((10,10))), "Should be equal")
+		self.assertTrue(np.array_equal(test_output_3[0,4], np.zeros((10,10))), "Should be equal")
+
 		
 if __name__ == '__main__':
 	unittest.main()

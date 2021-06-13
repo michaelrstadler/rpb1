@@ -408,3 +408,54 @@ def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66,
     # If dfs not requested, return corrected spot data.
     else:
         return corr_spot_data
+
+############################################################################
+def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
+    """Threshold a 3D stack using a threshold that varies linearly in Z
+    according to a supplied slope, return a binary mask.
+    
+    To use: Find a reasonable threshold for a single slice in your image
+    stack. Run function with various slopes and display=True, which will
+    show the number of thresholded objects detected in each Z slice. Play 
+    with slope until this relationship is satisfactorally flat.
+
+    Args:
+        stack: ndarray
+            3D image stack
+        ref_thresh: numeric
+            Threshold value for the reference slice
+        ref_slice: int
+            Slice number used for reference
+        slope: numeric
+            Slope (intensity/slice) of linear adjustment in threshold
+        display: bool
+            If true, plots number of detected objects vs. z slice
+    
+    Return:
+        mask: ndarray
+            4D binary mask resulting from adjusted thresholding
+    """
+    # Initialize empty mask.
+    mask = np.zeros_like(stack)
+    n_slices = stack.shape[0]
+    # Make a vector of thresholds for different Z slices.
+    thresh_start = ref_thresh - (ref_slice * slope)
+    thresh_end = ref_thresh + ((n_slices - ref_slice - 1) * slope)
+    thresh = np.linspace(thresh_start, thresh_end, n_slices)
+    
+    # Apply computed thresholds serially to Z slices, make binary
+    # mask with a little bit of opening to remove single-pixel
+    # objects.
+    for z in range(0, n_slices):
+        mask[z] = np.where(stack[z] >= thresh[z], 1, 0)
+    mask = ndi.morphology.binary_opening(mask, np.ones((1,2,2)))
+
+    # Plot number of detected objects per Z slice
+    if display:
+        counts = []
+        for z in range(0, n_slices):
+            _, count = ndi.label(mask[z])
+            counts.append(count)
+        plt.plot(counts)
+        plt.ylim(0,600)
+    return np.expand_dims(mask, axis=0)

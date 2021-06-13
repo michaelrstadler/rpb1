@@ -614,7 +614,7 @@ def zstack_normalize_mean(instack):
     """
     stack = np.copy(instack)    
     stackmean = stack.mean()
-    for x in range(0,stack.shape[0]):
-        immean = stack[x].mean()
-        stack[x] = stack[x] / immean * stackmean
+    for z in range(0,stack.shape[0]):
+        immean = stack[z].mean()
+        stack[z] = stack[z] / immean * stackmean
     return(stack)
