@@ -386,15 +386,23 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
     Depth-intensity data for each dataset is independently fit with an 
     exponential function (y = a * exp(-b * x) + c), giving a series of 
     curves at different intensities. From these curves, a 2D grid is 
-    interpolated for each exponential parameter. 
+    interpolated for each exponential parameter. I had trouble finding
+    a method to do interpolation that resulted in a smooth grid from 
+    multiple curves, but I could get a smooth grid from two curves.
+    The slightly clunky solution I came up with is to calculate grids
+    from pairs of curves and then essentially join them together. This 
+    necessitates the curves being "in order", from lowest to highest 
+    intensity.
     
     Args:
         depths: list of np.arrays
             Output from make_depth_vs_intensity_vectors. List items are
-            input datasets, array values are embryo depths in µm.
+            input datasets, array values are embryo depths in µm. Curves
+            must be in order from lowest to highest intensity.
         intensities: list of np.arrays
             Output from make_depth_vs_intensity_vectors. List items are
-            input datasets, array values are spot intensities.
+            input datasets, array values are spot intensities. Curves
+            must be in order from lowest to highest intensity.
         xgrid_start: numeric
             Start position for embryo depth axis of grid used for 
             interpolation.
@@ -421,7 +429,7 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
             If true, plot depth vs. intensity fits for range between 4
             and 15 µm
     Returns: 
-        paramgrid_a, paramgrid_b, paramgrid_c: ndarray
+        paramgrid_a, paramgrid_b, paramgrid_c: ndarrays
             2D grids (depth, intensity) of exponential parameters a, b, c
     
     """
@@ -429,6 +437,21 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
     def exp_func(x, a, b, c):
         return a * np.exp(-b * x) + c
     
+    def update_paramgrid(paramgrid_old, idx1, idx2, x_all, y_all, vals, grid_x, grid_y):
+        """Compute parameter grid from two curves, merge this grid with old grid."""
+        # Make vectors of x, y, and parameter values for these two curves.
+        x = np.concatenate([x_all[idx1], x_all[idx2]])
+        y = np.concatenate([y_all[idx1], y_all[idx2]])
+        vals = np.concatenate([vals[idx1], vals[idx2]])
+        # Perform interpolation for each parameter of exponential function.
+        # Syntax note: CloughTocher function returns a CloughTocher function, this
+        # function is called on the meshgrids to produce the interpolated grid.
+        paramgrid_new = CloughTocher2DInterpolator((x, y), vals)(grid_x, grid_y)
+        # Merge parameter grids by keeping all non-nan values in the new grid, and 
+        # replacing all nan positions with the values from the old grid. 
+        paramgrids_merged = np.where(~np.isnan(paramgrid_new), paramgrid_new, paramgrid_old)
+        return paramgrids_merged
+
     # Not currently implemented.
     def lin_func(x,m,b):
         return (m * x) + b
@@ -439,12 +462,12 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
         fitfunc = exp_func
     
     # Create vectors of x positions, y positions, and values for exponential
-    # parameters a, b, and c.
-    x_all = np.zeros(0)
-    y_all = np.zeros(0)
-    a_all = np.zeros(0)
-    b_all = np.zeros(0)
-    c_all = np.zeros(0)
+    # parameters a, b, and c. These vectors are used for interpolation.
+    x_all = []
+    y_all = []
+    a_all = []
+    b_all = []
+    c_all = []
     
     # Step through the depths and intensities for each dataset, build 'all'
     # vectors.
@@ -452,37 +475,82 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
         # Get vectors of depths and intensities for this dataset.
         depth_means,intensity_means = np.array(depths[n]), np.array(intensities[n])
         # Fit curve with exponential function.
-        if (len(x_all) == 0):
-            (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=guess, maxfev=100000)
-        else:
-            (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=(a_all[-1], b_all[-1], c_all[-1]), maxfev=100000,
-            bounds=((a_all[-1], b_all[-1], c_all[-1]), (np.inf, np.inf, np.inf)))
-        print(c)
+        (a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=guess, maxfev=100000)
+        # Deprecated: a bounded version of the fit function.
+        #(a,b,c),_ = curve_fit(fitfunc, depth_means, intensity_means, p0=(a_all[-1], b_all[-1], c_all[-1]), maxfev=100000,
+        #bounds=((a_all[-1], b_all[-1], c_all[-1]), (np.inf, np.inf, np.inf)))
+        
         # Create x and y values from exponential function with fitted parameters.
         x = np.arange(xgrid_start, xgrid_end, 0.1)
         y = (a * np.exp(-b * x)) + c
         # Add x, y, and exponential parameters to existing 'all' vectors.
-        x_all = np.concatenate([x_all, x])
-        y_all = np.concatenate([y_all, y])
-        a_all = np.concatenate([a_all, np.repeat(a, len(x))])
-        b_all = np.concatenate([b_all, np.repeat(b, len(x))])
-        c_all = np.concatenate([c_all, np.repeat(c, len(x))])
+        x_all.append(x)
+        y_all.append(y)
+        a_all.append(np.repeat(a, len(x)))
+        b_all.append(np.repeat(b, len(x)))
+        c_all.append(np.repeat(c, len(x)))
     
     # Create meshgrids to define regions over which to perform interpolation.
-    grid_x, grid_y = np.mgrid[xgrid_start:xgrid_end:xgrid_incr, ygrid_start:ygrid_end:ygrid_incr]
-    # Perform interpolation for each parameter of exponential function.
-    # Syntax note: CloughTocher function returns a CloughTocher function, this
-    # function is called on the meshgrids to produce the interpolated grid.
-    #paramgrid_a = RectBivariateSpline((x_all, y_all), a_all)(x, y)
-    #paramgrid_b = RectBivariateSpline((x_all, y_all), b_all)(x, y)
-    #paramgrid_c = RectBivariateSpline((x_all, y_all), c_all)(x, y)
-    paramgrid_a = CloughTocher2DInterpolator((x_all, y_all), a_all)(grid_x, grid_y)
-    paramgrid_b = CloughTocher2DInterpolator((x_all, y_all), b_all)(grid_x, grid_y)
-    paramgrid_c = CloughTocher2DInterpolator((x_all, y_all), c_all)(grid_x, grid_y)
+    grid_x, grid_y = np.mgrid[xgrid_start:xgrid_end:xgrid_incr, 
+        ygrid_start:ygrid_end:ygrid_incr]
+    # Initialize parameter grids for each exponential parameter.
+    paramgrid_a = np.zeros(grid_x.shape)
+    paramgrid_b = np.zeros(grid_x.shape)
+    paramgrid_c = np.zeros(grid_x.shape)
+
+    # Perform fitting for all consecutive ascending pairs of curves, continuously
+    # update final grid.
+    for n in range(1, len(depths)):
+        paramgrid_a = update_paramgrid(paramgrid_a, n-1, n, x_all, y_all, a_all, 
+            grid_x, grid_y)
+        paramgrid_b = update_paramgrid(paramgrid_b, n-1, n, x_all, y_all, b_all, 
+            grid_x, grid_y)
+        paramgrid_c = update_paramgrid(paramgrid_c, n-1, n, x_all, y_all, c_all, 
+            grid_x, grid_y)
     
+    # Plot some useful things.
     if display:
-        plt.scatter(x_all[(x_all > 4) & (x_all < 15)], y_all[(x_all > 4) & 
-                (x_all < 15)])
-        plt.grid(color='black', linestyle='-', linewidth=0.5)
+        plt.figure(figsize=(10,6))
+
+        # Plot original data and fits.
+        plt.subplot(231)
+        for n in range(0, len(depths)):
+            plt.scatter(depths[n], intensities[n], color='gray')
+            plt.scatter(x_all[n], y_all[n], 0.5, color='red')
+        plt.title('Fits to input data')
+
+        # Get curves from parameter grids at a series of points, plot in gray.
+        plt.subplot(232)
+        for pt_x in (25, 50, 75):
+            for pt_y in np.arange(10, 200, 50):
+                a = paramgrid_a[pt_x, pt_y]
+                b = paramgrid_b[pt_x, pt_y]
+                c = paramgrid_c[pt_x, pt_y]
+                x = np.arange(xgrid_start, xgrid_end, 0.1)
+                y = a * np.exp(-b * x) + c
+                plt.scatter(x,y, 0.5, color="gray")
+                plt.ylim(0,20000)
+                plt.grid(color='gray', alpha=0.5)
+    
+        # Plot original fits to data in red.
+        for n in range(0, len(depths)):
+            x = x_all[n]
+            y = y_all[n]
+            plt.scatter(x,y, 0.5, color='red')
+            plt.grid(color='black', linestyle='-', linewidth=0.5)
+            plt.ylim(0,20000)
+        plt.title('Curves from points')
+        
+
+        # Plot heatmaps of each parameter grid.
+        plt.subplot(234)
+        plt.imshow(np.swapaxes(paramgrid_a,0,1), origin='lower')
+        plt.title('a')
+        plt.subplot(235)
+        plt.imshow(np.swapaxes(paramgrid_b,0,1), origin='lower')
+        plt.title('b')
+        plt.subplot(236)
+        plt.imshow(np.swapaxes(paramgrid_c,0,1), origin='lower');
+        plt.title('c')
     
     return paramgrid_a, paramgrid_b, paramgrid_c
