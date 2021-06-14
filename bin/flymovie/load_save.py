@@ -154,11 +154,18 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
             If true, remove last frame if it contains blank slices
         swapaxes: bool
             If true, switches first two axes to produce a stack order ctzxy
+        return_metadata: bool
+            If true, returns a tuple of stack, first distance, z interval
             
     Returns:
         stack: ndarray
             Image stack in dimensions [t,c,z,x,y] (no swap) or 
             [c,t,z,x,y] (swapped)
+        starting_positions: list of floats
+            List of the position, in microns, of the first slice in the Z
+            stack of each file, taken from czi file metadata.
+        z_interval: float
+            Size of Z slice, in microns, taken from czi metadata
     """
     def frame_incomplete(stack3d):
         """Determine if frame is incomplete."""
@@ -181,9 +188,10 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
         handle = czifile.CziFile(filename)
         metadata = handle.metadata()
         root = ET.fromstring(metadata)
-        first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
+        # Pull first distance and z interval, convert to microns.
+        first_dist = float(root.findall('.//ZStackSetup')[0][8][0][0].text) * 1e6
         #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
-        z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
+        z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text) * 1e6
         handle.close()
         return stack, first_dist, z_interval
     else:
@@ -209,30 +217,20 @@ def read_czi_multiple(czi_files, folder):
             representing the 0-indexed location of the first frame of a new
             stack.
         starting_positions: list of floats
-            List of the position, in meters, of the first slice in the Z
+            List of the position, in microns, of the first slice in the Z
             stack of each file, taken from czi file metadata.
         z_interval: float
             Size of Z slice, in microns, taken from czi metadata
     """
-    def get_starting_position(czi_file_):
-        handle = czifile.CziFile(czi_file_)
-        metadata = handle.metadata()
-        root = ET.fromstring(metadata)
-        first_dist = root.findall('.//ZStackSetup')[0][8][0][0].text
-        #last_dist = root.findall('.//ZStackSetup')[0][9][0][0].text
-        z_interval = float(root.findall('.//ZStackSetup')[0][10][0][0].text)
-        handle.close()
-        return first_dist, z_interval
-
+    
     stacks = []
     starting_positions = []
     for czi_file_ in czi_files:
         czi_file_path = os.path.join(folder, czi_file_)
-        stacks.append(read_czi(czi_file_path, trim=True))
-        first_dist, z_interval = get_starting_position(czi_file_path)
+        stack, first_dist, z_interval = read_czi(czi_file_path, trim=True, return_metadata=True)
+        stacks.append(stack)
         starting_positions.append(first_dist)
-
-        
+ 
     stack, frames = concatenate_5dstacks(stacks)
     return stack, frames, starting_positions, z_interval
 
