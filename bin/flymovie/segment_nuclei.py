@@ -36,7 +36,7 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
             is the max value. Generally want size to be a little less than 2x 
             the distance between nuclear centers. Centers closer than this 
             will not produce two seeds.
-        min_seed_dist: numeric
+        min_nuc_center_dist: numeric
             The minimum euclidean distance (in pixels) allowed between watershed
             seeds. Typically set as ~the diameter of the nuclei.   
         sigma: numeric
@@ -45,14 +45,27 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
             Use maximum intensity projection (in Z) for segmenting
         return_intermediates: bool
             Return (mask, grad, seeds, ws) for troubleshooting
+        seed_window: tuple of ints
+            [Optional] 
+            Size in [z, x, y] for window for determining local maxes in 
+            distance transform. A point is retained as a seed if there
+            exists some window of this size in the image for which the point
+            is the max value. Generally want size to be a little less than 2x 
+            the distance between nuclear centers. Centers closer than this 
+            will not produce two seeds. If None, then a seed window is 
+            automatically generated from min_nuc_center_dist so that the
+            diagonal of the box is equal to twice this distance.
     
     Returns:
         labelmask: ndarray
             Mask of same shape as input stack with nuclei segmented and labeled
     
     """
+    # Generate seed window if none supplied.
     if seed_window is None:
+        # Window set such that the diagonal is equal to 2 * min_nuc_center_dist.
         seed_window = (stack.shape[0], (min_nuc_center_dist * 2) / np.sqrt(2), (min_nuc_center_dist * 2) / np.sqrt(2))
+        # Remove first dimension if max projection used.
         if usemax:
             seed_window = seed_window[1:]
 
@@ -61,13 +74,10 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
         stack_smooth = ndi.gaussian_filter(stack.max(axis=0), sigma)
     else:
         stack_smooth = ndi.gaussian_filter(stack, sigma)
-    #print('smooth')
     # Define a threshold for nuclear signal.
     thresh = threshold_otsu(stack_smooth)
-    #print('thresh')
     # Make a binary mask using threshold.
     mask = np.where(stack_smooth > thresh, 1, 0)
-    #print('mask')
     # Take the gradient of the mask to produce outlines for use in watershed algorithm.
     grad = gradient_nD(mask)
     # Perform distance transform and run local max finder to determine watershed seeds.
@@ -79,8 +89,6 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
     if usemax:
         ws = np.repeat(np.expand_dims(ws, axis=0), stack.shape[0], axis=0)
     labelmask = ws
-    #labelmask = labelmask_filter_objsize(ws, size_min, size_max)
-    #labelmask = filter_labelmask(labelmask, object_circularity, circularity_min, 1000)
 
     if (display):
         fig, ax = plt.subplots(3,2, figsize=(10,10))

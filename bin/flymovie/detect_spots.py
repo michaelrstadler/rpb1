@@ -8,21 +8,25 @@ from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_mo
 from .fitting import fitgaussian3d
 
 ############################################################################
-def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1, 
-                   sigma_big=4, bg_radius=4, fitwindow_rad_xy=10, 
-                   fitwindow_rad_z=2):  
+def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4, 
+        fitwindow_rad_xy=10, fitwindow_rad_z=2, mode='mindist', 
+        min_distances=(70,50,50), nucmask=None, nucmask_dilation=5):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
-    Alrigthm: bandbass filter -> background subtraction -> find local maxima
-    -> fit gaussian to windows around maxima
-    
+    Algorithm: bandbass filter -> background subtraction -> find candidate
+    peaks -> fit gaussian to windows around maxima
+
+    There are two modes which differ in how they find candidate ms2 spots
+    for fitting. In 'mindist' mode, the filtered image is searched for local
+    maxima separated by a supplied minimum distance. This can create errors
+    when spots happen to occur at extreme nuclear edges very near each other
+    (passing within minimum distance). In 'nucleus' mode, a maximum pixel 
+    is found for each nucleus in each frame and fitted. This mode is 
+    generally better as long as the supplied nuclear mask is good.
+
     Args:
         stack: ndarray
             4D image stack [t,z,x,y] containing MS2 spots
-        min_distances: tuple of three ints
-            Minimum distance (in pixels) allowed between spots for them to be
-            counted as distinct spots. Minimum distance supplied for each 
-            dimension.
         sigma_small: numeric
             Lower sigma for difference-of-gaussians bandpass filter
         sigma_small: numeric
@@ -36,6 +40,24 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
         fitwindow_rad_z: int
             Radius in pixels in the z-dimension of the window around local
             maxima peaks within which to do gaussian fitting.
+        mode: string
+            If 'mindist', candidate points for fitting are generated from
+                local maxima separated by distances defined by supplied 
+                min_distances
+            If 'nuclear', candidate points for fitting are found by taking
+                the maximum value of DoG-filtered image in each nucleus in 
+                a supplied nuclear mask
+        min_distances: tuple of three ints
+            ['mindist' mode only] Minimum distance (in pixels) allowed between 
+            spots for them to be counted as distinct spots. Minimum distance 
+            supplied for each dimension.
+        nucmask: ndarray
+            ['nucleus' mode only] 4-dimensional nuclear labelmask
+        nucmask_dilation: numeric
+            ['nucleus' mode only] Length of the structuring element used to 
+            morphologically dilate supplied nuclear mask. This is useful to 
+            ensure that spots near the nuclear edge are not lost due to small 
+            errors in nuclear masking.
     
     Returns:
         fit_data: list of ndarrays
@@ -46,12 +68,10 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
-    # Task: change size to minimum distance
     def get_fitwindow(data, peak, xy_rad, z_rad):
         """Retrieve section of image stack corresponding to given
         window around a point and the coordinate adjustments necessary
         to convert window coordinates to coordinates in the original image"""
-        
         # Set the start points for windows and "adjust" them if they get 
         # to negative numbers.
         zmin = peak[0] - z_rad
@@ -94,19 +114,39 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
             peak_num = peak_num + 1
         return spot_data
     
-    def fit_frame(substack, min_distances, sigma_small, 
-                   sigma_big, bg_radius, fitwindow_rad_xy, 
-                   fitwindow_rad_z):
+    def fit_frame(stack, framenum, sigma_small, sigma_big, bg_radius, 
+            fitwindow_rad_xy, fitwindow_rad_z, mode, min_distances, nucmask, 
+            nucmask_dilation):
         """Perform 3D gaussian fitting on a 3D image stack."""
-
+        substack = stack[framenum]
         # Filter and background subtract image.
         dog = dog_filter(substack, sigma_small, sigma_big)
         bg = ndi.filters.minimum_filter(dog, bg_radius)
         dog_bs = dog - bg
 
-        # Make a labelmask corresponding to local maxima peaks.
-        peak_window_size = (min_distances[0] * 2 + 1, min_distances[1] * 2 + 1, min_distances[2] * 2 + 1)
-        mask, peaks = peak_local_max_nD(dog_bs, peak_window_size)
+        # For mindist mode, find local maxima and assign to peaks.
+        if mode == 'mindist':
+            peak_window_size = (min_distances[0] * 2 + 1, min_distances[1] * 2 + 1, 
+                min_distances[2] * 2 + 1)
+            _, peaks = peak_local_max_nD(dog_bs, peak_window_size)
+        
+        # For nucleus mode, find maximum in each nucleus and add position to peaks.
+        elif mode == 'nucleus':
+            nucmask_thisframe = nucmask[framenum]
+            # Dilate nuclear mask to make a 'lookup' mask with expanded nuclei
+            # (to account for imperfect segmentation of nuclei).
+            nucmask_lookup = labelmask_apply_morphology(nucmask_thisframe, 
+                ndi.morphology.binary_dilation, 
+                struct=np.ones((1, nucmask_dilation, nucmask_dilation)), 
+                expand_size=(1, nucmask_dilation, nucmask_dilation)) 
+            peaks = []
+            for nuc in np.unique(nucmask_lookup):
+                # Mask everything but the nucleus in the stack, add coordinates of
+                # maximum pixel to peaks.
+                nucalone_stack = np.where(nucmask_lookup == nuc, dog_bs, 0)
+                peak = np.unravel_index(np.argmax(nucalone_stack), 
+                    nucalone_stack.shape)
+                peaks.append(tuple(peak))
 
         # Fit 3D gaussian in window surrounding each local maximum.
         fitparams = np.ndarray((0,7))
@@ -128,19 +168,25 @@ def fit_ms2(stack, min_distances=(70,50,50), sigma_small=1,
         return fitparams
     
     #### Main ####
+    if mode not in ('mindist', 'nucleus'):
+        raise ValueError('Invalid mode')
+    
+    if (mode == 'nucleus') and (nucmask is None):
+        raise ValueError('Must supply a nuclear mask for nucleus mode')
+
     # Do fitting on first frame.
-    fit_data_frame0 = fit_frame(stack[0], min_distances, sigma_small, 
-                   sigma_big, bg_radius, fitwindow_rad_xy, 
-                   fitwindow_rad_z)
+    fit_data_frame0 = fit_frame(stack, 0, sigma_small, 
+        sigma_big, bg_radius, fitwindow_rad_xy, 
+        fitwindow_rad_z, mode, min_distances, nucmask, nucmask_dilation)
     # Make fit_data a list of ndarrays.
     fit_data = [fit_data_frame0]
-    
     # Fit the rest of the frames, add their data to fit_data.
-    for i in range(1, stack.shape[0]):
-        print(i, end=' ')
-        fit_data_thisframe = fit_frame(stack[i], min_distances, sigma_small, 
+    for framenum in range(1, stack.shape[0]):
+        print(framenum, end=' ')
+        fit_data_thisframe = fit_frame(stack, framenum, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
-                   fitwindow_rad_z)
+                   fitwindow_rad_z, mode, min_distances, nucmask, 
+                   nucmask_dilation)
         fit_data.append(fit_data_thisframe)
         
     return fit_data
