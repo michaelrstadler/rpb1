@@ -30,6 +30,12 @@ class TestDetectSpots(unittest.TestCase):
 		fitwindow_rad_z = 2
 		sigma_small = 1
 		correct_output = test_data.fit_ms2_output
+
+		# Just make sure it runs in nucleus mode.
+		_ = fit_ms2(stack, fitwindow_rad_xy=fitwindow_rad_xy, 
+		sigma_small=sigma_small, mode='nucleus', nucmask = 
+		np.ones_like(stack))
+		
 		test_output = fit_ms2(stack, min_distances=min_distances, 
 			fitwindow_rad_xy=fitwindow_rad_xy, sigma_small=sigma_small)
 

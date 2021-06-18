@@ -27,14 +27,14 @@ class TestSegmentNuclei3DStackRpb1(unittest.TestCase):
 	def test_segment_nuclei_3Dstack_rpb1(self):
 		nucchannel = 0
 		seed_window = (30,30)
-		min_seed_dist = 30
+		min_nuc_center_dist = 30
 		sigma = 5
 		usemax = True
 		stack = test_data.stack
 		correct_output = test_data.segment_nuclei_3Dstack_rpb1_output
 
 		test_output = segment_nuclei_3Dstack_rpb1(stack[nucchannel, 0], 
-			seed_window=seed_window, min_seed_dist=min_seed_dist, 
+			seed_window=seed_window, min_nuc_center_dist=min_nuc_center_dist, 
 			sigma=sigma, usemax=usemax)
 
 
@@ -47,7 +47,7 @@ class TestSegmentNuclei4dStack(unittest.TestCase):
 	def test_segment_nuclei_4dstack(self):
 		nucchannel = 0
 		seed_window = (30,30)
-		min_seed_dist = 30
+		min_nuc_center_dist = 30
 		sigma = 5
 		usemax = True
 		stack = test_data.stack
@@ -55,7 +55,7 @@ class TestSegmentNuclei4dStack(unittest.TestCase):
 
 		test_output = segment_nuclei_4dstack(stack[nucchannel], 
 			segment_nuclei_3Dstack_rpb1, seed_window=seed_window, 
-			min_seed_dist=min_seed_dist, sigma=sigma, usemax=usemax)
+			min_nuc_center_dist=min_nuc_center_dist, sigma=sigma, usemax=usemax)
 
 
 		self.assertTrue(np.array_equal(test_output, correct_output),
