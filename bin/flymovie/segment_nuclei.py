@@ -17,14 +17,14 @@ from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand
 
 
 ############################################################################
-def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
-    min_seed_dist=25, sigma=5, usemax=False, display=False, 
-    return_intermediates=False):
+def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5, 
+    usemax=False, display=False, return_intermediates=False, 
+    seed_window=None):
     """Segment nuclei from Rpb1 fluorescence in confocal data.
     
-    Algorithm is smooth -> threshold -> distance transform to find seeds ->
-    take gradient on binary mask -> watershed on gradient. Does not do
-    any filtering on resulting segmented objects.
+    Algorithm is smooth -> threshold -> gradient -> distance transform to 
+    find seeds -> take gradient on binary mask -> watershed on gradient. 
+    Does not do any filtering on resulting segmented objects.
    
     Args:
         stack: ndarray
@@ -51,6 +51,11 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
             Mask of same shape as input stack with nuclei segmented and labeled
     
     """
+    if seed_window is None:
+        seed_window = (stack.shape[0], (min_nuc_center_dist * 2) / np.sqrt(2), (min_nuc_center_dist * 2) / np.sqrt(2))
+        if usemax:
+            seed_window = seed_window[1:]
+
     # Smooth stack using a Gaussian filter.
     if usemax:
         stack_smooth = ndi.gaussian_filter(stack.max(axis=0), sigma)
@@ -67,7 +72,7 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
     grad = gradient_nD(mask)
     # Perform distance transform and run local max finder to determine watershed seeds.
     dist = ndi.distance_transform_edt(mask)
-    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
+    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_nuc_center_dist)
     # Perform watershed segmentation.
     ws = watershed(grad, seeds.astype(int))
     # Filter object size and circularity, relabel to set background to 0.

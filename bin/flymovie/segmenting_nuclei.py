@@ -304,26 +304,27 @@ def stack_bgsub(stack, bgchannel=0, fgchannel=1):
     return bgsub
 
 ############################################################################
-def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50), 
-    min_seed_dist=25, sigma=5, usemax=False, display=False, 
-    return_intermediates=False):
+def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5, 
+    usemax=False, display=False, return_intermediates=False, 
+    seed_window=None):
     """Segment nuclei from Rpb1 fluorescence in confocal data.
     
-    Algorithm is smooth -> threshold -> distance transform to find seeds ->
-    take gradient on binary mask -> watershed on gradient. Does not do
-    any filtering on resulting segmented objects.
-   
+    Algorithm is smooth -> threshold -> gradient -> distance transform to 
+    find seeds -> take gradient on binary mask -> watershed on gradient. 
+    Does not do any filtering on resulting segmented objects.
+
     Args:
         stack: ndarray
             3D image stack of dimensions [z, x, y].
         seed_window: tuple of three ints
-            Size in [z, x, y] for window for determining local maxes in 
-            distance transform. A point is retained as a seed if there
-            exists some window of this size in the image for which the point
-            is the max value. Generally want size to be a little less than 2x 
-            the distance between nuclear centers. Centers closer than this 
+            Size in [z, x, y] for window for finding candidate nuclear
+            centers. Operates on distance transform of gradient, which is 
+            effectively the distance to nuclear boundary. A point is retained 
+            as a candidate if there exists some window of this size in the 
+            image for which the point is the max value. Generally want size 
+            to be a little less than 2x the distance between nuclear centers. Centers closer than this 
             will not produce two seeds.
-        min_seed_dist: numeric
+        min_nuc_center_dist: numeric
             The minimum euclidean distance (in pixels) allowed between watershed
             seeds. Typically set as ~the diameter of the nuclei.   
         sigma: numeric
@@ -339,10 +340,17 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
     
     """
     # Smooth stack using a Gaussian filter.
+    if seed_window is None:
+        print('mickelson1')
+        seed_window = (stack.shape[0], min_nuc_center_dist * 2, min_nuc_center_dist * 2)
+
     if usemax:
         stack_smooth = ndi.gaussian_filter(stack.max(axis=0), sigma)
+        seed_window = seed_window[1:]
     else:
         stack_smooth = ndi.gaussian_filter(stack, sigma)
+    
+
     #print('smooth')
     # Define a threshold for nuclear signal.
     thresh = threshold_otsu(stack_smooth)
@@ -354,7 +362,7 @@ def segment_nuclei_3Dstack_rpb1(stack, seed_window=(15,50,50),
     grad = gradient_nD(mask)
     # Perform distance transform and run local max finder to determine watershed seeds.
     dist = ndi.distance_transform_edt(mask)
-    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_seed_dist)
+    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_nuc_center_dist)
     # Perform watershed segmentation.
     ws = watershed(grad, seeds.astype(int))
     # Filter object size and circularity, relabel to set background to 0.
