@@ -70,6 +70,80 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		self.assertTrue(np.array_equal(test_output_3[0,0], np.ones((10,10))), "Should be equal")
 		self.assertTrue(np.array_equal(test_output_3[0,4], np.zeros((10,10))), "Should be equal")
 
+	def test_spot_data_add_depth(self):
+		input_ = {}
+		for n in range(0,10):
+			input_[n] = np.ones((20, 13))
+			input_[n][:, 0] = np.arange(0,20)
+		surface_before = 0
+		surface_after = 1
+		join_frames = [5]
+		start_positions = [5, 4]
+
+		output = spot_data_add_depth(input_, surface_before, surface_after, 
+			join_frames, start_positions, z_interval=0.5)
 		
+		# Test if it added a column.
+		for n in range(0, 10):
+			self.assertEqual(output[n].shape[1], 14, 'Failed to add column')
+
+	def test_spot_data_extract_depthbinned_intensities(self):
+		input_ = {}
+		for n in range(0,10):
+			input_[n] = np.ones((20, 13))
+			# Set frames.
+			input_[n][:, 0] = np.arange(0,20)
+			# Set depths.
+			input_[n][:, 12] = np.arange(0, 10, 0.5)
+			# Set intensities.
+			input_[n][:, 9] = np.arange(0, 10, 0.5)
+
+		output = spot_data_extract_depthbinned_intensities(input_, col_depth=12, col_to_bin=9, 
+        	bin_size=0.5, nbins=100)
+
+		self.assertEqual(len(output), 100, 'Length should be 100.')
+		self.assertEqual(np.mean(output[0]), 0, 'Should be 0.')
+		self.assertEqual(np.mean(output[11]), 5.5, 'Should be 5.5.')
+		self.assertEqual(len(output[90]), 0, 'Should be 0.')
+
+	def test_spot_data_depth_correct_stdcandle(self):
+		input_ = {}
+		for n in range(0,10):
+			input_[n] = np.ones((20, 13))
+			# Set frames.
+			input_[n][:, 0] = np.arange(0,20)
+			# Set depths.
+			input_[n][:, 12] = np.arange(0, 10, 0.5)
+			# Set intensities.
+			input_[n][:, 9] = np.arange(0, 10, 0.5)
+
+		paramgrid_a = np.ones((250,200))
+		paramgrid_b = np.zeros((250,200))
+		paramgrid_c = np.ones((250,200))
+		paramgrids = (paramgrid_a, paramgrid_b, paramgrid_c)
+		output = spot_data_depth_correct_stdcandle(input_, paramgrids, col_to_correct=9, col_depth=12, target_depth=10)
+		for spot_id in output:
+			self.assertTrue(np.array_equal(output[spot_id][:,9], np.repeat(2, 20)), 'Should be all 2s.')
+
+	def test_spot_data_depth_correct_fromdata(self):
+		input_ = {}
+		# Note: If intensities and depths are 'too discrete' (I originally used increments of 0.5),
+		# curve_fit throws a warning that it can't estimate covariances. Using more continuous
+		# values solved this.
+		intensities = np.arange(500, 1500, 0.1)
+		depths = np.arange(5,25, 0.05)
+		for n in range(0,10):
+			input_[n] = np.ones((20, 13))
+			# Set frames.
+			input_[n][:, 0] = np.arange(0,20)
+			# Set depths.
+			input_[n][:, 12] = np.random.choice(depths, 20) + np.random.normal(0,1,20)
+			# Set intensities.
+			input_[n][:, 9] = np.random.choice(intensities, 20) + np.random.normal(0,5,20)
+
+		spot_data_depth_correct_fromdata(input_, col_to_correct=9, 
+			col_depth=12, target_depth=10, fit_depth_min=12, 
+			fit_depth_max=18)
+
 if __name__ == '__main__':
 	unittest.main()

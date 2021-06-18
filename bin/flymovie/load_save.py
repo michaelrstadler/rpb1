@@ -144,7 +144,8 @@ def read_tiff_lattice(tif_folder, **kwargs):
         raise ValueError('Unequal number of CamA and CamB files.')
 
 ############################################################################
-def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
+def read_czi(filename, trim=False, swapaxes=True, return_metadata=False,
+    metadata_only=False):
     """Read a czi file into an ndarray
     
     Args:
@@ -156,6 +157,9 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
             If true, switches first two axes to produce a stack order ctzxy
         return_metadata: bool
             If true, returns a tuple of stack, first distance, z interval
+        metadata_only: bool
+            If true, just return the metadata features starting_positions
+            and z_interval. Stack is returned as None.
             
     Returns:
         stack: ndarray
@@ -175,14 +179,17 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
                 return True
         return False
 
-    stack = czifile.imread(filename)
-    stack = np.squeeze(stack)
-    # Trim off last frame if incomplete.
-    if trim:
-        if frame_incomplete(stack[-1,0]):
-            stack = stack[:-1]
-    if (swapaxes):
-        stack = np.swapaxes(stack,0,1)
+    if not metadata_only:
+        stack = czifile.imread(filename)
+        stack = np.squeeze(stack)
+        # Trim off last frame if incomplete.
+        if trim:
+            if frame_incomplete(stack[-1,0]):
+                stack = stack[:-1]
+        if (swapaxes):
+            stack = np.swapaxes(stack,0,1)
+    else:
+        stack = None
 
     if return_metadata:
         handle = czifile.CziFile(filename)
@@ -198,7 +205,7 @@ def read_czi(filename, trim=False, swapaxes=True, return_metadata=False):
         return stack
 
 ############################################################################
-def read_czi_multiple(czi_files, folder):
+def read_czi_multiple(czi_files, folder, metadata_only=False):
     """Read a list of 5d czi files, combine into single stack, record
     frame junctions and positions of first Z slice.
     
@@ -208,6 +215,9 @@ def read_czi_multiple(czi_files, folder):
             [c,t,z,x,y]. Shapes must be identical except for t dimension.
         folder: path
             Path to folder containing czi files
+        metadata_only: bool
+            If true, just return the metadata features starting_positions
+            and z_interval (no stack)
             
     Returns:
         stack: 5d ndarray
@@ -227,12 +237,18 @@ def read_czi_multiple(czi_files, folder):
     starting_positions = []
     for czi_file_ in czi_files:
         czi_file_path = os.path.join(folder, czi_file_)
-        stack, first_dist, z_interval = read_czi(czi_file_path, trim=True, return_metadata=True)
+        stack, first_dist, z_interval = read_czi(czi_file_path, trim=True, 
+            return_metadata=True, metadata_only=metadata_only)
         stacks.append(stack)
         starting_positions.append(first_dist)
- 
-    stack, frames = concatenate_5dstacks(stacks)
-    return stack, frames, starting_positions, z_interval
+    
+    if metadata_only:
+        return starting_positions, z_interval
+    else:
+        stack, frames = concatenate_5dstacks(stacks)
+        return stack, frames, starting_positions, z_interval
+    
+    
 
 ############################################################################
 def save_pickle(obj, filename):

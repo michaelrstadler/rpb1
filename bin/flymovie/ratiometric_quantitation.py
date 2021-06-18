@@ -433,10 +433,6 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
             2D grids (depth, intensity) of exponential parameters a, b, c
     
     """
-    
-    def exp_func(x, a, b, c):
-        return a * np.exp(-b * x) + c
-    
     def update_paramgrid(paramgrid_old, idx1, idx2, x_all, y_all, vals, grid_x, grid_y):
         """Compute parameter grid from two curves, merge this grid with old grid."""
         # Make vectors of x, y, and parameter values for these two curves.
@@ -451,6 +447,9 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
         # replacing all nan positions with the values from the old grid. 
         paramgrids_merged = np.where(~np.isnan(paramgrid_new), paramgrid_new, paramgrid_old)
         return paramgrids_merged
+
+    def exp_func(x, a, b, c):
+        return a * np.exp(-b * x) + c
 
     # Not currently implemented.
     def lin_func(x,m,b):
@@ -521,8 +520,8 @@ def fit_interpolate_depth_curves(depths, intensities, xgrid_start=0,
 
         # Get curves from parameter grids at a series of points, plot in gray.
         plt.subplot(232)
-        for pt_x in (25, 50, 75):
-            for pt_y in np.arange(10, 200, 50):
+        for pt_x in (50, 150):
+            for pt_y in np.arange(20, 200, 20):
                 a = paramgrid_a[pt_x, pt_y]
                 b = paramgrid_b[pt_x, pt_y]
                 c = paramgrid_c[pt_x, pt_y]

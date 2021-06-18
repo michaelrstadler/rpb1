@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from flymovie.general_functions import mesh_like
 from flymovie.fitting import gaussian3d
 from flymovie.viewers import plot_ps
+import scipy
+
+import copy
 
 
 ############################################################################
@@ -286,6 +289,7 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
     def norm_trace(df, x, lower, upper):
         """Normalize traces given upper and lower bounds"""
         return (df.iloc[:,x] - lower) / (upper - lower)
+    
     def df_filter_trajlen(df, df_to_count, minlen):
         """Filter pandas df columns for minimum number of non-nan entries."""
         return  df.loc[:,df_to_count.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
@@ -309,8 +313,10 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
             plt.plot(norm_trace(df1_processed, x, df1_lower, df1_upper))
             plt.plot(norm_trace(df2_processed, x, df2_lower, df2_upper))
         else:
-            plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma))
-            plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
+            #plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma))
+            #plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
+            plt.plot(df1_processed.iloc[:,x])
+            plt.plot(df2_processed.iloc[:,x])
         plt.title(df1_processed.columns[x])
     
     # Multiplot using plot_ps.
@@ -459,3 +465,264 @@ def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
         plt.plot(counts)
         plt.ylim(0,600)
     return np.expand_dims(mask, axis=0)
+
+############################################################################
+def spot_data_add_depth(spot_data, surface_before, surface_after,
+    join_frames, start_positions, z_interval=0.5):
+    """Add a column to spot_data with the absolute embryo depth of every
+    detected spot.
+
+    Args:
+        spot_data: dict of ndarrays
+            Column 0 must be frame number (time), column 2 must be Z slice
+        surface_before: float
+            Position of embryo surface measured before taking stack, in 
+            microns
+        surface_after: float
+            Position of embryo surface measured after taking stack, in 
+            microns
+        join_frames: iterable of ints
+            Positions of frames where movies are joined
+        start_positions: iterable of numeric
+            Positions of the start (lowest Z slice) of z stack for each
+            constituent stack
+        z_interval: float
+            Interval between Z slices, in microns
+        
+    Returns:
+        spot_data_wdepth: dict of ndarrays
+            Input spot_data object, with column added containing calibrated
+            absolute embryo depth
+    """
+    def get_nframes(spot_data):
+        """Get max frame number from spot_data object."""
+        last_frame_all = 0
+        for spot_id in spot_data:
+            last_frame_spot = spot_data[spot_id][-1, idx_t]
+            if last_frame_spot > last_frame_all:
+                last_frame_all = last_frame_spot
+        return last_frame_all + 1
+
+    def make_surface_vector(before, after, nframes):
+        """Make vector of inferred embryo surface positions for each frame,
+        assuming drift occurs at a constant rate."""
+        increment = (after - before) / nframes
+        surface_position = np.arange(before, after, increment)
+        return surface_position
+    
+    def make_true_start_vector(surface_positions, join_frames, start_positions):
+        """Make vector of the true start position of the Z stack for every frame,
+        calculated as the difference between the inferred embryo surface position
+        and the z-stack start position stored in metadata."""
+        nframes = len(surface_positions)
+        # Add last frame to join_frames list.
+        join_frames = join_frames + [nframes]
+        # First, make a vector (of length = nframes) with the uncorrected
+        # z-stack start position for each frame. 
+        # Start at 0. Join frames starts with the first junction, so for each 
+        # junction make the part of the vector between this junction and the 
+        # previous junction.
+        curr_segment_start = 0
+        start_positions_uncorrected = np.array([])
+        for n in range(0, len(join_frames)):
+            length = join_frames[n] - curr_segment_start
+            start_pos = float(start_positions[n])
+            start_positions_uncorrected = np.concatenate([start_positions_uncorrected,
+                np.repeat(start_pos, length)])
+            curr_segment_start = join_frames[n]
+
+        # Get corrected z-stack start positions by subtracting inferred embryo
+        # surface positions.
+        start_positions_corrected =  start_positions_uncorrected - surface_positions
+        return start_positions_corrected
+        
+    def add_depth_column(spot_data, start_positions, z_interval):
+        """Add new column to spot_data with absolute embryo depth."""
+        spot_data_wdepth = {}
+        for spot_id in spot_data:
+            arr = spot_data[spot_id].copy()
+            # Add new blank column of 0s.
+            arr = np.append(arr, np.zeros((arr.shape[0],1)), axis=1)
+            # Fill in data row by row.
+            for row in range(0, arr.shape[0]):
+                t,z = arr[row, idx_t], arr[row, idx_z]
+                slice_depth = start_positions[int(t)] + (z * z_interval)
+                arr[row, -1] = slice_depth
+            spot_data_wdepth[spot_id] = arr
+        return spot_data_wdepth
+
+    # Set indexes for frame (time) and z slice in spot_data, get nframes.
+    idx_t = 0
+    idx_z = 2
+    nframes = get_nframes(spot_data)
+    # Get surface positions, then z-stack start positions, then add depth column.
+    surface_positions = make_surface_vector(surface_before, surface_after, nframes)
+    start_positions = make_true_start_vector(surface_positions, join_frames, start_positions)
+    spot_data_wdepth = add_depth_column(spot_data, start_positions, z_interval)           
+    return spot_data_wdepth
+
+
+############################################################################
+def spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_bin, 
+        bin_size=0.5, nbins=100):
+        """Build vector of intensities binned by depth and their means.
+        
+        Args:
+            spot_data: dict of ndarrays
+                spot_data object
+            col_depth: int
+                Column in spot_data containing embryo depth
+            col_to_bin: iterable of ints
+                Columns in spot_data to correct
+            bin_size: numeric
+                Size of bins for depth, in microns
+            nbins: int
+                Number of bins to make
+        
+        Returns:
+            vals: list of lists
+                Each value in parent list is a depth bin, each bin contains
+                a list of all values from col_to_bin at in that depth range
+        """
+        vals = [[]] * nbins
+        for spot_id in spot_data:
+            arr = spot_data[spot_id]
+            for row in range(0, arr.shape[0]):
+                # Convert depth to array index in 0.5 µm increments.
+                depth = int(arr[row, col_depth] / bin_size)
+                vals[depth] = vals[depth] + [arr[row, col_to_bin]]
+        return vals
+
+############################################################################
+def spot_data_depth_correct_stdcandle(spot_data, paramgrids, col_to_correct=9, col_depth=12, target_depth=10):
+    """Correct spot_data object using parameters derived from standard candles.
+
+    Args:
+        spot_data: dict of ndarrays
+            Column 0 must be frame number (time), column 2 must be Z slice
+        paramgrids: tuple of ndarrays
+            Depth by intensity arrays of exponential parameters a, b, c, 
+            according to function intensity = a * e^(-b * depth) + c
+            Units are 0.1 µm on the depth axis and 100 a.u. on the intensity
+            axis. For a spot measures at depth 10 microns of intensity 
+            5000, parameters would be drawn from position (100, 50).
+        col_depth: int
+            Column in spot_data containing embryo depth
+        col_to_correct: iterable of ints
+            Column in spot_data to correct
+        target_depth: numeric
+            Reference depth to which all spots will be corrected
+
+    Returns:
+        spot_data_corr: dict of ndarrays
+            Input spot_data with indicated columns corrected for depth
+    
+    
+    """
+    def calc_exponential(depth, a, b, c):
+        """Return value of exponential function a * e^(-b * depth) + c."""
+        return a * np.exp(-b * depth) + c
+    
+    paramgrid_a, paramgrid_b, paramgrid_c = paramgrids
+    spot_data_corr = copy.deepcopy(spot_data)
+    for spot_id in spot_data:
+        for row in range(0, spot_data[spot_id].shape[0]):
+            depth = spot_data[spot_id][row, col_depth]
+            intensity = spot_data[spot_id][row, col_to_correct]
+            paramgrid_position_intensity = int(intensity / 100)
+            paramgrid_position_depth = int(depth / 0.1)
+            a = paramgrid_a[paramgrid_position_depth, paramgrid_position_intensity]
+            b = paramgrid_b[paramgrid_position_depth, paramgrid_position_intensity]
+            c = paramgrid_c[paramgrid_position_depth, paramgrid_position_intensity]
+            intensity_corr = calc_exponential(target_depth, a, b, c)
+            spot_data_corr[spot_id][row, col_to_correct] = intensity_corr
+    
+    # Plot boxplot of intensity vs. depth for uncorrected and corrected data.
+    vals = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
+    plt.subplot(211)
+    plt.boxplot(vals[10:40])
+    plt.ylim(0,15000)
+    vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corr, col_depth, col_to_correct)
+    plt.subplot(212)
+    plt.boxplot(vals_corr[10:40])
+    plt.ylim(0,15000)
+    
+    return spot_data_corr
+
+############################################################################
+def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9, 
+    col_depth=12, target_depth=10, fit_depth_min=10, fit_depth_max=20):
+    """Apply sample depth correction to a column in spot_data by equalizing 
+    the mean values of the feature across sample depths.
+
+    For the indicated column, mean values are determined for 0.5 µm bins
+    of sample depth. These depth vs. intensity curves are fitted with an 
+    exponential function, and this function is used to correct all 
+    values in the datasest.
+    
+    
+    """
+    def exp_func(x, a, b, c):
+        """Return value of exponential function a * e^(-b * x) + c."""
+        return a * np.exp(-b * x) + c
+    
+    def get_intercept(x, y, a, b):
+        """Solve exponential for intercept given all other parameters and 
+        x,y."""
+        return y - (a * np.exp(-b * x))
+
+    def get_means_intensity_depth_vectors(vals):
+        """Make a vector of mean intensity for each sample depth bin."""
+        means = [[]] * 100
+        for depth in range(0, len(vals)):
+            if (len(vals[depth]) > 0):
+                mean_ = np.nanmean(vals[depth])
+                means[depth] = mean_
+            else:
+                means[depth] = np.nan
+        return means
+
+    spot_data_corrected = copy.deepcopy(spot_data)
+    intensities_bydepth = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
+    #return intensities_bydepth
+    means_bydepth = get_means_intensity_depth_vectors(intensities_bydepth)
+
+    # Plot a boxplot of uncorrected intensities vs. sample depth.
+    plt.figure(figsize=(5, 5))
+    plt.subplot(311)
+    plt.boxplot(intensities_bydepth[10:40]);
+    plt.title('Depth vs. Intensity: Uncorrected')
+        
+    # Fit depths vs. means with exponential.
+    depths = np.arange(fit_depth_min, fit_depth_max, 0.5)
+    fit_minbin = int(fit_depth_min / 0.5)
+    fit_maxbin = int(fit_depth_max / 0.5)
+    means_subset = means_bydepth[fit_minbin:fit_maxbin]
+    (a,b,c),_ = scipy.optimize.curve_fit(exp_func, depths, means_subset, maxfev=100000)
+
+    # Plot fit vs. data.
+    x = np.arange(fit_depth_min, fit_depth_max, 0.02)
+    y = a * np.exp(-b * x) + c
+    plt.subplot(312)
+    plt.scatter(x,y, s=0.5)
+    plt.scatter(depths, means_subset)
+    plt.title('Fitting Result')
+
+    # Correct all values in indicated column based on fitted depth v. intensity
+    # function.
+    for spot_id in spot_data:
+        arr = spot_data[spot_id]
+        for row in range(0, arr.shape[0]):
+            depth = arr[row, col_depth]
+            value = arr[row, col_to_correct]
+            intercept = get_intercept(depth, value, a, b)
+            corrected_value = exp_func(target_depth, a, b, intercept)
+            spot_data_corrected[spot_id][row, col_to_correct] = corrected_value
+
+    # Plot a boxplot of corrected intensity values vs. sample depth.
+    vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corrected, col_depth, col_to_correct)
+    plt.subplot(313)
+    plt.boxplot(vals_corr[10:40]);
+    plt.title('Depth vs. Intensity: Corrected')
+    plt.tight_layout()
+    return spot_data_corrected
