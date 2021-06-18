@@ -266,6 +266,39 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
     return df_corr
 
 ############################################################################
+def spot_data_bleach_correct_framemean(spot_data, stack, channel,  
+    cols_to_correct=(9, 10, 11), sigma=1):
+    """Perform bleach correction using the (smoothed) frame averages from 
+    an image stack, apply correction to columns of spot_data object.
+
+    Args:
+        spot_data: dict of ndarrays
+            Spot_data object
+        stack: ndarray
+            5D [c,t,z,x,y] image stack to use for bleach correction
+        channel: int
+            Channel to use for correction
+        cols to corrects: iterable of ints
+            Columns in spot_data to bleach correct
+        sigma: number-like
+            Sigma value for gaussian filtering of frame means
+
+    Returns:
+        spot_data_corr: dict of ndarrays
+            Input spot_data with bleaching correction applied to indicated
+            columns
+    """
+    frame_means = np.mean(stack[channel], axis=(1,2,3))
+    frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
+    # Normalize means to the first frame.
+    means_norm = frame_means_smooth / frame_means_smooth[0]
+    spot_data_corr = copy.deepcopy(spot_data)
+    for spot_id in spot_data:
+        for col in cols_to_correct:
+            spot_data_corr[spot_id][:, col] = np.apply_along_axis(lambda x: x[col] / means_norm[int(x[0])], 1, spot_data[spot_id])
+    return spot_data_corr
+
+#######################################################################
 def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
     """Plot individual traces from MS2 spot pandas dfs with a minimum 
     trajectory length filter.
