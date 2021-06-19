@@ -267,7 +267,7 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
 
 ############################################################################
 def spot_data_bleach_correct_framemean(spot_data, stack, channel,  
-    cols_to_correct=(9, 10, 11), sigma=1):
+    cols_to_correct=(9, 10, 11), sigma=7):
     """Perform bleach correction using the (smoothed) frame averages from 
     an image stack, apply correction to columns of spot_data object.
 
@@ -296,6 +296,7 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
     for spot_id in spot_data:
         for col in cols_to_correct:
             spot_data_corr[spot_id][:, col] = np.apply_along_axis(lambda x: x[col] / means_norm[int(x[0])], 1, spot_data[spot_id])
+
     return spot_data_corr
 
 #######################################################################
@@ -627,7 +628,9 @@ def spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_bin,
         return vals
 
 ############################################################################
-def spot_data_depth_correct_stdcandle(spot_data, paramgrids, col_to_correct=9, col_depth=12, target_depth=10):
+def spot_data_depth_correct_stdcandle(spot_data, paramgrids, 
+    col_to_correct=9, col_depth=12, target_depth=10, display=True, 
+    plot_title=''):
     """Correct spot_data object using parameters derived from standard candles.
 
     Args:
@@ -639,18 +642,20 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids, col_to_correct=9, c
             Units are 0.1 µm on the depth axis and 100 a.u. on the intensity
             axis. For a spot measures at depth 10 microns of intensity 
             5000, parameters would be drawn from position (100, 50).
-        col_depth: int
-            Column in spot_data containing embryo depth
         col_to_correct: iterable of ints
             Column in spot_data to correct
+        col_depth: int
+            Column in spot_data containing embryo depth
         target_depth: numeric
             Reference depth to which all spots will be corrected
+        display: bool
+            If true, plot before and after boxplots of depth vs. intensity
+        plot_title: string
+            Label for data to use for plots
 
     Returns:
         spot_data_corr: dict of ndarrays
             Input spot_data with indicated columns corrected for depth
-    
-    
     """
     def calc_exponential(depth, a, b, c):
         """Return value of exponential function a * e^(-b * depth) + c."""
@@ -664,27 +669,35 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids, col_to_correct=9, c
             intensity = spot_data[spot_id][row, col_to_correct]
             paramgrid_position_intensity = int(intensity / 100)
             paramgrid_position_depth = int(depth / 0.1)
-            a = paramgrid_a[paramgrid_position_depth, paramgrid_position_intensity]
-            b = paramgrid_b[paramgrid_position_depth, paramgrid_position_intensity]
-            c = paramgrid_c[paramgrid_position_depth, paramgrid_position_intensity]
+            if paramgrid_position_intensity > paramgrid_a.shape[1]:
+                intensity_corr = intensity
+            else:
+                a = paramgrid_a[paramgrid_position_depth, paramgrid_position_intensity]
+                b = paramgrid_b[paramgrid_position_depth, paramgrid_position_intensity]
+                c = paramgrid_c[paramgrid_position_depth, paramgrid_position_intensity]
             intensity_corr = calc_exponential(target_depth, a, b, c)
             spot_data_corr[spot_id][row, col_to_correct] = intensity_corr
     
-    # Plot boxplot of intensity vs. depth for uncorrected and corrected data.
-    vals = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
-    plt.subplot(211)
-    plt.boxplot(vals[10:40])
-    plt.ylim(0,15000)
-    vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corr, col_depth, col_to_correct)
-    plt.subplot(212)
-    plt.boxplot(vals_corr[10:40])
-    plt.ylim(0,15000)
+    if display:
+        # Plot boxplot of intensity vs. depth for uncorrected and corrected data.
+        vals = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
+        plt.figure(figsize=(14, 4))
+        plt.subplot(121)
+        plt.boxplot(vals[10:40])
+        plt.ylim(0, 15000)
+        plt.title(plot_title + ' Before Std. Candle Correction')
+        vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corr, col_depth, col_to_correct)
+        plt.subplot(122)
+        plt.boxplot(vals_corr[10:40])
+        plt.ylim(0, 15000)
+        plt.title(plot_title + ' After Std. Candle Correction')
     
     return spot_data_corr
 
 ############################################################################
 def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9, 
-    col_depth=12, target_depth=10, fit_depth_min=10, fit_depth_max=20):
+    col_depth=12, target_depth=10, fit_depth_min=10, fit_depth_max=20,
+    display=True, plot_title=''):
     """Apply sample depth correction to a column in spot_data by equalizing 
     the mean values of the feature across sample depths.
 
@@ -693,7 +706,27 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
     exponential function, and this function is used to correct all 
     values in the datasest.
     
-    
+    Args:
+        spot_data: dict of ndarrays
+            Column 0 must be frame number (time), column 2 must be Z slice
+        col_to_correct: iterable of ints
+            Column in spot_data to correct
+        col_depth: int
+            Column in spot_data containing embryo depth
+        target_depth: numeric
+            Reference depth to which all spots will be corrected
+        fit_depth_min: numeric
+            Minimum depth of data to be used for fitting
+        fit_depth_max: numeric
+            Maximum depth of data to be used for fitting
+        display: bool
+            If true, plot before and after boxplots of depth vs. intensity
+        plot_title: string
+            Label for data to use for plots
+
+    Returns:
+        spot_data_corr: dict of ndarrays
+            Input spot_data with indicated columns corrected for depth
     """
     def exp_func(x, a, b, c):
         """Return value of exponential function a * e^(-b * x) + c."""
@@ -717,14 +750,7 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
 
     spot_data_corrected = copy.deepcopy(spot_data)
     intensities_bydepth = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
-    #return intensities_bydepth
     means_bydepth = get_means_intensity_depth_vectors(intensities_bydepth)
-
-    # Plot a boxplot of uncorrected intensities vs. sample depth.
-    plt.figure(figsize=(5, 5))
-    plt.subplot(311)
-    plt.boxplot(intensities_bydepth[10:40]);
-    plt.title('Depth vs. Intensity: Uncorrected')
         
     # Fit depths vs. means with exponential.
     depths = np.arange(fit_depth_min, fit_depth_max, 0.5)
@@ -732,14 +758,6 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
     fit_maxbin = int(fit_depth_max / 0.5)
     means_subset = means_bydepth[fit_minbin:fit_maxbin]
     (a,b,c),_ = scipy.optimize.curve_fit(exp_func, depths, means_subset, maxfev=100000)
-
-    # Plot fit vs. data.
-    x = np.arange(fit_depth_min, fit_depth_max, 0.02)
-    y = a * np.exp(-b * x) + c
-    plt.subplot(312)
-    plt.scatter(x,y, s=0.5)
-    plt.scatter(depths, means_subset)
-    plt.title('Fitting Result')
 
     # Correct all values in indicated column based on fitted depth v. intensity
     # function.
@@ -752,10 +770,26 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
             corrected_value = exp_func(target_depth, a, b, intercept)
             spot_data_corrected[spot_id][row, col_to_correct] = corrected_value
 
-    # Plot a boxplot of corrected intensity values vs. sample depth.
-    vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corrected, col_depth, col_to_correct)
-    plt.subplot(313)
-    plt.boxplot(vals_corr[10:40]);
-    plt.title('Depth vs. Intensity: Corrected')
-    plt.tight_layout()
+    if display:
+        # Plot a boxplot of uncorrected intensities vs. sample depth.
+        plt.figure(figsize=(5, 5))
+        plt.subplot(311)
+        plt.boxplot(intensities_bydepth[10:40]);
+        plt.title(plot_title + ' Depth vs. Intensity: Uncorrected')
+
+        # Plot fit vs. data.
+        x = np.arange(fit_depth_min, fit_depth_max, 0.02)
+        y = a * np.exp(-b * x) + c
+        plt.subplot(312)
+        plt.scatter(x,y, s=0.5)
+        plt.scatter(depths, means_subset)
+        plt.title(plot_title + ' Fitting Result')
+
+        # Plot a boxplot of corrected intensity values vs. sample depth.
+        vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corrected, col_depth, col_to_correct)
+        plt.subplot(313)
+        plt.boxplot(vals_corr[10:40]);
+        plt.title(plot_title + ' Depth vs. Intensity: Corrected')
+        plt.tight_layout()
+
     return spot_data_corrected

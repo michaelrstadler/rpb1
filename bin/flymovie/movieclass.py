@@ -48,27 +48,34 @@ class movie():
     # Initializer
 
     @staticmethod
-    def make_spot_table(spot_data, nucmask, colnum):
+    def make_spot_table(spot_data, colnum):
         """Make a spot_id x time_frame pandas df from a given column
         of spot_data."""
-        nframes = nucmask.shape[0]
+        # Initialize dataframe with 1000 frames, trim later.
+        nframes_init = 1000
+        max_frame = 0
         data = {}
         for spot in spot_data:
             arr = spot_data[spot]
-            vals = np.empty(nframes)
+            vals = np.empty(nframes_init)
             vals.fill(np.nan)
             for i in range(0, len(arr)):
                 t = int(arr[i,0])
+                if t > max_frame:
+                    max_frame = t
                 val = arr[i,colnum]
                 vals[t] = val
             data[spot] = vals
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+        # Trim off rows beyond max frame.
+        df_trimmed = df.iloc[:(max_frame + 1),:]
+        return df_trimmed
     
     def __init__(self, stack, nucmask, fits, spot_data):
         self.stack = stack
         self.nucmask = nucmask
         self.fits = fits
         self.spot_data = spot_data
-        self.intvol = movie.make_spot_table(self.spot_data, self.nucmask, 9)
-        self.intfit = movie.make_spot_table(self.spot_data, self.nucmask, 10)
-        self.prot = movie.make_spot_table(self.spot_data, self.nucmask, 11)
+        self.intvol = movie.make_spot_table(self.spot_data, 9)
+        self.intfit = movie.make_spot_table(self.spot_data, 10)
+        self.prot = movie.make_spot_table(self.spot_data, 11)
