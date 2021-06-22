@@ -290,7 +290,7 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
             columns
     """
     def get_ref_slices(spot_data):
-        
+        pass
     frame_means = np.mean(stack[channel], axis=(1,2,3))
     frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
     # Normalize means to the first frame.
@@ -504,6 +504,73 @@ def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
     return np.expand_dims(mask, axis=0)
 
 ############################################################################
+def make_surface_vector(before, after, nframes):
+        """Make vector of inferred embryo surface positions for each frame,
+        assuming drift occurs at a constant rate.
+        
+        Args:
+            before: float
+                Position of embryo surface, in microns, measured before
+            after: float
+                Position of embryo surface, in microns, measured after
+            nframes: int
+                Number of frames in movie
+        
+        Returns:
+            surface_positions: list
+                List of the inferred surface position, in microns, for each
+                frame
+        """
+        increment = (after - before) / nframes
+        surface_positions = np.arange(before, after, increment)
+        return surface_positions
+
+############################################################################
+def make_true_start_vector(surface_positions, join_frames, start_positions):
+        """Make vector of the true start position of the Z stack for every 
+        frame, calculated as the difference between the inferred embryo 
+        surface position and the z-stack start position stored in metadata.
+        
+        Args:
+            surface_positions: list
+                List of the inferred surface position, in microns, for each
+                frame
+            join_frames: list of ints
+                Frames at which movies are joined (first frame of new stack).
+                Length n-1 where n is the number of movies ('Missing' entry
+                for 0th movie)
+            start_positions: iterable of numeric
+                Starting positions, in microns, of each constituent Z stack.
+                Will be of length n equal to the number of movies.
+        
+        Returns:
+            start_positions_corrected: numpy array
+                Vector of the "true" start positions of the Z stack in each 
+                frame relative to the surface of the embryo (coverslip).
+        """
+        nframes = len(surface_positions)
+        print(nframes)
+        # Add last frame to join_frames list.
+        join_frames = join_frames + [nframes]
+        # First, make a vector (of length = nframes) with the uncorrected
+        # z-stack start position for each frame. 
+        # Start at 0. Join frames starts with the first junction, so for each 
+        # junction make the part of the vector between this junction and the 
+        # previous junction.
+        curr_segment_start = 0
+        start_positions_uncorrected = np.array([])
+        for n in range(0, len(join_frames)):
+            length = join_frames[n] - curr_segment_start
+            start_pos = float(start_positions[n])
+            start_positions_uncorrected = np.concatenate([start_positions_uncorrected,
+                np.repeat(start_pos, length)])
+            curr_segment_start = join_frames[n]
+        # Get corrected z-stack start positions by subtracting inferred embryo
+        # surface positions.
+        start_positions_corrected =  start_positions_uncorrected - surface_positions
+        return start_positions_corrected
+
+############################################################################
 def spot_data_add_depth(spot_data, surface_before, surface_after,
     join_frames, start_positions, z_interval=0.5):
     """Add a column to spot_data with the absolute embryo depth of every
@@ -539,39 +606,6 @@ def spot_data_add_depth(spot_data, surface_before, surface_after,
             if last_frame_spot > last_frame_all:
                 last_frame_all = last_frame_spot
         return last_frame_all + 1
-
-    def make_surface_vector(before, after, nframes):
-        """Make vector of inferred embryo surface positions for each frame,
-        assuming drift occurs at a constant rate."""
-        increment = (after - before) / nframes
-        surface_position = np.arange(before, after, increment)
-        return surface_position
-    
-    def make_true_start_vector(surface_positions, join_frames, start_positions):
-        """Make vector of the true start position of the Z stack for every frame,
-        calculated as the difference between the inferred embryo surface position
-        and the z-stack start position stored in metadata."""
-        nframes = len(surface_positions)
-        # Add last frame to join_frames list.
-        join_frames = join_frames + [nframes]
-        # First, make a vector (of length = nframes) with the uncorrected
-        # z-stack start position for each frame. 
-        # Start at 0. Join frames starts with the first junction, so for each 
-        # junction make the part of the vector between this junction and the 
-        # previous junction.
-        curr_segment_start = 0
-        start_positions_uncorrected = np.array([])
-        for n in range(0, len(join_frames)):
-            length = join_frames[n] - curr_segment_start
-            start_pos = float(start_positions[n])
-            start_positions_uncorrected = np.concatenate([start_positions_uncorrected,
-                np.repeat(start_pos, length)])
-            curr_segment_start = join_frames[n]
-
-        # Get corrected z-stack start positions by subtracting inferred embryo
-        # surface positions.
-        start_positions_corrected =  start_positions_uncorrected - surface_positions
-        return start_positions_corrected
         
     def add_depth_column(spot_data, start_positions, z_interval):
         """Add new column to spot_data with absolute embryo depth."""
@@ -594,7 +628,8 @@ def spot_data_add_depth(spot_data, surface_before, surface_after,
     nframes = get_nframes(spot_data)
     # Get surface positions, then z-stack start positions, then add depth column.
     surface_positions = make_surface_vector(surface_before, surface_after, nframes)
-    start_positions = make_true_start_vector(surface_positions, join_frames, start_positions)
+    start_positions = make_true_start_vector(surface_positions, join_frames, 
+        start_positions)
     spot_data_wdepth = add_depth_column(spot_data, start_positions, z_interval)           
     return spot_data_wdepth
 
