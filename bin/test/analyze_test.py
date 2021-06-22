@@ -145,5 +145,24 @@ class TestAnalyzeFunctions(unittest.TestCase):
 			col_depth=12, target_depth=10, fit_depth_min=12, 
 			fit_depth_max=18)
 
+	def test_spot_data_bleach_correct_framemean(self):
+		# Spot data uniformly 1 except time column.
+		spot_data = {}
+		for i in range(1,5):
+			spot_data[i] = np.ones((5,12))
+			spot_data[i][:,0] = np.arange(0,5)
+		
+		stack = np.ones((2, 5, 5, 100, 100))
+		# Make stack means 1, 2, 3, 4, 5.
+		for i in range(1,5):
+			stack[:, i] = stack[:, i] * (i+1)
+		#print(np.mean(stack[1,3]))
+		output = spot_data_bleach_correct_framemean(spot_data, stack, 1, sigma=0.1)
+		
+		self.assertAlmostEqual(output[1][0, 9], 1, 2, 'Should be 1.')
+		self.assertAlmostEqual(output[2][1, 10], 0.5, 2, 'Should be 0.5.')
+		self.assertAlmostEqual(output[3][2, 11], 0.333333333, 2, 'Should be 0.33.')
+		self.assertAlmostEqual(output[4][3, 10], 0.25, 2, 'Should be 0.25.')
+
 if __name__ == '__main__':
 	unittest.main()

@@ -76,6 +76,6 @@ class movie():
         self.nucmask = nucmask
         self.fits = fits
         self.spot_data = spot_data
-        self.intvol = movie.make_spot_table(self.spot_data, 9)
-        self.intfit = movie.make_spot_table(self.spot_data, 10)
-        self.prot = movie.make_spot_table(self.spot_data, 11)
+        #self.intvol = movie.make_spot_table(self.spot_data, 9)
+        #self.intfit = movie.make_spot_table(self.spot_data, 10)
+        #self.prot = movie.make_spot_table(self.spot_data, 11)

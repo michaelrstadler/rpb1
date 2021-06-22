@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from flymovie.general_functions import mesh_like
 from flymovie.fitting import gaussian3d
 from flymovie.viewers import plot_ps
+from flymovie.movieclass import movie
 import scipy
 
 import copy
@@ -267,7 +268,7 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
 
 ############################################################################
 def spot_data_bleach_correct_framemean(spot_data, stack, channel,  
-    cols_to_correct=(9, 10, 11), sigma=7):
+    cols_to_correct=(9, 10, 11), sigma=7, ref_depth=15):
     """Perform bleach correction using the (smoothed) frame averages from 
     an image stack, apply correction to columns of spot_data object.
 
@@ -288,6 +289,8 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
             Input spot_data with bleaching correction applied to indicated
             columns
     """
+    def get_ref_slices(spot_data):
+        
     frame_means = np.mean(stack[channel], axis=(1,2,3))
     frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
     # Normalize means to the first frame.
@@ -631,7 +634,8 @@ def spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_bin,
 def spot_data_depth_correct_stdcandle(spot_data, paramgrids, 
     col_to_correct=9, col_depth=12, target_depth=10, display=True, 
     plot_title=''):
-    """Correct spot_data object using parameters derived from standard candles.
+    """Correct spot_data object using parameters derived from standard 
+    candles.
 
     Args:
         spot_data: dict of ndarrays
@@ -683,7 +687,8 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
         vals = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
         plt.figure(figsize=(14, 4))
         plt.subplot(121)
-        plt.boxplot(vals[10:40])
+        plt.boxplot(vals[10:40], labels=np.arange(5, 20, 0.5))
+        plt.xticks(rotation = 45)
         plt.ylim(0, 15000)
         plt.title(plot_title + ' Before Std. Candle Correction')
         vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corr, col_depth, col_to_correct)
@@ -696,7 +701,7 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
 
 ############################################################################
 def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9, 
-    col_depth=12, target_depth=10, fit_depth_min=10, fit_depth_max=20,
+    col_depth=12, target_depth=10, fit_depth_min=12, fit_depth_max=20,
     display=True, plot_title=''):
     """Apply sample depth correction to a column in spot_data by equalizing 
     the mean values of the feature across sample depths.
@@ -774,7 +779,7 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
         # Plot a boxplot of uncorrected intensities vs. sample depth.
         plt.figure(figsize=(5, 5))
         plt.subplot(311)
-        plt.boxplot(intensities_bydepth[10:40]);
+        plt.boxplot(intensities_bydepth[10:40], labels=np.arange(5, 20, 0.5));
         plt.title(plot_title + ' Depth vs. Intensity: Uncorrected')
 
         # Plot fit vs. data.
@@ -793,3 +798,100 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
         plt.tight_layout()
 
     return spot_data_corrected
+
+############################################################################
+def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids, 
+    surface_before, surface_after, join_frames, start_positions, 
+    z_interval=0.5, spotchannel=1, protchannel=0, ij_rad=3, z_rad=1.1, 
+    ij_scale=1, z_scale=1):
+
+    def plot_bleaching_corr(spot_data_before, spot_data_after, nframes):
+        """Plot results of bleach correction."""
+        plt.figure(figsize=(14, 8))
+        plt.subplot(221)
+        ms2_before = spot_data_extract_depthbinned_intensities(spot_data_before, 
+            col_depth=0, col_to_bin=9, bin_size=1, nbins=nframes)
+        plt.boxplot(ms2_before)
+        plt.title('MS2 Before Bleaching Correction')
+        plt.ylim(0, 1e4)
+        plt.subplot(222)
+        ms2_after = spot_data_extract_depthbinned_intensities(spot_data_after, 
+            col_depth=0, col_to_bin=9, bin_size=1, bins=nframes)
+        plt.boxplot(ms2_after)
+        plt.title('MS2 After Bleaching Correction')
+        plt.ylim(0, 1e4)
+        plt.subplot(223)
+        prot_before = spot_data_extract_depthbinned_intensities(spot_data_before, 
+            col_depth=0, col_to_bin=11, bin_size=1, bins=nframes)
+        plt.boxplot(prot_before)
+        plt.title('Prot Before Bleaching Correction')
+        plt.ylim(0, 1e4)
+        plt.subplot(224)
+        prot_after = spot_data_extract_depthbinned_intensities(spot_data_after, 
+            col_depth=0, col_to_bin=11, bin_size=1, bins=nframes)
+        plt.boxplot(prot_after)
+        plt.title('Prot After Bleaching Correction')
+        plt.ylim(0, 1e4)
+
+    # Add columns corresponding to integrated MS2 signal (9), integrated
+    # Gaussian fit of MS2 (10), and integrated protein signal (11).
+    spot_data_plusms2 = add_volume_mean(spot_data_orig, stack, spotchannel, 
+        ij_rad, z_rad, ij_scale, z_scale)
+    
+    wlength_ij = (2 * ij_rad) + 1
+    wlength_z = (2 * int(z_rad)) + 1
+    spot_data_plusgaussint = add_gaussian_integration(spot_data_plusms2, 
+        wlength_ij, wlength_z)
+
+    spot_data_plusprot = add_volume_mean(spot_data_plusgaussint, stack, 
+        protchannel, ij_rad, z_rad, ij_scale, z_scale)
+
+    # Add a column (12) containing the sample depth for each spot.
+    spot_data_plusdepth = spot_data_add_depth(spot_data_plusprot, 
+        surface_before, surface_after, join_frames, start_positions, 
+        z_interval)
+
+    # Store names of columns for supplying to plotting functions.
+    colnames = {9:'MS2', 11:"Prot"}
+
+    # Possible alternative: use some reference columns to add volume 
+    # integrations with smaller radii to more closely match calculations from 
+    # 120-mer. Use these intensities to get the shape of the correction curve
+    # (parameters a and b), solve for intercept using the preferred intensity, 
+    # perform correction. Do bleach correction. Make a version of 
+    # spot_data_plus_depth with corrected intensity columns.
+
+    # Perform bleach correction on the three columns containing intensity 
+    # measurements. Currently using frame-mean based correction but this 
+    # could change.
+    spot_data_bleachcorr = spot_data_bleach_correct_framemean(
+        spot_data_plusdepth, stack, protchannel, cols_to_correct=(9, 10, 11))
+
+    # Plot results of bleach correction as mean intensity vs. time boxplots.
+    nframes = stack.shape[1]
+    #plot_bleaching_corr(spot_data_plusdepth, spot_data_bleachcorr, nframes)
+
+    # Perform depth correction using standard candle method.
+    spot_data_depthcorr_stdcandle = copy.deepcopy(spot_data_bleachcorr)
+    for col_to_correct in (9, 11):
+        spot_data_depthcorr_stdcandle = spot_data_depth_correct_stdcandle(
+            spot_data_depthcorr_stdcandle, paramgrids, 
+            col_to_correct=col_to_correct, col_depth=12, target_depth=12, 
+            plot_title=colnames[col_to_correct])
+
+    # Perform depth correction using from_data method.
+    spot_data_depthcorr_fromdata = copy.deepcopy(spot_data_bleachcorr)
+    for col_to_correct in (9, 11):
+        spot_data_depthcorr_fromdata = spot_data_depth_correct_fromdata(
+            spot_data_depthcorr_fromdata, col_to_correct=9, col_depth=12, 
+            target_depth=12, fit_depth_min=12, fit_depth_max=20, 
+            plot_title=colnames[col_to_correct])
+
+    # Generate dataframes, add data structures to movie.
+    mv.spot_data_bleachcorr = spot_data_bleachcorr
+    mv.spot_data_depthcorr_stdcandle = spot_data_depthcorr_stdcandle
+    mv.spot_data_depthcorr_fromdata = spot_data_depthcorr_fromdata
+    mv.ms2_stdcandle = movie.make_spot_table(spot_data_depthcorr_stdcandle, 9)
+    mv.ms2_fromdata = movie.make_spot_table(spot_data_depthcorr_fromdata, 9)
+    mv.prot_stdcandle = movie.make_spot_table(spot_data_depthcorr_stdcandle, 11)
+    mv.prot_fromdata = movie.make_spot_table(spot_data_depthcorr_fromdata, 11)
