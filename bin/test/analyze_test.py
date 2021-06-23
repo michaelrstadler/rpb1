@@ -89,6 +89,8 @@ class TestAnalyzeFunctions(unittest.TestCase):
 
 	def test_spot_data_extract_binned_data(self):
 		input_ = {}
+		# Make spot_data with spots 0-9, each spot exists for 20 consecutive
+		# frames, has depths 0-9.5 by 0.5, intensities same.
 		for n in range(0,10):
 			input_[n] = np.ones((20, 13))
 			# Set frames.
@@ -98,13 +100,14 @@ class TestAnalyzeFunctions(unittest.TestCase):
 			# Set intensities.
 			input_[n][:, 9] = np.arange(0, 10, 0.5)
 
-		output = spot_data_extract_binned_data(input_, col_data=9, 
-			col_bin_by=12, bin_size=0.5, nbins=100)
+		output, counts = spot_data_extract_binned_data(input_, col_data=9, 
+			col_bin_by=12, bin_size=0.5, nbins=100, return_counts=True)
 
 		self.assertEqual(len(output), 100, 'Length should be 100.')
 		self.assertEqual(np.mean(output[0]), 0, 'Should be 0.')
 		self.assertEqual(np.mean(output[11]), 5.5, 'Should be 5.5.')
 		self.assertEqual(len(output[90]), 0, 'Should be 0.')
+		self.assertEqual(counts[0], 10, 'Should be 10.')
 
 	def test_spot_data_depth_correct_stdcandle(self):
 		input_ = {}
@@ -164,6 +167,11 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		self.assertAlmostEqual(output[2][1, 10], 0.5, 2, 'Should be 0.5.')
 		self.assertAlmostEqual(output[3][2, 11], 0.333333333, 2, 'Should be 0.33.')
 		self.assertAlmostEqual(output[4][3, 10], 0.25, 2, 'Should be 0.25.')
+
+	def test_boxplot(self):
+		# Simply test if it runs.
+		input_ = [[1,2,3], [4,5,6], [7,8,9]]
+		boxplot(input_, (1,2,3), 10, 'testing')
 
 if __name__ == '__main__':
 	unittest.main()
