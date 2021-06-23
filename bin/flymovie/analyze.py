@@ -822,14 +822,21 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
     
     paramgrid_a, paramgrid_b, paramgrid_c = paramgrids
     spot_data_corr = copy.deepcopy(spot_data)
+    # Go through every line in spot_data.
     for spot_id in spot_data:
         for row in range(0, spot_data[spot_id].shape[0]):
+            # Get the positions in paramgrids corresponding to the depth 
+            # and intensity for this point.
             depth = spot_data[spot_id][row, col_depth]
             intensity = spot_data[spot_id][row, col_to_correct]
             paramgrid_position_intensity = int(intensity / 100)
             paramgrid_position_depth = int(depth / 0.1)
+            # If intensity is outside of paramgrid, leave as is
+            # (uncorrected).
             if paramgrid_position_intensity > paramgrid_a.shape[1]:
                 intensity_corr = intensity
+            # If inbounds, calculate corrected value from exponential
+            # parameters, update in spot_data.
             else:
                 a = paramgrid_a[paramgrid_position_depth, paramgrid_position_intensity]
                 b = paramgrid_b[paramgrid_position_depth, paramgrid_position_intensity]
@@ -974,11 +981,63 @@ def boxplot(vals, labels, ylim, title):
     plt.title(title)
 
 ############################################################################
-def mv_apply_corrections(mv, spot_data_orig, stack, nucmask, paramgrids, 
+def mv_process_apply_corrections(mv, paramgrids, 
     surface_before, surface_after, join_frames, stack_start_positions, 
     z_interval=0.5, spotchannel=1, protchannel=0, ij_rad=3, z_rad=1.1, 
-    ij_scale=1, z_scale=1, plotting_ylim=1e4):
+    ij_scale=1, z_scale=1, plotting_ylim=1e4, spot_data_orig=None, stack=None,
+    nucmask=None):
+    """Process initialized movies to integrate signal around detected spots,
+    correct for bleaching, correct for sample depth, and generate dataframes
+    with processed, corrected data.
+    
+    Args:  
+        mv: movie object
+        paramgrids: tuple of ndarrays
+            Arrays containing exponential parameters for depth correction 
+            using the standard candle method
+        surface_before: float
+            Position, in microns, of embryo surface before data collection
+        surface_after: float
+            Position, in microns, of embryo surface after data collection
+        join_frames: list of ints
+            Locations of frames at which constituent movies are joined
+        stack_start_positions: list of float
+            Locations, in microns, of the first slice of z-stacks of 
+            constituent movies
+        z_interval: float
+            Size, in microns, of interval between Z slices
+        spotchannel: int
+            Channel corresponding to MS2 spots
+        protchannel: int
+            Channel corresponding to protein signal
+        ij_rad: int
+            Radius in ij-dimension to use for integrating fluorescent signal
+            around spots
+        z_rad: int
+            Radius in z-dimension to use for integrating fluorescent signal
+            around spots
+        ij_scale: numeric
+            Scale factor for ij_rad (typically nm/pixel)
+        z_scale: numeric
+            Scale factor for z_rad (typically nm/pixel)
+        plotting_ylim: numeric
+            Upper limit for plotting intensity values
+        spot_data_orig: dict of ndarrays
+            [optional] Use a different spot_data object from the one in
+            mv.
+        stack: ndarray
+            [optional] Use a different stack from the one in mv
+        nucmask: ndarray
+            [optional] Use a different nuclear mask from the one in mv
 
+    Returns: None
+
+    Adds to mv:
+    spot_data objects: spot_data_plusdepth, spot_data_depthcorr_stdcandle, 
+    spot_data_depthcorr_fromdata
+
+    pandas dfs: ms2_stdcandle, ms2_fromdata, prot_stdcandle, prot_fromdata
+    """
     def plot_bleaching_corr(spot_data_before, spot_data_after, nframes, 
         ylim):
         """Plot results of bleach correction."""
@@ -1006,13 +1065,23 @@ def mv_apply_corrections(mv, spot_data_orig, stack, nucmask, paramgrids,
         boxplot(prot_after, labels, ylim, 'Prot After Bleaching Correction')
 
     def get_mean_spot_depth(spot_data, depth_col):
+        """Find mean depth across all detected spots."""
         depths = []
         for spot_id in spot_data:
             depths = depths + list(spot_data[spot_id][:, depth_col])
         return np.mean(depths)
 
+    # If not separately supplied, assign data structures to those supplied
+    # with mv.
+    if spot_data_orig is None:
+        spot_data_orig = mv.spot_data
+    if stack is None:
+        stack = mv.stack
+    if nucmask is None:
+        nucmask = mv.nucmask
+
     nframes = stack.shape[1]
-    
+
     # Add columns corresponding to integrated MS2 signal (9), integrated
     # Gaussian fit of MS2 (10), and integrated protein signal (11).
     spot_data_plusms2 = add_volume_mean(spot_data_orig, stack, spotchannel, 
@@ -1036,10 +1105,9 @@ def mv_apply_corrections(mv, spot_data_orig, stack, nucmask, paramgrids,
     plt.figure(figsize=(14,3))
     boxplot(depths, np.arange(0, nframes), 30, 'Spot Depths Over Time')
 
-    
-
-    # Store names of columns for supplying to plotting functions.
+    # Get mean depth of all spots for use as reference depth.
     mean_depth = int(get_mean_spot_depth(spot_data_plusdepth, 12))
+    # Store names of columns for supplying to plotting functions.
     colnames = {9:'MS2', 11:"Prot"}
 
     # Possible alternative: use some reference columns to add volume 
@@ -1049,24 +1117,25 @@ def mv_apply_corrections(mv, spot_data_orig, stack, nucmask, paramgrids,
     # perform correction. Do bleach correction. Make a version of 
     # spot_data_plus_depth with corrected intensity columns.
 
-    # Perform bleach correction on the three columns containing intensity 
-    # measurements. Currently using frame-mean based correction but this 
-    # could change.
-    spot_data_bleachcorr = spot_data_bleach_correct_framemean(
+    # Perform bleach correction using the constant depth method with a
+    # nuclear mask. Correct each channel from itself.
+    # Correct MS2 channel first.
+    spot_data_bleachcorr = spot_data_bleach_correct_constantdepth(
         spot_data_plusdepth, stack, spotchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
-        (9, 10), sigma=3, ref_depth=mean_depth, nucmask=nucmask, 
-        print_ref_slices=True)
+        (9, 10), ref_depth=mean_depth, nucmask=nucmask, 
+        print_ref_slices=True, plot_title='Spot Channel')
 
-    spot_data_bleachcorr = spot_data_bleach_correct_framemean(
+    # Correct protein channel.
+    spot_data_bleachcorr = spot_data_bleach_correct_constantdepth(
         spot_data_bleachcorr, stack, protchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
-        [11], sigma=3, ref_depth=mean_depth, nucmask=nucmask,
-        print_ref_slices=True)
+        [11], ref_depth=mean_depth, nucmask=nucmask,
+        print_ref_slices=True, plot_title='Prot Channel')
 
     # Plot results of bleach correction as mean intensity vs. time boxplots.
-    plot_bleaching_corr(spot_data_plusdepth, spot_data_bleachcorr, nframes, plotting_ylim,
-    frame_means_spotchannel, frame_means_protchannel)
+    plot_bleaching_corr(spot_data_plusdepth, spot_data_bleachcorr, nframes, 
+        plotting_ylim,)
 
     # Perform depth correction using standard candle method.
     spot_data_depthcorr_stdcandle = copy.deepcopy(spot_data_bleachcorr)
