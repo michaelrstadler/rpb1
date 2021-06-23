@@ -267,8 +267,9 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
     return df_corr
 
 ############################################################################
-def spot_data_bleach_correct_framemean(spot_data, stack, channel,  
-    cols_to_correct=(9, 10, 11), sigma=7, ref_depth=15):
+def spot_data_bleach_correct_framemean(spot_data, stack, channel, 
+    surface_before, surface_after, stack_start_positions, join_frames, 
+    z_interval, cols_to_correct=(9, 10, 11), sigma=7, ref_depth=20):
     """Perform bleach correction using the (smoothed) frame averages from 
     an image stack, apply correction to columns of spot_data object.
 
@@ -289,9 +290,28 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
             Input spot_data with bleaching correction applied to indicated
             columns
     """
-    def get_ref_slices(spot_data):
-        pass
-    frame_means = np.mean(stack[channel], axis=(1,2,3))
+    def get_ref_slices(start_positions, z_interval, ref_depth):
+        ref_slices = np.zeros(len(start_positions))
+        for f in range(0, len(start_positions)):
+            ref_slice = int((ref_depth - start_positions[f]) / z_interval)
+            ref_slices[f] = ref_slice
+        return [int(x) for x in ref_slices]
+
+    def get_frame_means(stack, channel, ref_slices):
+        nframes = len(ref_slices)
+        frame_means = np.zeros(nframes)
+        for f in range(0, nframes):
+            frame_mean = np.mean(stack[channel, f, ref_slices[f]])
+            frame_means[f] = frame_mean
+        return frame_means
+
+    nframes = stack.shape[1]
+    surface_positions = make_surface_vector(surface_before, surface_after, nframes)
+    start_positions = make_true_start_vector(surface_positions, join_frames, stack_start_positions)
+    print(start_positions)
+    ref_slices = get_ref_slices(start_positions, z_interval, ref_depth)
+    frame_means = get_frame_means(stack, channel, ref_slices)
+    print(frame_means)
     frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
     # Normalize means to the first frame.
     means_norm = frame_means_smooth / frame_means_smooth[0]
@@ -526,7 +546,8 @@ def make_surface_vector(before, after, nframes):
         return surface_positions
 
 ############################################################################
-def make_true_start_vector(surface_positions, join_frames, start_positions):
+def make_true_start_vector(surface_positions, join_frames, 
+    stack_start_positions):
         """Make vector of the true start position of the Z stack for every 
         frame, calculated as the difference between the inferred embryo 
         surface position and the z-stack start position stored in metadata.
@@ -539,7 +560,7 @@ def make_true_start_vector(surface_positions, join_frames, start_positions):
                 Frames at which movies are joined (first frame of new stack).
                 Length n-1 where n is the number of movies ('Missing' entry
                 for 0th movie)
-            start_positions: iterable of numeric
+            stack_start_positions: iterable of numeric
                 Starting positions, in microns, of each constituent Z stack.
                 Will be of length n equal to the number of movies.
         
@@ -561,7 +582,7 @@ def make_true_start_vector(surface_positions, join_frames, start_positions):
         start_positions_uncorrected = np.array([])
         for n in range(0, len(join_frames)):
             length = join_frames[n] - curr_segment_start
-            start_pos = float(start_positions[n])
+            start_pos = float(stack_start_positions[n])
             start_positions_uncorrected = np.concatenate([start_positions_uncorrected,
                 np.repeat(start_pos, length)])
             curr_segment_start = join_frames[n]
@@ -572,7 +593,7 @@ def make_true_start_vector(surface_positions, join_frames, start_positions):
 
 ############################################################################
 def spot_data_add_depth(spot_data, surface_before, surface_after,
-    join_frames, start_positions, z_interval=0.5):
+    join_frames, stack_start_positions, z_interval=0.5):
     """Add a column to spot_data with the absolute embryo depth of every
     detected spot.
 
@@ -587,7 +608,7 @@ def spot_data_add_depth(spot_data, surface_before, surface_after,
             microns
         join_frames: iterable of ints
             Positions of frames where movies are joined
-        start_positions: iterable of numeric
+        stack_start_positions: iterable of numeric
             Positions of the start (lowest Z slice) of z stack for each
             constituent stack
         z_interval: float
@@ -629,40 +650,42 @@ def spot_data_add_depth(spot_data, surface_before, surface_after,
     # Get surface positions, then z-stack start positions, then add depth column.
     surface_positions = make_surface_vector(surface_before, surface_after, nframes)
     start_positions = make_true_start_vector(surface_positions, join_frames, 
-        start_positions)
+        stack_start_positions)
     spot_data_wdepth = add_depth_column(spot_data, start_positions, z_interval)           
     return spot_data_wdepth
 
 
 ############################################################################
-def spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_bin, 
+def spot_data_extract_binned_data(spot_data, col_data, col_bin_by, 
         bin_size=0.5, nbins=100):
         """Build vector of intensities binned by depth and their means.
         
         Args:
             spot_data: dict of ndarrays
                 spot_data object
-            col_depth: int
-                Column in spot_data containing embryo depth
-            col_to_bin: iterable of ints
-                Columns in spot_data to correct
+            col_data: int
+                Column in spot_data containing data of interest
+            col_bin_by: int
+                Column in spot_data containing data by which you want to
+                bin (e.g., depth)
             bin_size: numeric
-                Size of bins for depth, in microns
+                Size of bins for data in col_bin_by
             nbins: int
                 Number of bins to make
         
         Returns:
             vals: list of lists
-                Each value in parent list is a depth bin, each bin contains
-                a list of all values from col_to_bin at in that depth range
+                Each value in parent list is a bin in the binned data, each 
+                bin contains a list of all values from col_data at in the 
+                range defined by the bin
         """
         vals = [[]] * nbins
         for spot_id in spot_data:
             arr = spot_data[spot_id]
             for row in range(0, arr.shape[0]):
                 # Convert depth to array index in 0.5 µm increments.
-                depth = int(arr[row, col_depth] / bin_size)
-                vals[depth] = vals[depth] + [arr[row, col_to_bin]]
+                bin_num = int(arr[row, col_bin_by] / bin_size)
+                vals[bin_num] = vals[bin_num] + [arr[row, col_data]]
         return vals
 
 ############################################################################
@@ -719,14 +742,14 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
     
     if display:
         # Plot boxplot of intensity vs. depth for uncorrected and corrected data.
-        vals = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
+        vals = spot_data_extract_binned_data(spot_data, col_depth, col_to_correct)
         plt.figure(figsize=(14, 4))
         plt.subplot(121)
         plt.boxplot(vals[10:40], labels=np.arange(5, 20, 0.5))
         plt.xticks(rotation = 45)
         plt.ylim(0, 15000)
         plt.title(plot_title + ' Before Std. Candle Correction')
-        vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corr, col_depth, col_to_correct)
+        vals_corr = spot_data_extract_binned_data(spot_data_corr, col_depth, col_to_correct)
         plt.subplot(122)
         plt.boxplot(vals_corr[10:40])
         plt.ylim(0, 15000)
@@ -789,7 +812,7 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
         return means
 
     spot_data_corrected = copy.deepcopy(spot_data)
-    intensities_bydepth = spot_data_extract_depthbinned_intensities(spot_data, col_depth, col_to_correct)
+    intensities_bydepth = spot_data_extract_binned_data(spot_data, col_depth, col_to_correct)
     means_bydepth = get_means_intensity_depth_vectors(intensities_bydepth)
         
     # Fit depths vs. means with exponential.
@@ -826,7 +849,7 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
         plt.title(plot_title + ' Fitting Result')
 
         # Plot a boxplot of corrected intensity values vs. sample depth.
-        vals_corr = spot_data_extract_depthbinned_intensities(spot_data_corrected, col_depth, col_to_correct)
+        vals_corr = spot_data_extract_binned_data(spot_data_corrected, col_depth, col_to_correct)
         plt.subplot(313)
         plt.boxplot(vals_corr[10:40]);
         plt.title(plot_title + ' Depth vs. Intensity: Corrected')
@@ -836,7 +859,7 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
 
 ############################################################################
 def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids, 
-    surface_before, surface_after, join_frames, start_positions, 
+    surface_before, surface_after, join_frames, stack_start_positions, 
     z_interval=0.5, spotchannel=1, protchannel=0, ij_rad=3, z_rad=1.1, 
     ij_scale=1, z_scale=1):
 
@@ -844,25 +867,25 @@ def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids,
         """Plot results of bleach correction."""
         plt.figure(figsize=(14, 8))
         plt.subplot(221)
-        ms2_before = spot_data_extract_depthbinned_intensities(spot_data_before, 
+        ms2_before = spot_data_extract_binned_data(spot_data_before, 
             col_depth=0, col_to_bin=9, bin_size=1, nbins=nframes)
         plt.boxplot(ms2_before)
         plt.title('MS2 Before Bleaching Correction')
         plt.ylim(0, 1e4)
         plt.subplot(222)
-        ms2_after = spot_data_extract_depthbinned_intensities(spot_data_after, 
+        ms2_after = spot_data_extract_binned_data(spot_data_after, 
             col_depth=0, col_to_bin=9, bin_size=1, bins=nframes)
         plt.boxplot(ms2_after)
         plt.title('MS2 After Bleaching Correction')
         plt.ylim(0, 1e4)
         plt.subplot(223)
-        prot_before = spot_data_extract_depthbinned_intensities(spot_data_before, 
+        prot_before = spot_data_extract_binned_data(spot_data_before, 
             col_depth=0, col_to_bin=11, bin_size=1, bins=nframes)
         plt.boxplot(prot_before)
         plt.title('Prot Before Bleaching Correction')
         plt.ylim(0, 1e4)
         plt.subplot(224)
-        prot_after = spot_data_extract_depthbinned_intensities(spot_data_after, 
+        prot_after = spot_data_extract_binned_data(spot_data_after, 
             col_depth=0, col_to_bin=11, bin_size=1, bins=nframes)
         plt.boxplot(prot_after)
         plt.title('Prot After Bleaching Correction')
