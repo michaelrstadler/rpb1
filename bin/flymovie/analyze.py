@@ -7,6 +7,7 @@ from flymovie.fitting import gaussian3d
 from flymovie.viewers import plot_ps
 from flymovie.movieclass import movie
 import scipy
+import warnings
 
 import copy
 
@@ -269,9 +270,13 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
 ############################################################################
 def spot_data_bleach_correct_framemean(spot_data, stack, channel, 
     surface_before, surface_after, stack_start_positions, join_frames, 
-    z_interval, cols_to_correct=(9, 10, 11), sigma=7, ref_depth=20):
+    z_interval, cols_to_correct=(9, 10, 11), sigma=7, ref_depth=20, 
+    print_ref_slices=False):
     """Perform bleach correction using the (smoothed) frame averages from 
     an image stack, apply correction to columns of spot_data object.
+
+    Note: smooth channels work far better for this, e.g., MS2 is better than
+    Rpb1.
 
     Args:
         spot_data: dict of ndarrays
@@ -280,24 +285,58 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
             5D [c,t,z,x,y] image stack to use for bleach correction
         channel: int
             Channel to use for correction
+        surface_before: float
+            Position of embryo surface measured before taking stack, in 
+            microns
+        surface_after: float
+            Position of embryo surface measured after taking stack, in 
+            microns
+        join_frames: iterable of ints
+            Positions of frames where movies are joined
+        z_interval: float
+            Thickness, in microns, of Z slices
+        stack_start_positions: iterable of numeric
+            Positions of the start (lowest Z slice) of z stack for each
+            constituent stack
         cols to corrects: iterable of ints
             Columns in spot_data to bleach correct
         sigma: number-like
             Sigma value for gaussian filtering of frame means
+        ref_depth: numeric
+            Sample depth, in microns, to use for bleaching correction.
+        print_ref_slices: bool
+            If true, prints list of slices used for correction. This is
+            useful for determining a proper reference depth, as you
+            want to avoid depths that result in a lot of 0 or max 
+            slices
 
     Returns:
         spot_data_corr: dict of ndarrays
             Input spot_data with bleaching correction applied to indicated
             columns
     """
-    def get_ref_slices(start_positions, z_interval, ref_depth):
+    def get_ref_slices(start_positions, z_interval, ref_depth, nslices):
+        """Get slice corresponding to reference depth for each frame."""
         ref_slices = np.zeros(len(start_positions))
         for f in range(0, len(start_positions)):
             ref_slice = int((ref_depth - start_positions[f]) / z_interval)
+            # If slice is outside the stack, assign ref_slice to the 
+            # nearest available and give a warning.
+            if (ref_slice < 0):
+                warnings.warn('Warning: reference slice less than 0.')
+                ref_slice = 0
+            elif (ref_slice > (nslices - 1)):
+                warnings.warn('Warning: reference slice beyond stack limit.')
+                ref_slice = nslices - 1
             ref_slices[f] = ref_slice
+        if print_ref_slices:
+            print('Reference slices: ', end='')
+            print(ref_slices)
+        # Convert floats to int and return.
         return [int(x) for x in ref_slices]
 
     def get_frame_means(stack, channel, ref_slices):
+        """Calculate mean intensity for each frame at reference slice."""
         nframes = len(ref_slices)
         frame_means = np.zeros(nframes)
         for f in range(0, nframes):
@@ -305,19 +344,19 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
             frame_means[f] = frame_mean
         return frame_means
 
-    nframes = stack.shape[1]
+    nframes, nslices = stack.shape[1], stack.shape[2]
     surface_positions = make_surface_vector(surface_before, surface_after, nframes)
     start_positions = make_true_start_vector(surface_positions, join_frames, stack_start_positions)
-    print(start_positions)
-    ref_slices = get_ref_slices(start_positions, z_interval, ref_depth)
+    ref_slices = get_ref_slices(start_positions, z_interval, ref_depth, nslices)
     frame_means = get_frame_means(stack, channel, ref_slices)
-    print(frame_means)
     frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
     # Normalize means to the first frame.
     means_norm = frame_means_smooth / frame_means_smooth[0]
+    # Initialize new copy of spot_data for changing data.
     spot_data_corr = copy.deepcopy(spot_data)
     for spot_id in spot_data:
         for col in cols_to_correct:
+            # Vectorized way of dividing column value by correction value for that frame.
             spot_data_corr[spot_id][:, col] = np.apply_along_axis(lambda x: x[col] / means_norm[int(x[0])], 1, spot_data[spot_id])
 
     return spot_data_corr
@@ -570,7 +609,6 @@ def make_true_start_vector(surface_positions, join_frames,
                 frame relative to the surface of the embryo (coverslip).
         """
         nframes = len(surface_positions)
-        print(nframes)
         # Add last frame to join_frames list.
         join_frames = join_frames + [nframes]
         # First, make a vector (of length = nframes) with the uncorrected
@@ -656,18 +694,18 @@ def spot_data_add_depth(spot_data, surface_before, surface_after,
 
 
 ############################################################################
-def spot_data_extract_binned_data(spot_data, col_data, col_bin_by, 
+def spot_data_extract_binned_data(spot_data, col_bin_by, col_data,
         bin_size=0.5, nbins=100):
         """Build vector of intensities binned by depth and their means.
         
         Args:
             spot_data: dict of ndarrays
                 spot_data object
-            col_data: int
-                Column in spot_data containing data of interest
             col_bin_by: int
                 Column in spot_data containing data by which you want to
                 bin (e.g., depth)
+            col_data: int
+                Column in spot_data containing data of interest
             bin_size: numeric
                 Size of bins for data in col_bin_by
             nbins: int
@@ -906,7 +944,7 @@ def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids,
 
     # Add a column (12) containing the sample depth for each spot.
     spot_data_plusdepth = spot_data_add_depth(spot_data_plusprot, 
-        surface_before, surface_after, join_frames, start_positions, 
+        surface_before, surface_after, join_frames, stack_start_positions, 
         z_interval)
 
     # Store names of columns for supplying to plotting functions.
@@ -923,7 +961,9 @@ def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids,
     # measurements. Currently using frame-mean based correction but this 
     # could change.
     spot_data_bleachcorr = spot_data_bleach_correct_framemean(
-        spot_data_plusdepth, stack, protchannel, cols_to_correct=(9, 10, 11))
+        spot_data_plusdepth, stack, protchannel, surface_before, surface_after, stack_start_positions, join_frames, 
+    z_interval, cols_to_correct=(9, 10, 11), sigma=3, ref_depth=18, 
+    print_ref_slices=False)
 
     # Plot results of bleach correction as mean intensity vs. time boxplots.
     nframes = stack.shape[1]

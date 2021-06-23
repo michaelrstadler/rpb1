@@ -87,7 +87,7 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		for n in range(0, 10):
 			self.assertEqual(output[n].shape[1], 14, 'Failed to add column')
 
-	def test_spot_data_extract_depthbinned_intensities(self):
+	def test_spot_data_extract_binned_data(self):
 		input_ = {}
 		for n in range(0,10):
 			input_[n] = np.ones((20, 13))
@@ -98,8 +98,8 @@ class TestAnalyzeFunctions(unittest.TestCase):
 			# Set intensities.
 			input_[n][:, 9] = np.arange(0, 10, 0.5)
 
-		output = spot_data_extract_depthbinned_intensities(input_, col_depth=12, col_to_bin=9, 
-        	bin_size=0.5, nbins=100)
+		output = spot_data_extract_binned_data(input_, col_data=9, 
+			col_bin_by=12, bin_size=0.5, nbins=100)
 
 		self.assertEqual(len(output), 100, 'Length should be 100.')
 		self.assertEqual(np.mean(output[0]), 0, 'Should be 0.')
@@ -144,7 +144,7 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		spot_data_depth_correct_fromdata(input_, col_to_correct=9, 
 			col_depth=12, target_depth=10, fit_depth_min=12, 
 			fit_depth_max=18)
-
+			
 	def test_spot_data_bleach_correct_framemean(self):
 		# Spot data uniformly 1 except time column.
 		spot_data = {}
@@ -157,7 +157,8 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		for i in range(1,5):
 			stack[:, i] = stack[:, i] * (i+1)
 		#print(np.mean(stack[1,3]))
-		output = spot_data_bleach_correct_framemean(spot_data, stack, 1, sigma=0.1)
+		output = spot_data_bleach_correct_framemean(spot_data, stack, 1, 
+		0, 0.000001, [5, 5], [2], 0.5, ref_depth=6, sigma=0.1)
 		
 		self.assertAlmostEqual(output[1][0, 9], 1, 2, 'Should be 1.')
 		self.assertAlmostEqual(output[2][1, 10], 0.5, 2, 'Should be 0.5.')
