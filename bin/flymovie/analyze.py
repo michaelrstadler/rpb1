@@ -268,15 +268,19 @@ def spotdf_bleach_correct(df, stack4d, sigma=10):
     return df_corr
 
 ############################################################################
-def spot_data_bleach_correct_framemean(spot_data, stack, channel, 
+def spot_data_bleach_correct_constantdepth(spot_data, stack, channel, 
     surface_before, surface_after, stack_start_positions, join_frames, 
-    z_interval, cols_to_correct=(9, 10, 11), sigma=7, ref_depth=20, 
-    print_ref_slices=False):
-    """Perform bleach correction using the (smoothed) frame averages from 
-    an image stack, apply correction to columns of spot_data object.
+    z_interval, cols_to_correct=(9, 10, 11), ref_depth=20, 
+    nucmask=None, print_ref_slices=False, plot_title=''):
+    """Perform bleach correction using the fluorescence signal at a
+    constant sample depth.
 
-    Note: smooth channels work far better for this, e.g., MS2 is better than
-    Rpb1.
+    For each frame, the mean intensity for the slice closest to the input
+    reference sample depth is computed. If a mask is supplied (e.g., of 
+    nuclei), then only background pixels are used for calculating the mean.
+    Frame number vs. mean data are fitted with a linear function, and this
+    linear correction is applied to the indicated columns of the spot_data
+    object.
 
     Args:
         spot_data: dict of ndarrays
@@ -291,31 +295,35 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
         surface_after: float
             Position of embryo surface measured after taking stack, in 
             microns
+        stack_start_positions: iterable of numeric
+            Positions of the start (lowest Z slice) of z stack for each
+            constituent stack
         join_frames: iterable of ints
             Positions of frames where movies are joined
         z_interval: float
             Thickness, in microns, of Z slices
-        stack_start_positions: iterable of numeric
-            Positions of the start (lowest Z slice) of z stack for each
-            constituent stack
         cols to corrects: iterable of ints
             Columns in spot_data to bleach correct
-        sigma: number-like
-            Sigma value for gaussian filtering of frame means
         ref_depth: numeric
             Sample depth, in microns, to use for bleaching correction.
+        nucmask: ndarray
+            [Optional] Mask of size equal to the last four dimensions of
+            stack. Only positions that are 0 in the mask are used for 
+            frame mean calculations. If not supplied, the entire reference
+            slice is used for each frame.
         print_ref_slices: bool
             If true, prints list of slices used for correction. This is
             useful for determining a proper reference depth, as you
             want to avoid depths that result in a lot of 0 or max 
             slices
+        plot_title: string
+            Label to append before "Bleaching Correction Fitting" in 
+            plot of fit vs. frame means data
 
-    Returns: tuple
+    Returns:
         spot_data_corr: dict of ndarrays
             Input spot_data with bleaching correction applied to indicated
             columns
-        frame_means_smooth: numpy array
-            Frame means used for correction
     """
     def get_ref_slices(start_positions, z_interval, ref_depth, nslices):
         """Get slice corresponding to reference depth for each frame."""
@@ -337,31 +345,68 @@ def spot_data_bleach_correct_framemean(spot_data, stack, channel,
         # Convert floats to int and return.
         return [int(x) for x in ref_slices]
 
-    def get_frame_means(stack, channel, ref_slices):
-        """Calculate mean intensity for each frame at reference slice."""
+    def get_frame_means(stack, channel, ref_slices, nucmask):
+        """Calculate mean intensity for each frame at reference depth."""
         nframes = len(ref_slices)
         frame_means = np.zeros(nframes)
         for f in range(0, nframes):
-            frame_mean = np.mean(stack[channel, f, ref_slices[f]])
+            ref_slice = ref_slices[f]
+            non_nuc_mask = nucmask[f, ref_slice] == 0
+            non_nuc_mask = ndi.morphology.binary_erosion(non_nuc_mask, 
+                structure=np.ones((5,5)))
+            non_nuc_vals = stack[channel, f, ref_slice][non_nuc_mask]
+            frame_mean = np.mean(non_nuc_vals)
             frame_means[f] = frame_mean
         return frame_means
 
+    def fit_frame_means(frame_means, plot_title):
+        """Fit frame means data with a linear function (y=mx+b), return
+        fitted means for each frame."""
+        def linear_func(x, m, b):
+            return (m * x) + b
+
+        frames_vector = np.arange(0, nframes)
+        (m, b), _ = scipy.optimize.curve_fit(linear_func, frames_vector, frame_means, maxfev=100000)
+        
+        # Plot fitting results.
+        plt.figure(figsize=(6,2))
+        plt.plot(frame_means)
+        plt.plot((frames_vector * m) + b)
+        plt.title(plot_title + ' Bleaching Correction Fitting')
+
+        fit_means = (m * frames_vector) + b
+        # Normalize means to the first frame.
+        fit_means_norm = fit_means / fit_means[0]
+        return fit_means_norm
+
+    # Make empty mask if nucmask not supplied (will include whole frame in mean).
+    if nucmask is None:
+        nucmask = np.zeros_like(stack[0])
+
+    # Compute the normalization vector fit_means_norm.
     nframes, nslices = stack.shape[1], stack.shape[2]
-    surface_positions = make_surface_vector(surface_before, surface_after, nframes)
-    start_positions = make_true_start_vector(surface_positions, join_frames, stack_start_positions)
-    ref_slices = get_ref_slices(start_positions, z_interval, ref_depth, nslices)
-    frame_means = get_frame_means(stack, channel, ref_slices)
-    frame_means_smooth = ndi.gaussian_filter(frame_means, sigma=sigma)
-    # Normalize means to the first frame.
-    means_norm = frame_means_smooth / frame_means_smooth[0]
+    surface_positions = make_surface_vector(surface_before, 
+        surface_after, nframes)
+    start_positions = make_true_start_vector(surface_positions, 
+        join_frames, stack_start_positions)
+    ref_slices = get_ref_slices(start_positions, z_interval, ref_depth, 
+        nslices)
+    frame_means = get_frame_means(stack, channel, ref_slices, nucmask)
+    fit_means_norm = fit_frame_means(frame_means, plot_title)
+    
     # Initialize new copy of spot_data for changing data.
     spot_data_corr = copy.deepcopy(spot_data)
+    # Apply correction to each spot_data datapoint based on 
+    # fit_means_norm.
     for spot_id in spot_data:
         for col in cols_to_correct:
-            # Vectorized way of dividing column value by correction value for that frame.
-            spot_data_corr[spot_id][:, col] = np.apply_along_axis(lambda x: x[col] / means_norm[int(x[0])], 1, spot_data[spot_id])
+            # Vectorized way of dividing column value by correction 
+            # value for that frame.
+            spot_data_corr[spot_id][:, col] = np.apply_along_axis(
+                lambda x: x[col] / fit_means_norm[int(x[0])], 1, 
+                spot_data[spot_id])
 
-    return spot_data_corr, frame_means_smooth
+    return spot_data_corr
 
 #######################################################################
 def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
@@ -929,38 +974,35 @@ def boxplot(vals, labels, ylim, title):
     plt.title(title)
 
 ############################################################################
-def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids, 
+def mv_apply_corrections(mv, spot_data_orig, stack, nucmask, paramgrids, 
     surface_before, surface_after, join_frames, stack_start_positions, 
     z_interval=0.5, spotchannel=1, protchannel=0, ij_rad=3, z_rad=1.1, 
     ij_scale=1, z_scale=1, plotting_ylim=1e4):
 
-    def plot_bleaching_corr(spot_data_before, spot_data_after, nframes, ylim,
-        frame_means_spotchannel, frame_means_protchannel):
+    def plot_bleaching_corr(spot_data_before, spot_data_after, nframes, 
+        ylim):
         """Plot results of bleach correction."""
         labels = np.arange(0, nframes)
         plt.figure(figsize=(14, 12))
-        plt.subplot(321)
-        plt.plot(frame_means_spotchannel)
-        plt.subplot(322)
-        plt.plot(frame_means_protchannel)
+
         ms2_before = spot_data_extract_binned_data(spot_data_before, 
             col_bin_by=0, col_data=9, bin_size=1, nbins=nframes)
-        plt.subplot(323)
+        plt.subplot(221)
         boxplot(ms2_before, labels, ylim, 'MS2 Before Bleaching Correction')
 
         ms2_after = spot_data_extract_binned_data(spot_data_after, 
             col_bin_by=0, col_data=9, bin_size=1, nbins=nframes)
-        plt.subplot(324)
+        plt.subplot(222)
         boxplot(ms2_after, labels, ylim, 'MS2 After Bleaching Correction')
 
         prot_before = spot_data_extract_binned_data(spot_data_before, 
             col_bin_by=0, col_data=11, bin_size=1, nbins=nframes)
-        plt.subplot(325)
+        plt.subplot(223)
         boxplot(prot_before, labels, ylim, 'Prot Before Bleaching Correction')
 
         prot_after = spot_data_extract_binned_data(spot_data_after, 
             col_bin_by=0, col_data=11, bin_size=1, nbins=nframes)
-        plt.subplot(326)
+        plt.subplot(224)
         boxplot(prot_after, labels, ylim, 'Prot After Bleaching Correction')
 
     def get_mean_spot_depth(spot_data, depth_col):
@@ -1010,17 +1052,17 @@ def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids,
     # Perform bleach correction on the three columns containing intensity 
     # measurements. Currently using frame-mean based correction but this 
     # could change.
-    spot_data_bleachcorr, frame_means_spotchannel = spot_data_bleach_correct_framemean(
+    spot_data_bleachcorr = spot_data_bleach_correct_framemean(
         spot_data_plusdepth, stack, spotchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
-        (9, 10), sigma=3, ref_depth=mean_depth, 
-        print_ref_slices=False)
+        (9, 10), sigma=3, ref_depth=mean_depth, nucmask=nucmask, 
+        print_ref_slices=True)
 
-    spot_data_bleachcorr, frame_means_protchannel = spot_data_bleach_correct_framemean(
+    spot_data_bleachcorr = spot_data_bleach_correct_framemean(
         spot_data_bleachcorr, stack, protchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
-        [11], sigma=3, ref_depth=mean_depth, 
-        print_ref_slices=False)
+        [11], sigma=3, ref_depth=mean_depth, nucmask=nucmask,
+        print_ref_slices=True)
 
     # Plot results of bleach correction as mean intensity vs. time boxplots.
     plot_bleaching_corr(spot_data_plusdepth, spot_data_bleachcorr, nframes, plotting_ylim,
@@ -1043,6 +1085,7 @@ def mv_apply_corrections(mv, spot_data_orig, stack, paramgrids,
             plot_title=colnames[col_to_correct])
 
     # Generate dataframes, add data structures to movie.
+    mv.spot_data_plusdepth = spot_data_plusdepth
     mv.spot_data_bleachcorr = spot_data_bleachcorr
     mv.spot_data_depthcorr_stdcandle = spot_data_depthcorr_stdcandle
     mv.spot_data_depthcorr_fromdata = spot_data_depthcorr_fromdata
