@@ -9,7 +9,9 @@ import matplotlib.pyplot as plt
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, init_maxval=None, color="cividis", coordfile=None):
+def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, 
+    init_maxval=None, color="cividis", coordfile=None, text_data=None, 
+    text_color='yellow'):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -73,8 +75,13 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, in
             # it is clarifying.
             ax[n].imshow(stack_local[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
             vmax=max_);
-            #ax[n].text(200,200,'test', color='yellow')    
-    
+            if text_data is not None:
+                t = kwargs['t']
+                if t in text_data:
+                    for text_instance in text_data[t]:
+                        x,y,s = text_instance
+                        ax[n].text(x,y,s, color=text_color)
+
     # Write clicked coordinates to file.
     def click_coord(event, z, t):
             f = open(coordfile, 'a')
