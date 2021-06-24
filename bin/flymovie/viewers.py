@@ -72,7 +72,8 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, in
             # Note: the (...,) in the following is not required, but I think 
             # it is clarifying.
             ax[n].imshow(stack_local[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
-            vmax=max_);    
+            vmax=max_);
+            #ax[n].text(200,200,'test', color='yellow')    
     
     # Write clicked coordinates to file.
     def click_coord(event, z, t):
@@ -166,7 +167,7 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, in
             order = 'ctxy'[4-stacks[0].ndim:]
         else:
             order = 'ctzxy'[5-stacks[0].ndim:]
-
+    
     # Open coordfile for appending.
     if (coordfile is not None):
         f = open(coordfile, 'w')
