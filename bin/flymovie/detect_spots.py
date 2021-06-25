@@ -71,37 +71,7 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
-    def get_fitwindow(data, peak, xy_rad, z_rad):
-        """Retrieve section of image stack corresponding to given
-        window around a point and the coordinate adjustments necessary
-        to convert window coordinates to coordinates in the original image"""
-        # Set the start points for windows and "adjust" them if they get 
-        # to negative numbers.
-        zmin = peak[0] - z_rad
-        xmin = peak[1] - xy_rad
-        ymin = peak[2] - xy_rad
-        # Initialize adjustments to values that are correct if no edge problems 
-        # are encountered.
-        z_adj = -z_rad
-        x_adj = -xy_rad
-        y_adj = -xy_rad
-        # Update mins and adjustments if windows start at negative coordinates.
-        if (zmin < 0):
-            zmin = 0
-            z_adj = -peak[0]
-        if (xmin < 0):
-            xmin = 0
-            x_adj = -peak[1]
-        if (ymin < 0):
-            ymin = 0
-            y_adj = -peak[2]
-
-        # Get end points, constained by max coordinate in data.
-        zmax = min(data.shape[0] - 1, peak[0] + z_rad)
-        xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
-        ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
-
-        return (data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj)
+    
     
     def relabel(peak_ids, oldparams, mask):
         """Renumber labelmask and corresponding fit parameters
@@ -150,26 +120,10 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
                 peak = np.unravel_index(np.argmax(nucalone_stack), 
                     nucalone_stack.shape)
                 peaks.append(tuple(peak))
-
-        # Fit 3D gaussian in window surrounding each local maximum.
-        fitparams = np.ndarray((0,7))
-        for peak in peaks:
-            fitwindow, z_adj, x_adj, y_adj = get_fitwindow(substack, peak, fitwindow_rad_xy, 
-                fitwindow_rad_z)
-            opt = fitgaussian3d(fitwindow)
-            if opt.success:
-                peak_fitparams = opt.x
-                # Move center coordinates to match center of gaussian fit, ensure they're within image. 
-                # If they're outside the image, coordinate is assigned as the edge of the image.
-                peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] + z_adj), 0, substack.shape[-3]-1)))
-                peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] + x_adj), 0, substack.shape[-2]-1)))
-                peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] + y_adj), 0, substack.shape[-1]-1)))
-                fitparams = np.vstack((fitparams, peak_fitparams))
-            # If fit fails, add dummy entry for spot.
-            else:
-                fitparams = np.vstack((fitparams, np.array([z_adj,x_adj,y_adj,0,np.inf,np.inf,np.inf])))
-        return fitparams
-    
+        
+        fit_params = fit_peaks(substack, peaks, fitwindow_rad_xy, fitwindow_rad_z)
+        return fit_params
+  
     #### Main ####
     if mode not in ('mindist', 'nucleus'):
         raise ValueError('Invalid mode')
@@ -193,6 +147,59 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
         fit_data.append(fit_data_thisframe)
         
     return fit_data
+
+def fit_peaks(stack, peaks, fitwindow_rad_xy, fitwindow_rad_z):
+    print('fitting peaks!')
+    def get_fitwindow(data, peak, xy_rad, z_rad):
+            """Retrieve section of image stack corresponding to given
+            window around a point and the coordinate adjustments necessary
+            to convert window coordinates to coordinates in the original image"""
+            # Set the start points for windows and "adjust" them if they get 
+            # to negative numbers.
+            zmin = peak[0] - z_rad
+            xmin = peak[1] - xy_rad
+            ymin = peak[2] - xy_rad
+            # Initialize adjustments to values that are correct if no edge problems 
+            # are encountered.
+            z_adj = -z_rad
+            x_adj = -xy_rad
+            y_adj = -xy_rad
+            # Update mins and adjustments if windows start at negative coordinates.
+            if (zmin < 0):
+                zmin = 0
+                z_adj = -peak[0]
+            if (xmin < 0):
+                xmin = 0
+                x_adj = -peak[1]
+            if (ymin < 0):
+                ymin = 0
+                y_adj = -peak[2]
+
+            # Get end points, constained by max coordinate in data.
+            zmax = min(data.shape[0] - 1, peak[0] + z_rad)
+            xmax = min(data.shape[1] - 1, peak[1] + xy_rad)
+            ymax = min(data.shape[2] - 1, peak[2] + xy_rad)
+
+            return (data[zmin:(zmax+1), xmin:(xmax+1), ymin:(ymax+1)], z_adj, x_adj, y_adj)
+
+    # Fit 3D gaussian in window surrounding each local maximum.
+    fitparams = np.ndarray((0,7))
+    for peak in peaks:
+        fitwindow, z_adj, x_adj, y_adj = get_fitwindow(stack, peak, fitwindow_rad_xy, 
+            fitwindow_rad_z)
+        opt = fitgaussian3d(fitwindow)
+        if opt.success:
+            peak_fitparams = opt.x
+            # Move center coordinates to match center of gaussian fit, ensure they're within image. 
+            # If they're outside the image, coordinate is assigned as the edge of the image.
+            peak_fitparams[0] = int(round(clamp((peak[0] + peak_fitparams[0] + z_adj), 0, stack.shape[-3]-1)))
+            peak_fitparams[1] = int(round(clamp((peak[1] + peak_fitparams[1] + x_adj), 0, stack.shape[-2]-1)))
+            peak_fitparams[2] = int(round(clamp((peak[2] + peak_fitparams[2] + y_adj), 0, stack.shape[-1]-1)))
+            fitparams = np.vstack((fitparams, peak_fitparams))
+        # If fit fails, add dummy entry for spot.
+        else:
+            fitparams = np.vstack((fitparams, np.array([z_adj,x_adj,y_adj,0,np.inf,np.inf,np.inf])))
+    return fitparams
 
 ############################################################################
 def filter_ms2fits(fit_data, peakiness=4.5, stack=None, channel=1):
@@ -636,7 +643,7 @@ def filter_spot_duration(connected_data, min_len):
     return filtered_data
 
 ############################################################################
-def fill_missing_spots(spot_data, stack, missing_spots, output, channel=1, 
+def add_missing_spots(spot_data, stack, missing_spots, output, channel=1, 
     ij_len=50):
     class State:
         """State objects store the state of the viewer."""
