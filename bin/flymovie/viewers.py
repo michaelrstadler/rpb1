@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, 
     init_maxval=None, color="cividis", coordfile=None, text_data=None, 
-    text_color='yellow'):
+    text_color='yellow', grid=False):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
     
     Args:
@@ -34,6 +34,12 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None,
         coordfile: string
             [Optional] File to which to write coordinates of mouse clicks.
             Only works in %matplotlib notebook mode.
+        text_data: dict of iterables
+            Dict entries are time frames, iterables contain tuples of the 
+            format [x-coordinate, y-coordinate, string]. Text of string is
+            displayed at the supplied coordinates.
+        text_color: string or color
+            Color of text to be displayed
             
     Returns: none
         
@@ -75,6 +81,9 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None,
             # it is clarifying.
             ax[n].imshow(stack_local[tuple(indexes) + (...,)], cmap=colmap, vmin=min_, 
             vmax=max_);
+            if (grid):
+                ax[n].grid(which="both", color="gray", alpha=0.4)
+            # Write text if text_data supplied.
             if text_data is not None:
                 t = kwargs['t']
                 if t in text_data:
@@ -156,7 +165,7 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None,
 
         # Make color and contrast widgets.
         interact(_update_view, order=fixed(order), **interact_call)
-    
+
     # Use first stack as reference for sizes, etc.
     if (type(stacks) is list):
         stack = stacks[0]
@@ -184,7 +193,7 @@ def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None,
     main(order)
 
 ############################################################################
-def qax(n, ncol=4):
+def qax(n, ncol=4, figsize=None):
     """Quick axes: generate 1d list of axes objects of specified number
     
     Args:
@@ -199,7 +208,9 @@ def qax(n, ncol=4):
     nrow = int(np.ceil(n / ncol))
     if (n < ncol):
         ncol = n
-    fig, ax = plt.subplots(nrow, ncol, figsize=(16, 4*nrow))
+    if figsize is None:
+        figsize=(16, 4*nrow)
+    fig, ax = plt.subplots(nrow, ncol, figsize=figsize)
     ax1d = []
     pos1d = 0
     if (nrow > 1):
@@ -309,6 +320,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
         boxstack[t, z_min:z_max, (i_max-linewidth):i_max, j_min:j_max] = hival
     
     # Main.
+    # If received a spot_data object.
     if (type(spot_data) == dict):
         for spot in spot_data:
             arr = spot_data[spot]
@@ -316,6 +328,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
                 row = row.astype(int)
                 point = (row[[0,2,3,4]])
                 drawbox(boxstack, point, halfwidth_xy, halfwidth_z, linewidth, hival, shadows)
+    # If received fits.
     elif (type(spot_data) == list):
         for t in range(0, len(spot_data)):
             for row in spot_data[t]:
@@ -326,7 +339,8 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
 ############################################################################
 def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, 
     halfwidth_xy=8, halfwidth_z=8, spotmode=False, spot_id='all', 
-    color='cividis', init_minval=0, init_maxval=1000000, shadows=True):
+    color='cividis', init_minval=0, init_maxval=1000000, shadows=True,
+    text_color='yellow', grid=False):
     """View image stack with boxes drawn around detected spots
     
     Args:
@@ -360,8 +374,27 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True,
             Initial value for maximum on contrast slider
         shadows: bool
             If true, show dark boxes in out of focus Z slices.
+        text_color: color/string
+            Color of text of spot_id to be displayed next to boxes
 
     """
+    def make_text_data(spot_data, halfwidth):
+        """Make dict containing tuples for text_data."""
+        text_data = {}
+        for spot_id in spot_data:
+            arr = spot_data[spot_id]
+            for row in arr:
+                # Note: j is the long axis, plotted by imshow horizontal.
+                t, i, j = [int(x) for x in (row[0], row[3], row[4])]
+                j += 1.5 * halfwidth
+                if t in text_data:
+                    # Text displays in xy, so long (horizontal) axis
+                    # needs to be first.
+                    text_data[t].append((j, i, spot_id))
+                else:
+                    text_data[t] = [(j, i, spot_id)]
+        return text_data
+
     if (spot_id == 'all'):
         data = spot_data.copy()
     else:
@@ -372,10 +405,19 @@ def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True,
 
     substack = stack[channel]
     boxes = box_spots(substack, data, halfwidth_xy=halfwidth_xy, halfwidth_z=halfwidth_z, linewidth=2, shadows=shadows)
-    if MAX:
-        viewer(boxes.max(axis=1), figsize, 'txy', color=color, init_minval=init_minval, init_maxval=init_maxval)
+    # If this is a spot_data object.
+    if (type(spot_data) == dict):
+        text_data = make_text_data(spot_data, halfwidth_xy)
     else:
-        viewer(boxes, figsize, 'tzxy', color=color, init_minval=init_minval, init_maxval=init_maxval)
+        text_data = None
+    if MAX:
+        viewer(boxes.max(axis=1), figsize, 'txy', color=color, 
+            init_minval=init_minval, init_maxval=init_maxval, 
+            text_data=text_data, text_color=text_color, grid=grid)
+    else:
+        viewer(boxes, figsize, 'tzxy', color=color, init_minval=init_minval,
+            init_maxval=init_maxval, text_data=text_data, 
+            text_color=text_color, grid=grid)
 
 ############################################################################
 def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, view=False):

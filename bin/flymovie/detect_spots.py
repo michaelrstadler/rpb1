@@ -3,8 +3,11 @@ import os
 from scipy import ndimage as ndi
 from scipy.spatial import distance
 from copy import deepcopy
+import ipywidgets as widgets
+import matplotlib.pyplot as plt
 
 from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology, clamp
+from .viewers import qax
 from .fitting import fitgaussian3d
 
 ############################################################################
@@ -631,3 +634,173 @@ def filter_spot_duration(connected_data, min_len):
             filtered_data[spot_num] = connected_data[spot]
             spot_num = spot_num + 1
     return filtered_data
+
+############################################################################
+def fill_missing_spots(spot_data, stack, missing_spots, output, channel=1, 
+    ij_len=50):
+    class State:
+        """State objects store the state of the viewer."""
+        def __init__(self, spot_data, stack, missing_spots, channel, 
+            ij_len):
+            # Set to -1 so that at start, will be different from int 
+            # box value (0) and trigger display
+            self.missing_spot = -1 
+            self.new_spots = []
+            self.spot_data = spot_data
+            self.stack = stack
+            self.missing_spots = missing_spots
+            self.channel = channel
+            self.ij_len = ij_len
+            self.num_slices = stack.shape[-3]
+            self.button_status = False
+            self.undo_status = False
+
+    ############################
+    # Functions used by widgets.
+    ############################
+    def _update(**kwargs):
+        """Function called when any widget change is observed."""
+        # Get widget values.
+        missing_spot = kwargs['missing_spot']
+        z = kwargs['z']
+        vert = kwargs['vert']
+        horiz = kwargs['horiz']
+        button_status = kwargs['add_spot_button']
+        undo_status = kwargs['undo']
+        
+        # If the button has been pressed, add spot.
+        if button_status != state.button_status:
+            state.button_status = button_status
+            add_spot(z, vert, horiz)
+
+        # If undo button clicked, remove last entry.
+        if undo_status != state.undo_status:
+            state.undo_status = undo_status
+            remove_last_spot()
+        
+        # If the missing_spot has been changed, display slices for the 
+        # new spot.
+        if missing_spot != state.missing_spot:
+            state.missing_spot = missing_spot
+            display_slices()
+
+    def get_last_position(missing_spot, spot_data):
+        """Find spot's last known position in i, j."""
+        spot_id, missing_frame = missing_spot
+        arr = spot_data[spot_id]
+        curr_frame, curr_i, curr_j = 0,0,0
+        # Go through all rows in this spot's data, search for entry for
+        # most recent frame prior to the missing frame. Entries do not
+        # have to be in order.
+        for row in arr:
+            row_frame = row[0]
+            # If this frame is more recent than any yet observed, update
+            # curr values.
+            if (row_frame < missing_frame) and (row_frame > curr_frame):
+                curr_frame = row_frame
+                curr_i = int(row[3])
+                curr_j = int(row[4])
+        return curr_i, curr_j
+
+    def display_slices():
+        """Display images of a window around the last known position of """
+        # Get positions to display from the frame of the missing spot and
+        # the i,j position of the spot in the most recent prior frame.
+        missing_spot_data = missing_spots[state.missing_spot]
+        i,j = get_last_position(missing_spot_data, spot_data)
+        t = missing_spot_data[1]
+
+        # Define a box in i,j around the estimated position based on 
+        # input parameter ij_len (converted to ij_rad for ease).
+        ij_rad = int(state.ij_len / 2)
+        i_min = max(0, i - ij_rad)
+        i_max = min((stack.shape[-2] - 1), i + ij_rad + 1)
+        j_min = max(0, j - ij_rad)
+        j_max = min((stack.shape[-1] - 1), j + ij_rad + 1)
+
+        # Initialize a plotting axes object, plot the box for all z
+        # slices.
+        ax = qax(state.num_slices, figsize=(12,12))
+        for z in range(len(ax)):
+            if z < state.num_slices:
+                substack = stack[channel, t, z, i_min:i_max, j_min:j_max]
+                img = ax[z].imshow(substack, cmap='Greys')
+                ax[z].set_title('z=' + str(z))
+                ax[z].grid(which="both", color="gray", alpha=0.75)
+                img.set_extent([j_min, j_max, i_max, i_min])
+                x_ticks = np.arange(j_min, j_max, 10)
+                ax[z].set_xticks(x_ticks)
+                ax[z].set_xticklabels(ax[z].get_xticks(), rotation = 45)
+                y_ticks = np.arange(i_min, i_max, 10)
+                ax[z].set_yticks(y_ticks)
+            # Plot a blank for excess axes positions.
+            else:
+                ax[z].imshow(np.zeros((state.ij_len, state.ij_len)))
+        plt.tight_layout()
+
+    def add_spot(z, vert, horiz):
+        """Add a new feature to output with the coordinate information
+        for the new spot based on information in integer boxes."""
+        spot_id, t = state.missing_spots[state.missing_spot]
+        state.new_spots.append((spot_id, t, z, vert, horiz))
+        output.append((spot_id, t, z, vert, horiz))
+
+    def remove_last_spot():
+        """Removes last entry in output array to 'undo' last add."""
+        output.pop()
+    
+    ##############################  
+    # Functions for making widgets
+    ##############################
+    def _make_box(attribute):
+        """Make an integer box."""
+        box = widgets.IntText(
+            value=0,
+            description=attribute,
+            disabled=False
+        )
+        return box
+
+    def _make_bounded_box(attribute, min_, max_):
+        """Make a bounded integer box."""
+        box = widgets.BoundedIntText(
+            value=0,
+            min=min_,
+            max=max_,
+            description=attribute,
+            disabled=False
+        )
+        return box
+
+    def _make_button(name):
+        """Make a toggle button."""
+        # Note: the standard button is incompatable with interact, so
+        # I am clunkily using a toggle button ::rolls eyes::
+        button = widgets.ToggleButton(
+            value=False,
+            description=name,
+            disabled=False,
+            button_style='',
+            tooltip=name,
+        )
+        return button
+    
+    #######
+    # Main
+    #######
+
+    # Initialize interact call, add a box for missing spot number
+    # and each axis, add a toggle button to add spot based on
+    # supplied coordinates.
+    interact_call = {} 
+    interact_call['missing_spot'] = _make_bounded_box('missing_spot', 0, len(missing_spots)-1)
+    for n in ('z', 'horiz', 'vert'):
+        func = _make_box(n)
+        interact_call[n] = func
+    interact_call['add_spot_button'] = _make_button('add_spot')
+    interact_call['undo'] = _make_button('undo')
+
+    # Initialize state object that stores the current state of
+    # the app, make interact call to initiate.
+    state = State(spot_data, stack, missing_spots, channel, ij_len)
+    widgets.interact(_update, **interact_call)
