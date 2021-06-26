@@ -1,8 +1,8 @@
 import numpy as np
 import os
+import copy
 from scipy import ndimage as ndi
 from scipy.spatial import distance
-from copy import deepcopy
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 
@@ -67,26 +67,10 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             Each entry in the list is a time point (frame). Each row in
             array is a fit (a single local maxima), columns are: 0: center 
             z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
-            3: fit_height, 4: width_z, 5: width_x, 6: width_y). Coordinates 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y. Coordinates 
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
-    
-    
-    def relabel(peak_ids, oldparams, mask):
-        """Renumber labelmask and corresponding fit parameters
-        Set background as 0, objects in order 1...end.
-        """
-        spot_data = {}
-        peak_num = 1
-        for peak in peak_ids:
-            #coords = np.where(mask == peak)
-            paramsnew = oldparams[peak-1,:] # object 1 will be fitparams row 0
-            # Rearrange params from fit function so coordinates lead.
-            spot_data[peak_num] = paramsnew[[1,2,3,0,4,5,6]]
-            peak_num = peak_num + 1
-        return spot_data
-    
     def fit_frame(stack, framenum, sigma_small, sigma_big, bg_radius, 
             fitwindow_rad_xy, fitwindow_rad_z, mode, min_distances, nucmask, 
             nucmask_dilation):
@@ -121,7 +105,7 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
                     nucalone_stack.shape)
                 peaks.append(tuple(peak))
         
-        fit_params = fit_peaks(substack, peaks, fitwindow_rad_xy, fitwindow_rad_z)
+        fit_params = fit_peaks_3Dstack(substack, peaks, fitwindow_rad_xy, fitwindow_rad_z)
         return fit_params
   
     #### Main ####
@@ -148,8 +132,30 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
         
     return fit_data
 
-def fit_peaks(stack, peaks, fitwindow_rad_xy, fitwindow_rad_z):
-    print('fitting peaks!')
+############################################################################
+def fit_peaks_3Dstack(stack, peaks, fitwindow_rad_xy, fitwindow_rad_z):
+    """Perform 3D gaussian fitting on a set of locations (peaks) in a 3D 
+    image stack.
+    
+    Args:
+        stack: ndarray
+            3D image stack
+        peaks: iterable of iterable (list of tuples)
+            Each entry in parent is a single point to fit, points consist
+            of coordinates [z, x, y]
+        fitwindow_rad_xy: int
+            'radius' of window used for fitting in xy. Length will be 
+            2 * radius + 1
+        fitwindow_rad_z: int
+            'radius' of window used for fitting in z. Height will be 
+            2 * radius + 1
+    
+    Returns:
+        fitparams: ndarray
+            Each row is a single fit result, columns are 0: center 
+            z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
+            3: fit_height, 4: width_z, 5: width_x, 6: width_y
+    """
     def get_fitwindow(data, peak, xy_rad, z_rad):
             """Retrieve section of image stack corresponding to given
             window around a point and the coordinate adjustments necessary
@@ -487,7 +493,7 @@ def connect_ms2_fits_focuscorrect(fits_orig, z_frames, z_corrs, nucmask,
     ## adjusted to correct for the refocusing.
     
     # Make a copy of fits to be altered.
-    fits_adj = deepcopy(fits_orig) 
+    fits_adj = copy.deepcopy(fits_orig) 
     # Make a vector of length equal to number of frames storing the z correction for each
     # frame (relative to first, uncorrected segment).
     frame_corrs = np.repeat(0, z_frames[0])  
@@ -811,3 +817,73 @@ def add_missing_spots(spot_data, stack, missing_spots, output, channel=1,
     # the app, make interact call to initiate.
     state = State(spot_data, stack, missing_spots, channel, ij_len)
     widgets.interact(_update, **interact_call)
+
+############################################################################
+def spot_data_apply_manual_curations(spot_data_input, new_spots, bad_spots, 
+    stack, fitwindow_rad_xy=10, fitwindow_rad_z=2, channel=1):
+    """Update spot_data object with results of manual curation.
+
+    Entries corresponding to bad spots are removed. New spots are fitted
+    with a 3D gaussian function and and added in place (entries for
+    each spot are in order of ascending frame number). An updated copy of
+    spot_data is returned.
+
+    Args:
+        spot_data: dict of ndarrays
+            Original spot_data object
+        new_spots: iterable of tuples
+            List of spot entries to add
+            Each entry in parent is a different spot, entries contain
+            spot id number and coordinates: [spot_id, frame (t), z, x, y]
+        bad_spots: iterable of tuples
+            List of spots entries to remove. Entries are tuples with 
+            [spot_id, frame (t)]
+        stack: ndarray
+            5D image stack associate with spot_data
+        fitwindow_rad_xy: int
+            Radius in pixels in the xy-dimension of the window around local
+            maxima peaks within which to do gaussian fitting.
+        fitwindow_rad_z: int
+            Radius in pixels in the z-dimension of the window around local
+            maxima peaks within which to do gaussian fitting.
+        channel: int
+            Channel (first dim.) of stack to use for fitting
+    
+    Return:
+        spot_data: dict of ndarray
+            Copy of input spot_data with manually curated updates
+    """
+    # Make a copy of input spot_data.
+    spot_data = copy.deepcopy(spot_data_input)
+    # Delete entries for bad spots.
+    for spot in bad_spots:
+        spot_id, frame = spot
+        if (frame in spot_data[spot_id][:,0]):
+            rownum_to_delete = np.where(spot_data[spot_id][:,0] == frame)[0][0]
+            spot_data[spot_id] = np.delete(spot_data[spot_id], 
+                rownum_to_delete, 0)
+        else:
+            raise ValueError('No spot corresponding to bad spot ' + 
+                str(spot))
+    
+    # Add new entries for new spots.
+    for spot in new_spots:
+        spot_id, t, z, x, y = spot
+        if t in spot_data[spot_id][:,0]:
+            raise ValueError('Spot ' + str(spot_id) + 
+                ' already has an entry for frame ' + str(t))
+        # Perform gaussian fitting at new coordinates, get parameters.
+        coords = [[z,x,y]]
+        fit_params = fit_peaks_3Dstack(stack[channel, t], coords, 
+            fitwindow_rad_xy, fitwindow_rad_z)
+        height, z_width, x_width, y_width = fit_params[0, 3:]
+        # Get nucleus ID of spot.
+        nuc_id = spot_data[spot_id][0,1]
+        # Create new row by adding nucleus and fitting parameters.
+        new_row = np.expand_dims(np.array([t, nuc_id, z, x, y, height, 
+            z_width, x_width, y_width]), 0)
+        # Add new row to the end of current ndarray, sort by frame number (time).
+        spot_array = np.concatenate((spot_data[spot_id], new_row))
+        spot_array_sorted = spot_array[np.argsort(spot_array[:,0])]
+        spot_data[spot_id] = spot_array_sorted
+    return spot_data

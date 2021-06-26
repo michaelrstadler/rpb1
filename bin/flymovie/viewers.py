@@ -340,7 +340,7 @@ def box_spots(stack, spot_data, max_mult=1.3, halfwidth_xy=15,
 def quickview_ms2(stack, spot_data, channel=0, figsize=12, MAX=True, 
     halfwidth_xy=8, halfwidth_z=8, spotmode=False, spot_id='all', 
     color='cividis', init_minval=0, init_maxval=1000000, shadows=True,
-    text_color='yellow', grid=False):
+    text_color='red', grid=False):
     """View image stack with boxes drawn around detected spots
     
     Args:
