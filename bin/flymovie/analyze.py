@@ -409,7 +409,8 @@ def spot_data_bleach_correct_constantdepth(spot_data, stack, channel,
     return spot_data_corr
 
 #######################################################################
-def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
+def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True, 
+    figsize=None):
     """Plot individual traces from MS2 spot pandas dfs with a minimum 
     trajectory length filter.
     
@@ -433,13 +434,16 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
         """Normalize traces given upper and lower bounds"""
         return (df.iloc[:,x] - lower) / (upper - lower)
     
-    def df_filter_trajlen(df, df_to_count, minlen):
+    def df_process(df, df_to_count, minlen):
         """Filter pandas df columns for minimum number of non-nan entries."""
-        return  df.loc[:,df_to_count.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
+        df_minlen =  df.loc[:,df_to_count.apply(lambda x: np.count_nonzero(~np.isnan(x)), axis=0) > minlen]
+        grand_min = np.nanmin(df.to_numpy().flatten())
+        df_nan_to_zero = df_minlen.fillna(grand_min)
+        return df_nan_to_zero
     
     # Filter input dfs for trajectory length.
-    df1_processed = df_filter_trajlen(df1, df1, minlen)
-    df2_processed = df_filter_trajlen(df2, df1, minlen)
+    df1_processed = df_process(df1, df1, minlen)
+    df2_processed = df_process(df2, df1, minlen)
     
     # Get limits for normalization.
     if norm:
@@ -456,14 +460,14 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True):
             plt.plot(norm_trace(df1_processed, x, df1_lower, df1_upper))
             plt.plot(norm_trace(df2_processed, x, df2_lower, df2_upper))
         else:
-            #plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma))
-            #plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma))
-            plt.plot(df1_processed.iloc[:,x])
-            plt.plot(df2_processed.iloc[:,x])
+            plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma), linewidth=2)
+            plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma), linewidth=2)
+            #plt.plot(df1_processed.iloc[:,x])
+            #plt.plot(df2_processed.iloc[:,x])
         plt.title(df1_processed.columns[x])
     
     # Multiplot using plot_ps.
-    plot_ps(plot_function, range(0,num_to_plot))
+    plot_ps(plot_function, range(0,num_to_plot), figsize=figsize)
 
 ############################################################################
 def spotdf_plot_traces_bleachcorrect(df1, df2, minlen, stack4d, sigma=0.8, 
@@ -820,6 +824,26 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
         """Return value of exponential function a * e^(-b * depth) + c."""
         return a * np.exp(-b * depth) + c
     
+    def move_to_nearest_nonzero(pos_depth, intensity, paramgrids):
+        """For points below the curve of valid values in paramgrids, match
+        a and b (shape) parameters from nearest valid point, find intercept,
+        return parameters. Conceptually, at the indicated depth the intensity
+        is below what we have data for and doesn't have valid parameter values
+        because of the way interpolation works. As a solution, we match the
+        shape of the very bottom curve, find the intercept to make a curve 
+        with the same shape but at the location that intersects our point,
+        and use that curve for correction."""
+        # Find the a and b values of the first non-zero intensity value
+        # for the supplied depth.
+        grid_row = paramgrids[0][pos_depth, :]
+        depth = pos_depth * 0.1
+        first_nonzero_col = np.argmax(grid_row != 0)
+        a = paramgrids[0][pos_depth, first_nonzero_col]
+        b = paramgrids[1][pos_depth, first_nonzero_col]
+        # Calculate intercept (c) from exponential using a, b, and depth.
+        c = intensity - (a * np.exp(-b * depth))
+        return a, b, c
+
     paramgrid_a, paramgrid_b, paramgrid_c = paramgrids
     spot_data_corr = copy.deepcopy(spot_data)
     # Go through every line in spot_data.
@@ -841,6 +865,11 @@ def spot_data_depth_correct_stdcandle(spot_data, paramgrids,
                 a = paramgrid_a[paramgrid_position_depth, paramgrid_position_intensity]
                 b = paramgrid_b[paramgrid_position_depth, paramgrid_position_intensity]
                 c = paramgrid_c[paramgrid_position_depth, paramgrid_position_intensity]
+            # If position is below region with valid values (b is only 0 for invalid positions),
+            # use the shape of the curve through the nearest valid point to make a curve
+            # for correction.
+            if (b == 0):
+                a, b, c = move_to_nearest_nonzero(paramgrid_position_depth, intensity, paramgrids)
             intensity_corr = calc_exponential(target_depth, a, b, c)
             spot_data_corr[spot_id][row, col_to_correct] = intensity_corr
     
@@ -1158,6 +1187,10 @@ def mv_process_apply_corrections(mv, paramgrids,
     mv.spot_data_bleachcorr = spot_data_bleachcorr
     mv.spot_data_depthcorr_stdcandle = spot_data_depthcorr_stdcandle
     mv.spot_data_depthcorr_fromdata = spot_data_depthcorr_fromdata
+    mv.ms2_uncorr = movie.make_spot_table(spot_data_plusdepth, 9)
+    mv.prot_uncorr = movie.make_spot_table(spot_data_plusdepth, 11)
+    mv.ms2_bleachcorr = movie.make_spot_table(spot_data_bleachcorr, 9)
+    mv.prot_bleachcorr = movie.make_spot_table(spot_data_bleachcorr, 11)
     mv.ms2_stdcandle = movie.make_spot_table(spot_data_depthcorr_stdcandle, 9)
     mv.ms2_fromdata = movie.make_spot_table(spot_data_depthcorr_fromdata, 9)
     mv.prot_stdcandle = movie.make_spot_table(spot_data_depthcorr_stdcandle, 11)

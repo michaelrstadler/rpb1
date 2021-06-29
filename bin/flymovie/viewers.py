@@ -226,7 +226,7 @@ def qax(n, ncol=4, figsize=None):
     return ax1d
 
 ############################################################################
-def plot_ps(func, span=range(0,8)):
+def plot_ps(func, span=range(0,8), figsize=None):
     """Plot a parameter series in a specified range
     
     User supplies a plotting function that takes a single integer input as
@@ -248,7 +248,7 @@ def plot_ps(func, span=range(0,8)):
             Range object containing values of parameter to plot. 
     """
     nplots = len(span)
-    ax = qax(int(len(span)))
+    ax = qax(int(len(span)), figsize=figsize)
     for pln in range(0, len(span)):
         plt.sca(ax[pln])
         func(span[pln])

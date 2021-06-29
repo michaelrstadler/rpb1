@@ -7,7 +7,7 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 
 from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology, clamp
-from .viewers import qax
+from .viewers import qax, spot_movies
 from .fitting import fitgaussian3d
 
 ############################################################################
@@ -651,6 +651,32 @@ def filter_spot_duration(connected_data, min_len):
 ############################################################################
 def add_missing_spots(spot_data, stack, missing_spots, output, channel=1, 
     ij_len=50):
+    """Create user-interactive interface for adding missing spots and 
+    removing incorrectly-called spots.
+    
+    Args:
+        spot_data: dict of ndarrays
+            spot_data object
+        stack: ndarray
+            Image stack associated with spot_data
+        missing_spots: iterable of iterable
+            List of missing spots, each list entry is a missing spot, entry
+            is tuple of [spot_id, frame number]
+        output: list of tuples
+            Empty list that is changed in place to contain user-selected 
+            spot locations. List entries are tuples [spot_id, frame number,
+            z, x, y]
+        channel: int
+            Channel in stack to display (channel with spots)
+        ij_len: int
+            Side length of the window to display around spots
+
+    Returns:
+        output: list of tuples
+            Because of weirdness of Jupyter widgets, returning is difficult,
+            so I use the somewhat clunky solution of supplying a mutable
+            object (list) and changing it in place via the widgets.
+    """
     class State:
         """State objects store the state of the viewer."""
         def __init__(self, spot_data, stack, missing_spots, channel, 
@@ -701,15 +727,17 @@ def add_missing_spots(spot_data, stack, missing_spots, output, channel=1,
         """Find spot's last known position in i, j."""
         spot_id, missing_frame = missing_spot
         arr = spot_data[spot_id]
-        curr_frame, curr_i, curr_j = 0,0,0
+        curr_frame, curr_i, curr_j, closest_frame_dist = 0,0,0, np.inf
         # Go through all rows in this spot's data, search for entry for
         # most recent frame prior to the missing frame. Entries do not
         # have to be in order.
         for row in arr:
             row_frame = row[0]
+            frame_dist = abs(row_frame - missing_frame)
             # If this frame is more recent than any yet observed, update
             # curr values.
-            if (row_frame < missing_frame) and (row_frame > curr_frame):
+            if (frame_dist < closest_frame_dist):
+                closest_frame_dist = frame_dist
                 curr_frame = row_frame
                 curr_i = int(row[3])
                 curr_j = int(row[4])
@@ -887,3 +915,15 @@ def spot_data_apply_manual_curations(spot_data_input, new_spots, bad_spots,
         spot_array_sorted = spot_array[np.argsort(spot_array[:,0])]
         spot_data[spot_id] = spot_array_sorted
     return spot_data
+
+def plot_projections(mv):
+    """Examine time-averaged xy (Z-projection) and xz views of each spot."""
+    sm = spot_movies(mv.stack, mv.spot_data, 1,17, fill=0, view=False)
+
+    for x in range(1,len(sm)):
+        xy = sm[x].mean(axis=(0,1))
+        xz = sm[x].mean(axis=(0,2))
+        fig, ax = plt.subplots(1,2)
+        ax[0].imshow(xy)
+        ax[0].set_title(x)
+        ax[1].imshow(xz)
