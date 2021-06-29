@@ -952,7 +952,8 @@ def spot_data_depth_correct_fromdata(spot_data, col_to_correct=9,
     fit_minbin = int(fit_depth_min / 0.5)
     fit_maxbin = int(fit_depth_max / 0.5)
     means_subset = means_bydepth[fit_minbin:fit_maxbin]
-    (a,b,c),_ = scipy.optimize.curve_fit(exp_func, depths, means_subset, maxfev=100000)
+    (a,b,c),_ = scipy.optimize.curve_fit(exp_func, depths, means_subset, 
+        p0=(1e6, 1e-5, 1e6), maxfev=100000)
 
     # Correct all values in indicated column based on fitted depth v. intensity
     # function.
@@ -1153,14 +1154,14 @@ def mv_process_apply_corrections(mv, paramgrids,
         spot_data_plusdepth, stack, spotchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
         (9, 10), ref_depth=mean_depth, nucmask=nucmask, 
-        print_ref_slices=True, plot_title='Spot Channel')
+        print_ref_slices=False, plot_title='Spot Channel')
 
     # Correct protein channel.
     spot_data_bleachcorr = spot_data_bleach_correct_constantdepth(
         spot_data_bleachcorr, stack, protchannel, surface_before, surface_after, 
         stack_start_positions, join_frames, z_interval, cols_to_correct=
         [11], ref_depth=mean_depth, nucmask=nucmask,
-        print_ref_slices=True, plot_title='Prot Channel')
+        print_ref_slices=False, plot_title='Prot Channel')
 
     # Plot results of bleach correction as mean intensity vs. time boxplots.
     plot_bleaching_corr(spot_data_plusdepth, spot_data_bleachcorr, nframes, 
