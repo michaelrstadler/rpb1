@@ -7,7 +7,7 @@ from skimage.filters.thresholding import threshold_li, threshold_otsu
 from skimage.segmentation import flood_fill, watershed
 from scipy.stats import mode
 from skimage.measure import label, regionprops
-from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand_mip
+from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand_mip, relabel_labelmask
 
 ############################################################################    
 ############################################################################
@@ -91,6 +91,11 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
     labelmask = ws
 
     if (display):
+        if usemax:
+            mask = np.expand_dims(mask, 0)
+            seeds = np.expand_dims(seeds, 0)
+            stack_smooth = np.expand_dims(stack_smooth, 0)
+            grad = np.expand_dims(grad, 0)
         fig, ax = plt.subplots(3,2, figsize=(10,10))
         # Display mask.
         ax[0][0].imshow(mask.max(axis=0))
@@ -110,7 +115,7 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
         # Display final mask.
         ax[2][0].imshow(labelmask.astype('bool').max(axis=0))
         ax[2][0].set_title('Final Segmentation')
-
+        
     if return_intermediates:
         return (mask, grad, seeds, ws)
     return labelmask

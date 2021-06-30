@@ -409,7 +409,7 @@ def spot_data_bleach_correct_constantdepth(spot_data, stack, channel,
     return spot_data_corr
 
 #######################################################################
-def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True, 
+def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True, 
     figsize=None):
     """Plot individual traces from MS2 spot pandas dfs with a minimum 
     trajectory length filter.
@@ -429,9 +429,11 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True,
     
     Returns: none 
     """
-    
-    def norm_trace(df, x, lower, upper):
+    dfs = copy.deepcopy(df_list)
+    def norm_trace(df, x):
         """Normalize traces given upper and lower bounds"""
+        lower = np.nanmin(df.iloc[:,x])
+        upper = np.nanmax(df.iloc[:,x])
         return (df.iloc[:,x] - lower) / (upper - lower)
     
     def df_process(df, df_to_count, minlen):
@@ -442,32 +444,32 @@ def spotdf_plot_traces(df1, df2, minlen, sigma=0.8, norm=True,
         return df_nan_to_zero
     
     # Filter input dfs for trajectory length.
-    df1_processed = df_process(df1, df1, minlen)
-    df2_processed = df_process(df2, df1, minlen)
-    
+    for i in range(0, len(dfs)):
+        dfs[i] = df_process(dfs[i], dfs[i], minlen)
+
     # Get limits for normalization.
     if norm:
-        df1_lower, df1_upper = np.nanpercentile(df1_processed.to_numpy().flatten(), [5, 95])
-        df2_lower, df2_upper = np.nanpercentile(df2_processed.to_numpy().flatten(), [5, 95])
+        for i in range(0, len(dfs)):
+            lower, upper = np.nanpercentile(dfs[i].to_numpy().flatten(), [5, 95])
+            dfs[i] = dfs[i].apply(norm_trace, 0)
     
-    num_to_plot=df1_processed.shape[1]
+    num_to_plot=dfs[0].shape[1]
     
     # Define function for making each plot.
     def plot_function(x):
-        if norm:
-            #plt.plot(ndi.gaussian_filter1d(norm_trace(df1_processed, x, df1_lower, df1_upper), sigma))
-            #plt.plot(ndi.gaussian_filter1d(norm_trace(df2_processed, x, df2_lower, df2_upper), sigma))
-            plt.plot(norm_trace(df1_processed, x, df1_lower, df1_upper))
-            plt.plot(norm_trace(df2_processed, x, df2_lower, df2_upper))
-        else:
-            plt.plot(ndi.gaussian_filter1d(df1_processed.iloc[:,x], sigma), linewidth=2)
-            plt.plot(ndi.gaussian_filter1d(df2_processed.iloc[:,x], sigma), linewidth=2)
-            #plt.plot(df1_processed.iloc[:,x])
-            #plt.plot(df2_processed.iloc[:,x])
-        plt.title(df1_processed.columns[x])
+        for df in dfs:
+            plt.plot(ndi.gaussian_filter1d(df.iloc[:,x], sigma), linewidth=2)
+            plt.title(df.columns[x])
+
+        
     
     # Multiplot using plot_ps.
+    
+    if figsize is None:
+        nrow = int(np.ceil(dfs[0].shape[1] / 4))
+        figsize=(16, 1.5*nrow)
     plot_ps(plot_function, range(0,num_to_plot), figsize=figsize)
+    plt.tight_layout()
 
 ############################################################################
 def spotdf_plot_traces_bleachcorrect(df1, df2, minlen, stack4d, sigma=0.8, 
