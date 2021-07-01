@@ -1017,7 +1017,7 @@ def mv_process_apply_corrections(mv, paramgrids,
     surface_before, surface_after, join_frames, stack_start_positions, 
     z_interval=0.5, spotchannel=1, protchannel=0, ij_rad=3, z_rad=1.1, 
     ij_scale=1, z_scale=1, plotting_ylim=1e4, spot_data_orig=None, stack=None,
-    nucmask=None):
+    nucmask=None, fit_depth_min=12, fit_depth_max=20):
     """Process initialized movies to integrate signal around detected spots,
     correct for bleaching, correct for sample depth, and generate dataframes
     with processed, corrected data.
@@ -1182,8 +1182,8 @@ def mv_process_apply_corrections(mv, paramgrids,
     for col_to_correct in (9, 11):
         spot_data_depthcorr_fromdata = spot_data_depth_correct_fromdata(
             spot_data_depthcorr_fromdata, col_to_correct=col_to_correct, col_depth=12, 
-            target_depth=mean_depth, fit_depth_min=12, fit_depth_max=25, 
-            plot_title=colnames[col_to_correct])
+            target_depth=mean_depth, fit_depth_min=fit_depth_min, 
+            fit_depth_max=fit_depth_max, plot_title=colnames[col_to_correct])
 
     # Generate dataframes, add data structures to movie.
     mv.spot_data_plusdepth = spot_data_plusdepth

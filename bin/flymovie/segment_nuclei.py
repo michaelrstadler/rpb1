@@ -121,6 +121,113 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
     return labelmask
 
 ############################################################################
+def segment_nuclei_3Dstack_victoria(stack, min_nuc_center_dist=25, sigma=5, 
+    usemax=False, display=False, return_intermediates=False, 
+    seed_window=None):
+    """Segment nuclei from Rpb1 fluorescence in confocal data.
+    
+    Algorithm is smooth -> threshold -> gradient -> distance transform to 
+    find seeds -> take gradient on binary mask -> watershed on gradient. 
+    Does not do any filtering on resulting segmented objects.
+   
+    Args:
+        stack: ndarray
+            3D image stack of dimensions [z, x, y].
+        seed_window: tuple of three ints
+            Size in [z, x, y] for window for determining local maxes in 
+            distance transform. A point is retained as a seed if there
+            exists some window of this size in the image for which the point
+            is the max value. Generally want size to be a little less than 2x 
+            the distance between nuclear centers. Centers closer than this 
+            will not produce two seeds.
+        min_nuc_center_dist: numeric
+            The minimum euclidean distance (in pixels) allowed between watershed
+            seeds. Typically set as ~the diameter of the nuclei.   
+        sigma: numeric
+            Sigma for use in initial gaussian smoothing
+        usemax: bool
+            Use maximum intensity projection (in Z) for segmenting
+        return_intermediates: bool
+            Return (mask, grad, seeds, ws) for troubleshooting
+        seed_window: tuple of ints
+            [Optional] 
+            Size in [z, x, y] for window for determining local maxes in 
+            distance transform. A point is retained as a seed if there
+            exists some window of this size in the image for which the point
+            is the max value. Generally want size to be a little less than 2x 
+            the distance between nuclear centers. Centers closer than this 
+            will not produce two seeds. If None, then a seed window is 
+            automatically generated from min_nuc_center_dist so that the
+            diagonal of the box is equal to twice this distance.
+    
+    Returns:
+        labelmask: ndarray
+            Mask of same shape as input stack with nuclei segmented and labeled
+    
+    """
+    # Generate seed window if none supplied.
+    if seed_window is None:
+        # Window set such that the diagonal is equal to 2 * min_nuc_center_dist.
+        seed_window = (stack.shape[0], (min_nuc_center_dist * 2) / np.sqrt(2), (min_nuc_center_dist * 2) / np.sqrt(2))
+        # Remove first dimension if max projection used.
+        if usemax:
+            seed_window = seed_window[1:]
+
+    # Smooth stack using a Gaussian filter.
+    if usemax:
+        stack_medfilt = ndi.median_filter(stack.max(axis=0), 15)
+        stack_smooth = ndi.gaussian_filter(stack_medfilt, sigma)
+    else:
+        stack_smooth = ndi.gaussian_filter(stack, sigma)
+    # Define a threshold for nuclear signal.
+    thresh = threshold_li(stack_smooth)
+    print(thresh)
+    # Make a binary mask using threshold.
+    mask = np.where(stack_smooth > thresh, 1, 0)
+    # Take the gradient of the mask to produce outlines for use in watershed algorithm.
+    grad = gradient_nD(mask)
+    # Perform distance transform and run local max finder to determine watershed seeds.
+    dist = ndi.distance_transform_edt(mask)
+    seeds, _ = peak_local_max_nD(dist, size=seed_window, min_dist=min_nuc_center_dist)
+    # Perform watershed segmentation.
+    ws = watershed(grad, seeds.astype(int))
+    # Filter object size and circularity, relabel to set background to 0.
+    if usemax:
+        ws = np.repeat(np.expand_dims(ws, axis=0), stack.shape[0], axis=0)
+    labelmask = ws
+
+    if (display):
+        if usemax:
+            mask = np.expand_dims(mask, 0)
+            seeds = np.expand_dims(seeds, 0)
+            stack_smooth = np.expand_dims(stack_smooth, 0)
+            grad = np.expand_dims(grad, 0)
+        fig, ax = plt.subplots(3,2, figsize=(10,10))
+        # Display mask.
+        ax[0][0].imshow(mask.max(axis=0))
+        ax[0][0].set_title('Initial Mask')
+        # Display watershed seeds.
+        seeds_vis = ndi.morphology.binary_dilation(seeds.max(axis=0), structure=np.ones((8,8)))
+        ax[0][1].imshow(stack_smooth.max(axis=0), alpha=0.5)
+        ax[0][1].imshow(seeds_vis, alpha=0.5)
+        ax[0][1].set_title('Watershed seeds')
+        # Display gradient.
+        ax[1][0].imshow(grad.max(axis=0))
+        ax[1][0].set_title('Gradient')
+        # Display watershed output.
+        ws = relabel_labelmask(ws)
+        ax[1][1].imshow(ws.astype('bool').max(axis=0))
+        ax[1][1].set_title('Watershed')
+        # Display final mask.
+        ax[2][0].imshow(labelmask.astype('bool').max(axis=0))
+        ax[2][0].set_title('Final Segmentation')
+        
+    if return_intermediates:
+        return (mask, grad, seeds, ws)
+    return labelmask
+
+
+############################################################################
 def segment_nuclei_4dstack(stack, seg_func, **kwargs):
     """Perform segmentation on a time-series of 3D stacks
     

@@ -5,6 +5,8 @@ from scipy import ndimage as ndi
 from scipy.spatial import distance
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
+from skimage.filters import thresholding
+import skimage as ski
 
 from .general_functions import dog_filter, peak_local_max_nD, labelmask_apply_morphology, clamp
 from .viewers import qax, spot_movies
@@ -13,7 +15,8 @@ from .fitting import fitgaussian3d
 ############################################################################
 def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4, 
         fitwindow_rad_xy=10, fitwindow_rad_z=2, mode='mindist', 
-        min_distances=(70,50,50), nucmask=None, nucmask_dilation=5):  
+        min_distances=(70,50,50), nucmask=None, nucmask_dilation=5, 
+        max_objects_inframe=200):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
     Algorithm: bandbass filter -> background subtraction -> find candidate
@@ -71,15 +74,50 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             are adjusted so that if fit center lies outside the image, 
             center is moved to the edge.
     """
+    def get_threshold(stack, sigma_small, sigma_big, bg_radius):
+        """Get threshold via Otsu method using a subset of the stack."""
+        def get_start_stop(stack, rel_idx):
+            start = stack.shape[rel_idx] * 0.3
+            stop = stack.shape[rel_idx] * 0.7
+            return int(start), int(stop)
+        # Take roughly the middle of the stack.
+        j_start, j_stop = get_start_stop(stack, -1)
+        i_start, i_stop = get_start_stop(stack, -2)
+        t_start, t_stop = get_start_stop(stack, -4)
+        thresholds = []
+        # Find the otsu threshold for the processed version at each frame,
+        # return the maximum threshold for any frame.
+        for frame in range(t_start, t_stop):
+            substack = stack[frame, :, i_start:i_stop, j_start:j_stop]
+            # Filter and background subtract image.
+            dog = dog_filter(substack, sigma_small, sigma_big)
+            bg = ndi.filters.minimum_filter(dog, bg_radius)
+            dog_bs = dog - bg
+            thresholds.append(thresholding.threshold_otsu(dog_bs))
+        return np.max(thresholds)
+
     def fit_frame(stack, framenum, sigma_small, sigma_big, bg_radius, 
             fitwindow_rad_xy, fitwindow_rad_z, mode, min_distances, nucmask, 
-            nucmask_dilation):
+            nucmask_dilation, threshold):
         """Perform 3D gaussian fitting on a 3D image stack."""
         substack = stack[framenum]
         # Filter and background subtract image.
         dog = dog_filter(substack, sigma_small, sigma_big)
         bg = ndi.filters.minimum_filter(dog, bg_radius)
         dog_bs = dog - bg
+
+        # For threshold mode, candidate spots for fitting are those over 
+        # threshold.
+        if mode == 'threshold':
+            peaks = []
+            bin_mask = np.where(dog > threshold, 1, 0)
+            conn_comp, _ = ndi.label(bin_mask)
+            props = ski.measure.regionprops(conn_comp)
+            for id_ in range(0, len(props)):
+                centroid = props[id_].centroid
+                # Convert floats to ints.
+                centroid = tuple([int(x) for x in centroid])
+                peaks.append(centroid)
 
         # For mindist mode, find local maxima and assign to peaks.
         if mode == 'mindist':
@@ -109,16 +147,21 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
         return fit_params
   
     #### Main ####
-    if mode not in ('mindist', 'nucleus'):
+    if mode not in ('mindist', 'nucleus', 'threshold'):
         raise ValueError('Invalid mode')
     
     if (mode == 'nucleus') and (nucmask is None):
         raise ValueError('Must supply a nuclear mask for nucleus mode')
 
+    threshold = None
+    if mode == 'threshold':
+        threshold = get_threshold(stack, sigma_small, sigma_big, bg_radius)
+        
     # Do fitting on first frame.
     fit_data_frame0 = fit_frame(stack, 0, sigma_small, 
         sigma_big, bg_radius, fitwindow_rad_xy, 
-        fitwindow_rad_z, mode, min_distances, nucmask, nucmask_dilation)
+        fitwindow_rad_z, mode, min_distances, nucmask, nucmask_dilation, 
+        threshold)
     # Make fit_data a list of ndarrays.
     fit_data = [fit_data_frame0]
     # Fit the rest of the frames, add their data to fit_data.
@@ -127,7 +170,7 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
         fit_data_thisframe = fit_frame(stack, framenum, sigma_small, 
                    sigma_big, bg_radius, fitwindow_rad_xy, 
                    fitwindow_rad_z, mode, min_distances, nucmask, 
-                   nucmask_dilation)
+                   nucmask_dilation, threshold)
         fit_data.append(fit_data_thisframe)
         
     return fit_data
@@ -916,9 +959,9 @@ def spot_data_apply_manual_curations(spot_data_input, new_spots, bad_spots,
         spot_data[spot_id] = spot_array_sorted
     return spot_data
 
-def plot_projections(mv):
+def plot_projections(mv, channel=1):
     """Examine time-averaged xy (Z-projection) and xz views of each spot."""
-    sm = spot_movies(mv.stack, mv.spot_data, 1,17, fill=0, view=False)
+    sm = spot_movies(mv.stack, mv.spot_data, channel,17, fill=0, view=False)
 
     for x in range(1,len(sm)):
         xy = sm[x].mean(axis=(0,1))
