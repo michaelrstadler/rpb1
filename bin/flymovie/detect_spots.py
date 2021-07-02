@@ -16,7 +16,7 @@ from .fitting import fitgaussian3d
 def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4, 
         fitwindow_rad_xy=10, fitwindow_rad_z=2, mode='mindist', 
         min_distances=(70,50,50), nucmask=None, nucmask_dilation=5, 
-        max_objects_inframe=200):  
+        use_thresh=False):  
     """Perform 3D gaussian fitting on local maxima in a 4D image stack
     
     Algorithm: bandbass filter -> background subtraction -> find candidate
@@ -64,7 +64,11 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             morphologically dilate supplied nuclear mask. This is useful to 
             ensure that spots near the nuclear edge are not lost due to small 
             errors in nuclear masking.
-    
+        use_thresh: bool
+            ['mindist' mode only] If true, Otsu thresholding is used to
+            screen candidate spots before fitting. Considerably reduces
+            computational time when using small minimum distances.
+
     Returns:
         fit_data: list of ndarrays
             Each entry in the list is a time point (frame). Each row in
@@ -75,7 +79,8 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             center is moved to the edge.
     """
     def get_threshold(stack, sigma_small, sigma_big, bg_radius):
-        """Get threshold via Otsu method using a subset of the stack."""
+        """Get spot threshold via Otsu method using a subset of the 
+        stack."""
         def get_start_stop(stack, rel_idx):
             start = stack.shape[rel_idx] * 0.3
             stop = stack.shape[rel_idx] * 0.7
@@ -100,31 +105,25 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
             fitwindow_rad_xy, fitwindow_rad_z, mode, min_distances, nucmask, 
             nucmask_dilation, threshold):
         """Perform 3D gaussian fitting on a 3D image stack."""
+        peak_window_size = (min_distances[0] * 2 + 1, min_distances[1] * 2 + 1, 
+                min_distances[2] * 2 + 1)
         substack = stack[framenum]
         # Filter and background subtract image.
         dog = dog_filter(substack, sigma_small, sigma_big)
         bg = ndi.filters.minimum_filter(dog, bg_radius)
         dog_bs = dog - bg
 
-        # For threshold mode, candidate spots for fitting are those over 
-        # threshold.
-        if mode == 'threshold':
-            peaks = []
-            bin_mask = np.where(dog > threshold, 1, 0)
-            conn_comp, _ = ndi.label(bin_mask)
-            props = ski.measure.regionprops(conn_comp)
-            for id_ in range(0, len(props)):
-                centroid = props[id_].centroid
-                # Convert floats to ints.
-                centroid = tuple([int(x) for x in centroid])
-                peaks.append(centroid)
-
         # For mindist mode, find local maxima and assign to peaks.
-        if mode == 'mindist':
-            peak_window_size = (min_distances[0] * 2 + 1, min_distances[1] * 2 + 1, 
-                min_distances[2] * 2 + 1)
+        if mode == 'mindist': 
             _, peaks = peak_local_max_nD(dog_bs, peak_window_size)
-        
+            if threshold is not None:
+                good_peaks = []
+                for peak in peaks:
+                    val = dog_bs[peak]
+                    if val >= threshold:
+                        good_peaks.append(peak)
+                peaks = good_peaks
+                
         # For nucleus mode, find maximum in each nucleus and add position to peaks.
         elif mode == 'nucleus':
             nucmask_thisframe = nucmask[framenum]
@@ -147,14 +146,14 @@ def fit_ms2(stack, sigma_small=1, sigma_big=4, bg_radius=4,
         return fit_params
   
     #### Main ####
-    if mode not in ('mindist', 'nucleus', 'threshold'):
+    if mode not in ('mindist', 'nucleus'):
         raise ValueError('Invalid mode')
     
     if (mode == 'nucleus') and (nucmask is None):
         raise ValueError('Must supply a nuclear mask for nucleus mode')
 
     threshold = None
-    if mode == 'threshold':
+    if use_thresh:
         threshold = get_threshold(stack, sigma_small, sigma_big, bg_radius)
         
     # Do fitting on first frame.
@@ -299,7 +298,7 @@ def filter_ms2fits(fit_data, peakiness=4.5, stack=None, channel=1):
     return fit_data
 
 ############################################################################
-def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10, 
+def connect_ms2_frames_nearest(fit_data, nucmask, max_frame_gap=1, max_jump=10, 
     scale_xy=1, scale_z=1):
     """Connect detected MS2 spots in a single movie through multiple time 
     frames based on the distance between spots.
@@ -310,7 +309,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
     connected to spots from prior frames are initialized as new spots.
     
     Args:
-        spot_data: list of ndarrays
+        fit_data: list of ndarrays
             Each entry in list is a distinct frame (in time), rows in array
             are individual detected spots and columns are 0: center 
             z-coordinate, 1: center x-coordinate, 2: center y-coordinate, 
@@ -348,9 +347,9 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         connected_data[new_id] = np.expand_dims(new_spot_data, 0)
 
 
-    def get_peakiness(spot_data):
+    def get_peakiness(fit_data):
         """Determine peakiness for a spot from height and mean of x- and y- widths"""
-        return spot_data[3] / np.mean((spot_data[5], spot_data[6]))
+        return fit_data[3] / np.mean((fit_data[5], fit_data[6]))
 
     def sq_euc_distance(coords1, coords2, scale_z=1, scale_xy=1):
         """Find the squared euclidean distance between two points."""
@@ -373,7 +372,6 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
                 coord_list.append(spot_coords)
         return coord_list
             
-    
     def find_nearest_spot(this_coord, coord_list, scale_z, scale_xy):
         """For a given point, find the closest spot in a coordinate list
         and the distance between the points."""
@@ -404,6 +402,9 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
                 if (len(spot_coords_tlag) == 0):
                     break
                 nearest_spot_id, dist, nearest_spot_coords = find_nearest_spot(this_spot_coords, spot_coords_tlag, scale_z, scale_xy)
+                # To avoid race condition later when replacing a row, copy original data
+                # for this spot.
+                nearest_spot_data_orig = copy.copy(connected_data[nearest_spot_id])
                 # Check is spot is within max distance.
                 if (dist <= max_jump):
                     this_spot_nucID = this_spot_data[1]
@@ -425,11 +426,15 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
                         # existing and initialize it as a new spot.
                         if (dist < existing_dist):
                             row_index = np.where(connected_data[nearest_spot_id][:,0] == t)[0][0]
-                            superseded_spot_data = connected_data[nearest_spot_id][row_index]
+                            # Warning: if connected_data is used here (and re-assigned a few lines later),
+                            # produces unstable race condition and this doesn't perform as expected.
+                            superseded_spot_data = nearest_spot_data_orig[row_index]
+                            #superseded_spot_data = connected_data[nearest_spot_id][row_index]
                             # Superseded spot from this frame gets bumped to be a new spot.
                             initialize_new_spot(superseded_spot_data, connected_data)
                             # Replace data for superseded spot with this spot's data.
                             connected_data[nearest_spot_id][row_index] = this_spot_data
+                            #print('3: ' + str(superseded_spot_data) + '\n' + str(this_spot_data))
                             return
 
         # If no suitable spot was found in previous frames, make a new spot.
@@ -447,8 +452,9 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
 
 
     def add_time_nuc(this_spot_data, t, nucmask):
-        """ Append the frame number (t) and nucleus ID to front of spot_data"""
-        # Combine frame number and zxy to for coordinate tuple, accounting for out-of-bounds z-coordinates due to re-focus adjustments.
+        """ Append the frame number (t) and nucleus ID to front of this_spot_data"""
+        # Combine frame number and zxy to for coordinate tuple, accounting 
+        # for out-of-bounds z-coordinates due to re-focus adjustments.
         spot_coords = tuple(np.concatenate((
             [t], 
             this_spot_data[0:3]
@@ -470,7 +476,7 @@ def connect_ms2_frames(spot_data, nucmask, max_frame_gap=1, max_jump=10,
         return connected_data
         
     # Main
-    input_data = spot_data.copy()
+    input_data = fit_data.copy()
     connected_data = initialize_connected_data(input_data[0])
     
     # Go through each frame, attempt to connect each detected spot to previous spots.
