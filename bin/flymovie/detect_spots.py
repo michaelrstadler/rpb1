@@ -489,7 +489,6 @@ def connect_ms2_frames_nearest(fit_data, nucmask, max_frame_gap=1, max_jump=10,
     
     return connected_data  
 
-
 ############################################################################
 def connect_ms2_fits_focuscorrect(fits_orig, z_frames, z_corrs, nucmask, 
     max_frame_gap=1, max_jump=18, scale_xy=1, scale_z=1):
