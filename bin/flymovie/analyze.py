@@ -458,11 +458,9 @@ def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True,
     # Define function for making each plot.
     def plot_function(x):
         for df in dfs:
-            plt.plot(ndi.gaussian_filter1d(df.iloc[:,x], sigma), linewidth=2)
+            plt.plot(ndi.gaussian_filter1d(df.iloc[:,x], sigma), linewidth=3)
             plt.title(df.columns[x])
 
-        
-    
     # Multiplot using plot_ps.
     
     if figsize is None:
