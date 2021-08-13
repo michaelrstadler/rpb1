@@ -563,7 +563,8 @@ def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66,
         return corr_spot_data
 
 ############################################################################
-def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
+def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False, 
+    ymax=600):
     """Threshold a 3D stack using a threshold that varies linearly in Z
     according to a supplied slope, return a binary mask.
     
@@ -583,6 +584,8 @@ def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
             Slope (intensity/slice) of linear adjustment in threshold
         display: bool
             If true, plots number of detected objects vs. z slice
+        ymax: int
+            Maximum value to display on y-axis
     
     Return:
         mask: ndarray
@@ -610,7 +613,7 @@ def threshold_w_slope(stack, ref_thresh, ref_slice, slope, display=False):
             _, count = ndi.label(mask[z])
             counts.append(count)
         plt.plot(counts)
-        plt.ylim(0,600)
+        plt.ylim(0,ymax)
     return np.expand_dims(mask, axis=0)
 
 ############################################################################
