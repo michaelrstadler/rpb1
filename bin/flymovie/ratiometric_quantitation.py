@@ -31,6 +31,10 @@ def fit_objects_from_mask(stack, mask, fitwindow_rad_xy=10,
             'Radius' in pixels of fit window in xy plane
         fitwindow_rad_z: int
             'Radius' in pixels of fit window in z plane
+        sample_size: None or int
+            If not None, a sample of this size is randomly drawn (without
+            replacement) from candidates and only the selected objects are
+            fitted. (Speeds things up when you don't need every spot)
 
     Returns:
         fit_data: list of ndarrays
