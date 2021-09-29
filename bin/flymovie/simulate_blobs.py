@@ -2,8 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from flymovie.general_functions import mesh_like
-
-
+import scipy.ndimage as ndi
 
 ############################################################################
 def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean, 
@@ -151,3 +150,27 @@ def make_dummy_mask(zdim=20, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
             mask[(((z - z_midpoint) ** 2) + ((i - i_center) ** 2) + ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
             nuc_id += 1
     return mask
+
+############################################################################
+def make_scalespace(stack, sigmas):
+    """Make a scalespace representation of an input stack using gaussian 
+    kernel with a range of sigmas.
+    
+    Args:
+        stack: ndarray
+            Image stack
+        sigmas: iterable
+            Range of sigmas to use for gaussian filtering in scale-space
+            representation
+
+    Returns:
+        scalespace: ndarray
+            Zeroeth dimension corresponds to the supplied sigma levels,
+            shape of each 0-dimension entry is equal to input stack.
+    """
+    dims = tuple([len(sigmas)]) + stack.shape
+    scalespace = np.zeros(dims)
+    for i in range(0, len(sigmas)):
+        sigma = sigmas[i]
+        scalespace[i] = ndi.gaussian_filter(stack, sigma)
+    return scalespace
