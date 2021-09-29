@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy
 from flymovie.general_functions import mesh_like
+
 
 
 ############################################################################
@@ -35,6 +37,14 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         simstack: ndarray
             Stack of same shape as nucmask containing simulated data.
     """
+    def make_odd(n):
+        """Ensure box dimension is an odd integer to make math work."""
+        n = int(n)
+        if (n % 2) == 0:
+            return n + 1
+        else:
+            return n
+
     def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, z_winlen, ij_winlen):
         """Make a 3D gaussian signal within a box of defined size.
         
@@ -87,8 +97,8 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         else:
             raise ValueError('Shape of box and stack section not equal')
     
-    ij_windowlen blob_radius_mean * 3.5
-    z_windowlen = ij_windowlen / z_ij_ratio
+    ij_windowlen = make_odd(blob_radius_mean * 3.5)
+    z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
     # Initialize stack with just nuclear backgrounds.
     bg_stack = np.random.normal(bg_mean, bg_var, size=nucmask.shape)
     simstack = np.where(nucmask, bg_stack, 0)
@@ -113,4 +123,31 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
             add_box_to_stack(simstack, box, (z, i, j))
     return simstack
 
+############################################################################
+def make_dummy_mask(zdim=20, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
+    """Make a label mask of spherical dummy nuclei.
     
+    Nuclei are equally spaced spheres.
+
+    Args:
+        zdim: int
+            Size of mask in z dimension
+        idim: int
+            Size of mask in i dimension
+        jdim: int
+            Size of mask in j dimension
+        nuc_spacing: int
+            Number of pixels separating nuclear centers in ij dimension
+        nuc_rad: int
+            Radius of nuclei
+    """
+    mask = np.zeros((zdim, idim, jdim))
+    z, i, j = mesh_like(mask, 3)
+    z_midpoint = int(mask.shape[0] / 2)
+    nuc_id = 1
+    for i_center in range(2 * nuc_rad, mask.shape[1], nuc_spacing):
+        for j_center in range(2 * nuc_rad, mask.shape[2], nuc_spacing):
+            # Basic equation of circle.
+            mask[(((z - z_midpoint) ** 2) + ((i - i_center) ** 2) + ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
+            nuc_id += 1
+    return mask
