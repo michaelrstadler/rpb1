@@ -147,12 +147,13 @@ def make_dummy_mask(zdim=20, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
     for i_center in range(2 * nuc_rad, mask.shape[1], nuc_spacing):
         for j_center in range(2 * nuc_rad, mask.shape[2], nuc_spacing):
             # Basic equation of circle.
-            mask[(((z - z_midpoint) ** 2) + ((i - i_center) ** 2) + ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
+            mask[(((z - z_midpoint) ** 2) + ((i - i_center) ** 2) + 
+                ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
             nuc_id += 1
     return mask
 
 ############################################################################
-def make_scalespace(stack, sigmas):
+def make_scalespace_representation(stack, sigmas):
     """Make a scalespace representation of an input stack using gaussian 
     kernel with a range of sigmas.
     
@@ -174,3 +175,40 @@ def make_scalespace(stack, sigmas):
         sigma = sigmas[i]
         scalespace[i] = ndi.gaussian_filter(stack, sigma)
     return scalespace
+
+############################################################################
+def make_scalespace_hist(scalespace, mask=None, numbins=100, histrange=(0,25)):
+    """Make a 2D histogram of a scalespace representation of an image stack.
+    
+    Args:
+        scalespace: ndarray
+            Scalespace representation of image stack (scale in dimension 0)
+        make: ndarray
+            (optional) Mask for values to be included in histogram calculation
+        numbins: int
+            Number of bins to use for histogram
+        histrange: (int, int)
+            Range of values to be included in histogram
+    
+    Returns:
+        hist_data: ndarray
+            Histogram data for each sigma level of input data. Dimensions
+            are number of sigmas x numbins
+        
+    """
+    def get_pixel_vals(stack, mask):
+        """Create flattened array of values in mask foreground of image 
+        stack."""
+        if mask is not None:
+            return stack[np.where(mask)]
+        else:
+            return stack.flatten()
+    # Initialize histogram data with 0s.
+    hist_data = np.zeros(tuple([scalespace.shape[0], numbins]))
+    # Make histogram from each sigma level, add to hist_data.
+    for s in range(0, scalespace.shape[0]):
+        vals = get_pixel_vals(scalespace[s], mask)
+        hist_ = np.histogram(vals, bins=numbins, range=histrange)[0]
+        hist_data[s] = hist_
+    
+    return hist_data
