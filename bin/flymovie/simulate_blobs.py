@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import scipy
 from flymovie.general_functions import mesh_like
 import scipy.ndimage as ndi
+import dask
+
 
 ############################################################################
 def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean, 
@@ -72,21 +74,25 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         for dim in range(0, 3):
             start = coords[dim] - int(box.shape[dim] / 2)
             end = coords[dim] + int(box.shape[dim] / 2) + 1
+            stack_start = start
+            stack_end = end
+            box_start = 0
+            box_end = box.shape[dim]
             if start < 0:
-                stack_starts.append(0)
-                stack_ends.append(end + start)
-                box_starts.append(-start)
-                box_ends.append(box.shape[dim] + start)
-            elif end > stack.shape[dim]:
-                stack_starts.append(start)
-                stack_ends.append(stack.shape[dim])
-                box_starts.append(0)
-                box_ends.append(box.shape[dim] + stack.shape[dim] - end)
-            else:
-                stack_starts.append(start)
-                stack_ends.append(end)
-                box_starts.append(0)
-                box_ends.append(box.shape[dim])
+                stack_start = 0
+                #stack_end = stack_end + start # will subtract because start negative
+                box_start = -start
+                #box_end = box.shape[dim] + start
+            if end > stack.shape[dim]:
+                #stack_starts.append(start)
+                stack_end = stack.shape[dim]
+                #box_starts.append(0)
+                box_end = box.shape[dim] - (end - stack.shape[dim])
+            
+            stack_starts.append(stack_start)
+            stack_ends.append(stack_end)
+            box_starts.append(box_start)
+            box_ends.append(box_end)
         # Ensure that the shapes of the subsection of the stack to add to
         # and the box to add are the same. If so, add box values to stack.
         substack_shape = stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]].shape
@@ -94,7 +100,7 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         if substack_shape == box_to_add.shape:
             stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
         else:
-            raise ValueError('Shape of box and stack section not equal')
+            print(substack_shape, box_to_add.shape)
     
     ij_windowlen = make_odd(blob_radius_mean * 3.5)
     z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
