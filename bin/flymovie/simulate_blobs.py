@@ -212,3 +212,88 @@ def make_scalespace_hist(scalespace, mask=None, numbins=100, histrange=(0,25)):
         hist_data[s] = hist_
     
     return hist_data
+
+############################################################################
+def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_range, 
+    blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, 
+    blob_number_range, z_ij_ratio=2, sigmas=[0,0.5,1,1.5,2,4,6], numbins=100, 
+    histrange=(0,25), zdim=40, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
+    """Simulate blobs with a range of parameters, record scale-space histograms.
+    
+    Args:
+        bg_mean_range: iterable
+            Range of values for the nuclear baground mean
+        bg_var_range= iterable
+            Range of values for the nuclear background variance
+        blob_intensity_mean_range: iterable
+            Range of values for the blob intensity mean
+        blob_intensity_var_range: iterable
+            Range of values for the blob intensity variance
+        blob_radius_mean_range: iterable
+            Range of values for the blob radius mean
+        blob_radius_var_range: iterable
+            Range of values for the blob radius variance
+        blob_number_range: iterable
+            Range of values for the number of blobs per nucleuc
+        z_ij_ratio: numeric
+            Ratio of the size of voxels in z to ji dimensions
+        sigmas: iterable
+            Sigma values to use in constructing scale-space representations
+            of simulated stacks.
+        numbins: int
+            Number of bins for histogram
+        histrange: tuple of ints
+            End points for histogram values
+        zdim: int
+            Size of simulated stack in pixels in z.
+        idim: int
+            Size of simulated stack in pixels in i
+        jdim: int
+            Size of simulated stack in pixels in j
+        nuc_spacing: int
+            The spacing, in pixels, between nuclei in i and j.
+        nuc_rad: int
+            Radius, in pixels, of simulated nuclei.
+
+    Returns:
+        data_: delayed list
+            Dask delayed object, must be computed using dask.compute(data_).
+            Each list item is the outcome of a simulation. Items are tuples.
+            First (0) item is a list of simulation parameters:
+                0: bg_mean 
+                1: bg_var 
+                2: blob_intensity_mean 
+                3: blob_intensity_var 
+                4: blob_radius_mean 
+                5: blob_radius_var
+                6: blob_number
+            Second item (1) is the 2D histogram of the scale-space representation  
+    """
+    mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
+    data_ = []
+    for bg_mean in bg_mean_range:
+        for bg_var in bg_var_range:
+            for blob_intensity_mean in blob_intensity_mean_range:
+                for blob_intensity_var in blob_intensity_var_range:
+                    for blob_radius_mean in blob_radius_mean_range:
+                        for blob_radius_var in blob_radius_var_range:
+                            for blob_number in blob_number_range:
+                                """
+                                # Non-delayed in case needed.
+                                simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+                                    z_ij_ratio)
+                                scalespace = make_scalespace_representation(simstack, sigmas)
+                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
+                                """
+                                #"""
+                                simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+                                    z_ij_ratio)
+                                scalespace = dask.delayed(make_scalespace_representation)(simstack, sigmas)
+                                hist_ = dask.delayed(make_scalespace_hist)(scalespace, mask, numbins, histrange)
+                                #"""
+                                params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
+                                    blob_radius_var, blob_number]
+                                data_.append((params, hist_))
+    return data_
