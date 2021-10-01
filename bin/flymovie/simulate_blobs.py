@@ -314,12 +314,15 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                                 # Old way of doing this -- less memory efficient.
                                 scalespace = dask.delayed(make_scalespace_representation)(simstack, sigmas)
                                 hist_ = dask.delayed(make_scalespace_hist)(scalespace, mask, numbins, histrange)
-                                """
+                                
                                 #hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask)
 
                                 hist_ = dask.delayed(test)(mask, bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, 
                                         blob_radius_mean, blob_radius_var, blob_number, z_ij_ratio, sigmas)
                                 hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask)
+                                """
+                                hist_ = dask.delayed(test)(mask, bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, 
+                                    blob_radius_mean, blob_radius_var, blob_number, z_ij_ratio, sigmas)
                                 params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
                                     blob_radius_var, blob_number]
                                 data_.append((params, hist_))
