@@ -5,11 +5,12 @@ from flymovie.general_functions import mesh_like
 import scipy.ndimage as ndi
 import dask
 import warnings
+import gc
 
 
 ############################################################################
-def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean, 
-    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000, 
+    blob_intensity_var=1000, blob_radius_mean=2, blob_radius_var=0.5, blob_number=50, 
     z_ij_ratio=2):
 
     """Simulate the distribution of fluorescence signal within nuclei in a 
@@ -189,7 +190,7 @@ def make_scalespace_hist(scalespace, mask=None, numbins=100, histrange=(0,25)):
     Args:
         scalespace: ndarray
             Scalespace representation of image stack (scale in dimension 0)
-        make: ndarray
+        mask: ndarray
             (optional) Mask for values to be included in histogram calculation
         numbins: int
             Number of bins to use for histogram
@@ -284,23 +285,59 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                     for blob_radius_mean in blob_radius_mean_range:
                         for blob_radius_var in blob_radius_var_range:
                             for blob_number in blob_number_range:
-                                """
-                                # Non-delayed in case needed.
-                                simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
-                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio)
-                                scalespace = make_scalespace_representation(simstack, sigmas)
-                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
-                                """
-                                #"""
                                 simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
                                     z_ij_ratio)
+                                """
+                                # Non-delayed in case needed.
+                                scalespace = make_scalespace_representation(simstack, sigmas)
+                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
+                                """
+                                """
+                                # Old way of doing this -- less memory efficient.
                                 scalespace = dask.delayed(make_scalespace_representation)(simstack, sigmas)
                                 hist_ = dask.delayed(make_scalespace_hist)(scalespace, mask, numbins, histrange)
-                                #"""
+                                """
+                                hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask)
                                 params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
                                     blob_radius_var, blob_number]
                                 data_.append((params, hist_))
-                        
     return data_
+
+############################################################################
+def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, histrange=(0,66000)):
+    """Directly calculate a scalespace histogram on an image stack.
+        
+    More memory efficient than first storing scalespace representation.
+        
+    Args:
+        stack: ndarray
+            Image stack
+        mask: ndarray
+            (optional) Mask for values to be included in histogram calculation
+        numbins: int
+            Number of bins to use for histogram
+        histrange: (int, int)
+            Range of values to be included in histogram
+    
+    Returns:
+        hist_data: ndarray
+            Histogram data for each sigma level of input data. Dimensions
+            are number of sigmas x numbins
+    """
+    def get_pixel_vals(stack, mask):
+        """Create flattened array of values in mask foreground of image 
+        stack."""
+        if mask is not None:
+            return stack[np.where(mask)]
+        else:
+            return stack.flatten()
+    # Initialize empty hist_ container.        
+    hist_ = np.ndarray((0, numbins))
+    # Calculate 1D hist for each sigma level, concatenate.
+    for sigma in sigmas:
+        stack_filtered = ndi.gaussian_filter(stack, sigma)
+        vals = get_pixel_vals(stack_filtered, mask)
+        hist_thissigma = np.histogram(vals, bins=numbins, range=histrange)[0]
+        hist_ = np.vstack([hist_, hist_thissigma])
+    return hist_
