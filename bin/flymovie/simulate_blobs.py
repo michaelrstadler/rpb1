@@ -325,7 +325,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                                     blob_radius_mean, blob_radius_var, blob_number, z_ij_ratio, sigmas)
                                 params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
                                     blob_radius_var, blob_number]
-                                data_.append((params, hist_))
+                                data_.append(hist_)
     return data_
 
 ############################################################################
