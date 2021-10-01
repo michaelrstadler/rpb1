@@ -4,6 +4,7 @@ import scipy
 from flymovie.general_functions import mesh_like
 import scipy.ndimage as ndi
 import dask
+import warnings
 
 
 ############################################################################
@@ -72,23 +73,22 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         # coordinates and box size will result in trying to assign positions 
         # outside the stack.
         for dim in range(0, 3):
+            # Initialize start and stop locations for case where box is entirely
+            # within stack dimensions.
             start = coords[dim] - int(box.shape[dim] / 2)
             end = coords[dim] + int(box.shape[dim] / 2) + 1
             stack_start = start
             stack_end = end
             box_start = 0
             box_end = box.shape[dim]
+            # Adjust for cases where box falls out of bounds of stack.
             if start < 0:
                 stack_start = 0
-                #stack_end = stack_end + start # will subtract because start negative
                 box_start = -start
-                #box_end = box.shape[dim] + start
             if end > stack.shape[dim]:
-                #stack_starts.append(start)
                 stack_end = stack.shape[dim]
-                #box_starts.append(0)
                 box_end = box.shape[dim] - (end - stack.shape[dim])
-            
+            # Append corrected starts and stops for this dimension.
             stack_starts.append(stack_start)
             stack_ends.append(stack_end)
             box_starts.append(box_start)
@@ -100,7 +100,7 @@ def simulate_blobs(nucmask, bg_mean, bg_var, blob_intensity_mean,
         if substack_shape == box_to_add.shape:
             stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
         else:
-            print(substack_shape, box_to_add.shape)
+            warnings.warn('Dimensions of box to add and stack to replace do not match.')
     
     ij_windowlen = make_odd(blob_radius_mean * 3.5)
     z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
@@ -159,7 +159,7 @@ def make_dummy_mask(zdim=20, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
     return mask
 
 ############################################################################
-def make_scalespace_representation(stack, sigmas):
+def make_scalespace_representation(stack, sigmas=[0,0.5,1,1.5,2,4,6]):
     """Make a scalespace representation of an input stack using gaussian 
     kernel with a range of sigmas.
     
@@ -302,4 +302,5 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                                 params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
                                     blob_radius_var, blob_number]
                                 data_.append((params, hist_))
+                        
     return data_
