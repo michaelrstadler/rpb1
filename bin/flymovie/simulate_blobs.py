@@ -276,17 +276,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                 6: blob_number
             Second item (1) is the 2D histogram of the scale-space representation  
     """
-    def test(mask, bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, 
-        blob_radius_mean, blob_radius_var, blob_number, z_ij_ratio, sigmas):
-        
-        simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
-            blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-            z_ij_ratio)
-        
-        hist_ = make_scalespace_2dhist(simstack, sigmas, mask)
 
-        return hist_
-        
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     data_ = []
     for bg_mean in bg_mean_range:
@@ -300,22 +290,6 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                                 # Non-delayed in case needed.
                                 scalespace = make_scalespace_representation(simstack, sigmas)
                                 hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
-                                simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
-                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio)
-                            
-                                # Non-delayed in case needed.
-                                scalespace = make_scalespace_representation(simstack, sigmas)
-                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
-                                
-                                # Old way of doing this -- less memory efficient.
-                                scalespace = dask.delayed(make_scalespace_representation)(simstack, sigmas)
-                                hist_ = dask.delayed(make_scalespace_hist)(scalespace, mask, numbins, histrange)
-                                
-                                #hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask)
-                                
-                                hist_ = dask.delayed(test)(mask, bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, 
-                                    blob_radius_mean, blob_radius_var, blob_number, z_ij_ratio, sigmas)
                                 """
                                 simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
