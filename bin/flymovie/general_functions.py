@@ -5,6 +5,7 @@ from skimage.segmentation import flood_fill
 from skimage.measure import regionprops
 from scipy.spatial import distance
 from dataclasses import dataclass
+import pandas as pd
 
 
 
@@ -633,6 +634,7 @@ def make_tables_from_arivis(trackfile, nucfile, spotfile):
     Each spot contains 'nuc_all' and 'spot_all' which contain all the exported
     parameters for the nucleus and MS2 spot, and 'nuc' and 'spot' which 
     contain a reduced set of parameters with better names."""
+
     @dataclass
     class DataCont:
         nuc_all: pd.DataFrame
@@ -659,7 +661,6 @@ def make_tables_from_arivis(trackfile, nucfile, spotfile):
                 
                 spot_data = spots[spots['Parent Ids'] == nuc_id]
                 if spot_data.shape[0] != 0:
-                    
                     if 'spot' not in data[track_num]:
                         data[track_num]['spot'] = spot_data
                     else:
@@ -677,8 +678,8 @@ def make_tables_from_arivis(trackfile, nucfile, spotfile):
         if 'spot' in data[i]:
             nuc = data[i]['nuc']
             spot = data[i]['spot']
-            nuc_selected = nucs[selected]
-            spot_selected = spots[selected]
+            nuc_selected = nuc[selected]
+            spot_selected = spot[selected]
             nuc_selected.columns = selected_simple
             spot_selected.columns = selected_simple
             data_final.append(DataCont(nuc, spot, nuc_selected, spot_selected))
