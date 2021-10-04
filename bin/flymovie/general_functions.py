@@ -4,6 +4,8 @@ from scipy import ndimage as ndi
 from skimage.segmentation import flood_fill
 from skimage.measure import regionprops
 from scipy.spatial import distance
+from dataclasses import dataclass
+
 
 
 ############################################################################
@@ -618,3 +620,67 @@ def zstack_normalize_mean(instack):
         immean = stack[z].mean()
         stack[z] = stack[z] / immean * stackmean
     return(stack)
+
+############################################################################
+def make_tables_from_arivis(trackfile, nucfile, spotfile):
+    """Take output csv table data from arivis segmentation of MS2 movies
+    and wrangel it into a reasonable pandas dataframe object.
+    
+    Inputs are the filenames for the csv exports of the tracks, nucleus
+    objects and spots from arivis.
+    
+    Output is a list of data containers. Each item in list is a spot.
+    Each spot contains 'nuc_all' and 'spot_all' which contain all the exported
+    parameters for the nucleus and MS2 spot, and 'nuc' and 'spot' which 
+    contain a reduced set of parameters with better names."""
+    @dataclass
+    class DataCont:
+        nuc_all: pd.DataFrame
+        spot_all: pd.DataFrame
+        nuc: pd.DataFrame
+        spot: pd.DataFrame
+
+    tracks = pd.read_csv(trackfile)
+    nucs = pd.read_csv(nucfile)
+    spots = pd.read_csv(spotfile)
+
+    data = []
+    track_num = 0
+    for index, row in tracks.iterrows():
+        data.append({})
+        for child_id in row['Children Ids'].split(','):
+            nuc_data = nucs[nucs['Id'] == int(child_id)]
+            if nuc_data.shape[0] != 0:
+                nuc_id = int(nuc_data['Id'])
+                if 'nuc' not in data[track_num]:
+                    data[track_num]['nuc'] = nuc_data
+                else:
+                    data[track_num]['nuc'] = pd.concat([data[track_num]['nuc'], nuc_data]) 
+                
+                spot_data = spots[spots['Parent Ids'] == nuc_id]
+                if spot_data.shape[0] != 0:
+                    
+                    if 'spot' not in data[track_num]:
+                        data[track_num]['spot'] = spot_data
+                    else:
+                        data[track_num]['spot'] = pd.concat([data[track_num]['spot'], spot_data]) 
+        track_num += 1
+        
+    selected = ['First, Time Point', 'X (px), Center of Bounding Box',	'Y (px), Center of Bounding Box',	'Z (px), Center of Bounding Box',
+        'Min, Intensities #1',	'Max, Intensities #1',	'Mean, Intensities #1',	'Sum, Intensities #1',	'SD, Intensities #1',
+        'Min, Intensities #2',	'Max, Intensities #2',	'Mean, Intensities #2',	'Sum, Intensities #2',	'SD, Intensities #2']
+    selected_simple = ['t', 'x', 'y', 'z', 'min_intensity_1',	'max_intensity_1',	'mean_intensity_1',	'sum_intensity_1',	'sd_intensity_1',
+        'min_intensity_2',	'max_intensity_2',	'mean_intensity_2',	'sum_intensity_2',	'sd_intensity_2']
+    data_final = []
+    
+    for i in range(0, len(data)):
+        if 'spot' in data[i]:
+            nuc = data[i]['nuc']
+            spot = data[i]['spot']
+            nuc_selected = nucs[selected]
+            spot_selected = spots[selected]
+            nuc_selected.columns = selected_simple
+            spot_selected.columns = selected_simple
+            data_final.append(DataCont(nuc, spot, nuc_selected, spot_selected))
+            
+    return data_final
