@@ -294,7 +294,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                                 simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
                                     z_ij_ratio)
-                                hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask)
+                                hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask, numbins, histrange)
                                 params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
                                     blob_radius_var, blob_number]
                                 data_.append((params, hist_))
