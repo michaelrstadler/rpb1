@@ -103,7 +103,7 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
         else:
             warnings.warn('Dimensions of box to add and stack to replace do not match.')
     
-    ij_windowlen = make_odd(blob_radius_mean * 3.5)
+    ij_windowlen = make_odd(blob_radius_mean * 5.5)
     z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
     # Initialize stack with just nuclear backgrounds.
     bg_stack = np.random.normal(bg_mean, bg_var, size=nucmask.shape)
@@ -151,8 +151,8 @@ def make_dummy_mask(zdim=20, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
     z, i, j = mesh_like(mask, 3)
     z_midpoint = int(mask.shape[0] / 2)
     nuc_id = 1
-    for i_center in range(2 * nuc_rad, mask.shape[1], nuc_spacing):
-        for j_center in range(2 * nuc_rad, mask.shape[2], nuc_spacing):
+    for i_center in range(nuc_rad, mask.shape[1], nuc_spacing):
+        for j_center in range(nuc_rad, mask.shape[2], nuc_spacing):
             # Basic equation of circle.
             mask[(((z - z_midpoint) ** 2) + ((i - i_center) ** 2) + 
                 ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
