@@ -2,10 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from flymovie.general_functions import mesh_like
+from flymovie.load_save import save_pickle
 import scipy.ndimage as ndi
 import dask
 import warnings
 import gc
+import os
 
 
 ############################################################################
@@ -301,7 +303,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
     return data_
 
 ############################################################################
-def simulate_param_range(bg_mean_range, bg_var_range, blob_intensity_mean_range, 
+def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_mean_range, 
     blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, 
     blob_number_range, z_ij_ratio=2, zdim=20, idim=200, jdim=200, 
     nuc_spacing=100, nuc_rad=50):
@@ -349,6 +351,17 @@ def simulate_param_range(bg_mean_range, bg_var_range, blob_intensity_mean_range,
                 6: blob_number
             Second item (1) is the simulated image stack.
     """
+    def sim_and_save(mask, bg_mean, bg_var, blob_intensity_mean, 
+        blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+        z_ij_ratio):
+        simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
+            blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+            z_ij_ratio)
+        params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
+            blob_radius_var, blob_number]
+        param_string = '_'.join([str(x) for x in params])
+        filename = os.path.join(outfolder, param_string + '.pkl')
+        save_pickle(simstack, filename)
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     data_ = []
@@ -359,17 +372,9 @@ def simulate_param_range(bg_mean_range, bg_var_range, blob_intensity_mean_range,
                     for blob_radius_mean in blob_radius_mean_range:
                         for blob_radius_var in blob_radius_var_range:
                             for blob_number in blob_number_range:
-                                """
-                                # Non-delayed in case needed.
-                                scalespace = make_scalespace_representation(simstack, sigmas)
-                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
-                                """
-                                simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                data_.append(dask.delayed(sim_and_save)(mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio)
-                                params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
-                                    blob_radius_var, blob_number]
-                                data_.append((params, simstack))
+                                    z_ij_ratio))
     return data_
 
 ############################################################################
