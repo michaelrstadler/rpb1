@@ -365,7 +365,7 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
         save_pickle(simstack, filename)
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
-    processes = []
+    args = []
     for bg_mean in bg_mean_range:
         for bg_var in bg_var_range:
             for blob_intensity_mean in blob_intensity_mean_range:
@@ -373,13 +373,19 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
                     for blob_radius_mean in blob_radius_mean_range:
                         for blob_radius_var in blob_radius_var_range:
                             for blob_number in blob_number_range:
-                                p = multiprocessing.Process(target=sim_and_save, args=(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio))
-                                processes.append(p)
-                                p.start()
-    return processes
-
+                                    z_ij_ratio])
+    
+    batch_size = 2000
+    for i in range(0, len(args), batch_size):
+        processes = []
+        start = i * batch_size
+        end = min(start + batch_size, len(args))
+        for j in range(start, end):
+            p = multiprocessing.Process(target=sim_and_save, args=args[j])
+            p.start() 
+                               
 ############################################################################
 def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, histrange=(0,66000)):
     """Directly calculate a scalespace histogram on an image stack.
