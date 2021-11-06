@@ -380,7 +380,7 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
     batch_size = 2000
     for i in range(0, len(args), batch_size):
         processes = []
-        start = i * batch_size
+        start = i
         end = min(start + batch_size, len(args))
         for j in range(start, end):
             p = multiprocessing.Process(target=sim_and_save, args=args[j])
