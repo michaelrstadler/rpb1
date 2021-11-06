@@ -313,7 +313,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
         for process in processes:
             process.join()
         data_ = list(data_)
-        sleep(2) # Prevents errors at the end of computation
+        sleep(30) # Prevents errors at the end of computation
 
     return data_
     
