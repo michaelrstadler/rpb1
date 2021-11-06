@@ -294,6 +294,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     manager = multiprocessing.Manager()
     processes = []
+    args = []
     with multiprocessing.Manager() as manager:
         data_ = manager.list()
         l = manager.list()
@@ -304,16 +305,23 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                         for blob_radius_mean in blob_radius_mean_range:
                             for blob_radius_var in blob_radius_var_range:
                                 for blob_number in blob_number_range:
-                                    p = multiprocessing.Process(target=sim_and_hist, args=(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                    args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
                                         blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                        z_ij_ratio, sigmas, histrange, numbins, data_))
-                                    p.start()
-                                    processes.append(p)
-                                    
-        for process in processes:
-            process.join()
+                                        z_ij_ratio, sigmas, histrange, numbins, data_])
+        batch_size = 200
+        for i in range(0, len(args), batch_size):
+            processes = []
+            start = i
+            end = min(start + batch_size, len(args))
+            for j in range(start, end):
+                p = multiprocessing.Process(target=sim_and_hist, args=args[j])
+                p.start()
+                processes.append(p)                           
+            for process in processes:
+                process.join()
+
         data_ = list(data_)
-        sleep(30) # Prevents errors at the end of computation
+        sleep(5) # Prevents errors at the end of computation
 
     return data_
     
