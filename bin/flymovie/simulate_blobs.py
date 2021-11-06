@@ -9,7 +9,7 @@ import warnings
 import gc
 import os
 import multiprocessing
-
+from time import sleep
 
 ############################################################################
 def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000, 
@@ -279,29 +279,44 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                 6: blob_number
             Second item (1) is the 2D histogram of the scale-space representation  
     """
+    def sim_and_hist(mask, bg_mean, bg_var, blob_intensity_mean, 
+        blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+        z_ij_ratio, sigmas, histrange, numbins, data_):
+        """Call simulation, generate histogram, add to shared list."""
+        simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
+            blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+            z_ij_ratio)
+        hist_ = make_scalespace_2dhist(simstack, sigmas, mask, numbins, histrange)
+        params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
+            blob_radius_var, blob_number]
+        data_.append((params, hist_))
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
-    data_ = []
-    for bg_mean in bg_mean_range:
-        for bg_var in bg_var_range:
-            for blob_intensity_mean in blob_intensity_mean_range:
-                for blob_intensity_var in blob_intensity_var_range:
-                    for blob_radius_mean in blob_radius_mean_range:
-                        for blob_radius_var in blob_radius_var_range:
-                            for blob_number in blob_number_range:
-                                """
-                                # Non-delayed in case needed.
-                                scalespace = make_scalespace_representation(simstack, sigmas)
-                                hist_ = make_scalespace_hist(scalespace, mask, numbins, histrange)
-                                """
-                                simstack = dask.delayed(simulate_blobs)(mask, bg_mean, bg_var, blob_intensity_mean, 
-                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio)
-                                hist_ = dask.delayed(make_scalespace_2dhist)(simstack, sigmas, mask, numbins, histrange)
-                                params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
-                                    blob_radius_var, blob_number]
-                                data_.append((params, hist_))
+    manager = multiprocessing.Manager()
+    processes = []
+    with multiprocessing.Manager() as manager:
+        data_ = manager.list()
+        l = manager.list()
+        for bg_mean in bg_mean_range:
+            for bg_var in bg_var_range:
+                for blob_intensity_mean in blob_intensity_mean_range:
+                    for blob_intensity_var in blob_intensity_var_range:
+                        for blob_radius_mean in blob_radius_mean_range:
+                            for blob_radius_var in blob_radius_var_range:
+                                for blob_number in blob_number_range:
+                                    p = multiprocessing.Process(target=sim_and_hist, args=(mask, bg_mean, bg_var, blob_intensity_mean, 
+                                        blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+                                        z_ij_ratio, sigmas, histrange, numbins, data_))
+                                    p.start()
+                                    processes.append(p)
+                                    
+        for process in processes:
+            process.join()
+        data_ = list(data_)
+        sleep(2) # Prevents errors at the end of computation
+
     return data_
+    
 
 ############################################################################
 def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_mean_range, 
@@ -376,7 +391,7 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
                                 args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
                                     blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
                                     z_ij_ratio])
-    
+                                
     batch_size = 2000
     for i in range(0, len(args), batch_size):
         processes = []
