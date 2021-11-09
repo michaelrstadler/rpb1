@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from flymovie.general_functions import mesh_like
-from flymovie.load_save import save_pickle, listdir_nohidden
+from flymovie.load_save import save_pickle, load_pickle, listdir_nohidden
 import scipy.ndimage as ndi
 import dask
 import warnings

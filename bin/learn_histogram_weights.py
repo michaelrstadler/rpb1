@@ -25,7 +25,23 @@ import scipy
 import numpy as np
 import pandas as pd
 import dask
+from optparse import OptionParser
 
 
+def parse_options():
+	parser = OptionParser()
+	parser.add_option("-f", "--file", dest="filename",
+					  help="Reduced bin file", metavar="FILE")
+	parser.add_option("-o", "--outfolder", dest="outfolder",
+					  help="Path for output files", metavar="OUTFOLDER")
+	parser.add_option("-c", "--chromosome", dest="chromosome",
+					  help="Chromosome", metavar="CHROMOSOME")
+	parser.add_option("-w", "--windowsize", dest="windowsize", default=400,
+					  help="Panel width, in bins", metavar="WINDOWSIZE")
+	parser.add_option("-s", "--stepsize", dest="stepsize", default=200,
+					  help="Step size, in bins", metavar="STEPSIZE")
+	
+	(options, args) = parser.parse_args()
+	return options    
 
-############################################################################
+options = parse_options()
