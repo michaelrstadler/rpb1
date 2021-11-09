@@ -485,18 +485,34 @@ def sims_to_data(folder, mask, width, t_function, **kwargs):
             Parameters used for simulation, rows correspond to rows
             in data
     """
-    files = listdir_nohidden(folder)
-    data = np.zeros((len(files), width))
-    param_data = np.zeros((len(files), 7))
-    for i in range(len(files)):
-        f = files[i]
-        # Extract parameters from file name.
-        f_base = os.path.splitext(f)[0]
+    def functionX(file, folder, mask, list, t_function, **kwargs):
+        f_base = os.path.splitext(file)[0]
         params = [float(x) for x in f_base.split('_')]
         # Get data from simulated stack.
-        stack = load_pickle(os.path.join(folder, f))
-        data_file = t_function(stack=stack, mask=mask, **kwargs)
-        param_data[i] = params
-        data[i] = data_file
+        stack = load_pickle(os.path.join(folder, file))
+        list.append((t_function(stack=stack, mask=mask, **kwargs), params))
+
+    files = listdir_nohidden(folder)
+    manager = multiprocessing.Manager()
+    processes = []
+    args = []
+    with multiprocessing.Manager() as manager:
+        data = manager.list()
+        batch_size = 200
+        for i in range(0, len(files), batch_size):
+            processes = []
+            start = i
+            end = min(start + batch_size, len(files))
+            for j in range(start, end):
+                file = files[j]
+                p = multiprocessing.Process(target=functionX, args=[file, folder, mask, data, t_function], kwargs=kwargs)
+                p.start()
+                processes.append(p)                           
+            for process in processes:
+                process.join()
+
+        data = list(data)
+        sleep(20) # Prevents errors at the end of computation
     
-    return data, param_data
+    return data
+
