@@ -278,3 +278,24 @@ def load_pickle(filename):
     with open(filename, 'rb') as file:
         obj = pickle.load(file)
     return obj
+
+############################################################################
+def listdir_nohidden(path):
+    """List all files in a directory, excluding hidden files starting with 
+    .
+    
+    Args:
+        path: string
+            Path to directory
+    
+    Returns:
+        files: list
+            List of non-hidden files
+    """
+    files = []
+    if not os.path.isdir(path):
+        raise ValueError('Not a valid path to directory.')
+    for f in os.listdir(path):
+        if not f.startswith('.'):
+            files.append(f)
+    return files

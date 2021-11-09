@@ -321,7 +321,7 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                 process.join()
 
         data_ = list(data_)
-        sleep(5) # Prevents errors at the end of computation
+        sleep(20) # Prevents errors at the end of computation
 
     return data_
     
@@ -410,7 +410,8 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
             p.start() 
                                
 ############################################################################
-def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, histrange=(0,66000)):
+def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, 
+    histrange=(0,66000), flatten=False):
     """Directly calculate a scalespace histogram on an image stack.
         
     More memory efficient than first storing scalespace representation.
@@ -424,6 +425,8 @@ def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, histrange=(0,66000)
             Number of bins to use for histogram
         histrange: (int, int)
             Range of values to be included in histogram
+        flatten: bool
+            If true, return flattened array
     
     Returns:
         hist_data: ndarray
@@ -445,4 +448,12 @@ def make_scalespace_2dhist(stack, sigmas, mask, numbins=100, histrange=(0,66000)
         vals = get_pixel_vals(stack_filtered, mask)
         hist_thissigma = np.histogram(vals, bins=numbins, range=histrange)[0]
         hist_ = np.vstack([hist_, hist_thissigma])
+    if flatten:
+        return hist_.flatten()
     return hist_
+
+def make_scalespace_2dhist_flattened(stack, sigmas, mask, numbins=100, 
+    histrange=(0,66000)):
+    """Wrapper for make_scalespace_2dhist with flattened toggled on."""
+    return make_scalespace_2dhist(stack, sigmas, mask, numbins, histrange, 
+    flatten=True)
