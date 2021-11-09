@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from flymovie.general_functions import mesh_like
-from flymovie.load_save import save_pickle
+from flymovie.load_save import save_pickle, listdir_nohidden
 import scipy.ndimage as ndi
 import dask
 import warnings
@@ -457,3 +457,46 @@ def make_scalespace_2dhist_flattened(stack, sigmas, mask, numbins=100,
     """Wrapper for make_scalespace_2dhist with flattened toggled on."""
     return make_scalespace_2dhist(stack, sigmas, mask, numbins, histrange, 
     flatten=True)
+
+############################################################################
+def sims_to_data(folder, mask, width, t_function, **kwargs):
+    """Take a folder of pickled simulation data, apply a transform
+    function, return transformed data and parameters.
+    
+    Args:
+        folder: path
+            Folder containing pickled simulation output
+        mask: ndarray
+            Mask specifying regions of simulated images to use
+        width: int
+            Width of output data array 
+        t_function: function
+            Function to transform simulation data. Output is
+            1D numpy array of length equal to width (above)
+        **kwargs:
+            kwargs for transfer function
+        
+    Returns:
+        Tuple data, params
+        data: ndarray
+            Output data from transfer function, each row is data
+            for a different simulation
+        params: ndarray
+            Parameters used for simulation, rows correspond to rows
+            in data
+    """
+    files = listdir_nohidden(folder)
+    data = np.zeros((len(files), width))
+    param_data = np.zeros((len(files), 7))
+    for i in range(len(files)):
+        f = files[i]
+        # Extract parameters from file name.
+        f_base = os.path.splitext(f)[0]
+        params = [float(x) for x in f_base.split('_')]
+        # Get data from simulated stack.
+        stack = load_pickle(os.path.join(folder, f))
+        data_file = t_function(stack=stack, mask=mask, **kwargs)
+        param_data[i] = params
+        data[i] = data_file
+    
+    return data, param_data
