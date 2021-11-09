@@ -10,6 +10,7 @@ __copyright__   = "Copyright 2021, Planet Earth"
 import flymovie as fm
 import numpy as np
 from optparse import OptionParser
+from time import time, process_time
 
 
 def parse_options():
@@ -40,7 +41,7 @@ def parse_options():
     
     (options, args) = parser.parse_args()
     return options    
-
+t_start = time()
 options = parse_options()
 folder, outfile, sigmasstring, zdim, idim, jdim, nuc_radius, nuc_sep, numbins, histrangestring = options.folder, options.outfile, options.sigmas, options.zdim, options.idim, options.jdim, options.nuc_radius, options.nuc_sep, options.numbins, options.histrange
 sigmas = [float(x) for x in sigmasstring.split(',')]
@@ -51,3 +52,5 @@ mask = fm.make_dummy_mask(zdim, idim, jdim, nuc_sep, nuc_radius)
 width = len(sigmas) * numbins
 output = fm.sims_to_data(folder, mask, width, fm.make_scalespace_2dhist_flattened, sigmas=sigmas, numbins=numbins, histrange=histrange)
 fm.save_pickle(output, outfile)
+t_end = time()
+print (len(data_), t_end - t_start)
