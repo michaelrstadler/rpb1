@@ -36,7 +36,7 @@ def parse_options():
                       help="Separation between nuclei in simulated data", metavar="SEP")
     parser.add_option("-b", "--numbins", dest="numbins", default=100,
                       help="Number of bins in histogram", metavar="NUMBINS")
-    parser.add_option("-N", "--histrange", dest="histrange", default='0,66_000',
+    parser.add_option("-n", "--histrange", dest="histrange", default='0,66_000',
                       help="Range of histogram in form: 0,66000", metavar="HISTRANGE")
     
     (options, args) = parser.parse_args()
