@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
-from flymovie.general_functions import mesh_like
+from flymovie.general_functions import mesh_like, dog_filter
 from flymovie.load_save import save_pickle, load_pickle, listdir_nohidden
 import scipy.ndimage as ndi
 import dask
@@ -221,6 +221,47 @@ def make_scalespace_hist(scalespace, mask=None, numbins=100, histrange=(0,25)):
         hist_ = np.histogram(vals, bins=numbins, range=histrange)[0]
         hist_data[s] = hist_
     
+    return hist_data
+
+############################################################################
+def make_DoG_histograms(stack, mask=None, sigmas=[(1,2),(1,3),(1,5)], 
+    numbins=100, histrange=(0,65_000)):
+    """Make a 2D scale-space histogram of an image stack using difference
+    of Gaussian (DoG) filter for scale axis.
+
+    Args:
+        stack: ndarray
+            Image stack
+        mask: ndarray
+            (optional) Mask for values to be included in histogram calculation
+        sigmas: iterable of tuples (numeric, numeric)
+            Values to use for the smaller sigma value in DoG filter
+        numbins: int
+            Number of bins to use for histogram
+        histrange: (int, int)
+            Range of values to be included in histogram
+    
+    Returns:
+        hist_data: ndarray
+            Histogram data for each pair of sigma values. Dimensions
+            are # sigmas x numbins
+    """
+    def get_pixel_vals(stack, mask):
+        """Create flattened array of values in mask foreground of image 
+        stack."""
+        if mask is not None:
+            return stack[np.where(mask)]
+        else:
+            return stack.flatten()
+
+    hist_data = np.zeros(tuple([len(sigmas), numbins]))  
+    n = 0 # Keep track of where to add new histogram.     
+    for smallsigma, bigsigma in sigmas:
+        dog = dog_filter(stack, bigsigma, smallsigma)
+        vals = get_pixel_vals(dog, mask)
+        hist_ = np.histogram(vals, bins=numbins, range=histrange)[0]
+        hist_data[n] = hist_
+        n += 1
     return hist_data
 
 ############################################################################
@@ -490,7 +531,7 @@ def sims_to_data(folder, mask, width, t_function, **kwargs):
         params = [float(x) for x in f_base.split('_')]
         # Get data from simulated stack.
         stack = load_pickle(os.path.join(folder, file))
-        list.append((t_function(stack=stack, mask=mask, **kwargs), params))
+        list.append((params, t_function(stack=stack, mask=mask, **kwargs)))
 
     files = listdir_nohidden(folder)
     manager = multiprocessing.Manager()

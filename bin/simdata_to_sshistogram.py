@@ -50,7 +50,7 @@ histrange = [float(x) for x in histrangestring.split(',')]
 
 mask = fm.make_dummy_mask(zdim, idim, jdim, nuc_sep, nuc_radius)
 width = len(sigmas) * numbins
-output = fm.sims_to_data(folder, mask, width, fm.make_scalespace_2dhist_flattened, sigmas=sigmas, numbins=numbins, histrange=histrange)
+output = fm.sims_to_data(folder, mask, width, fm.make_scalespace_2dhist, sigmas=sigmas, numbins=numbins, histrange=histrange)
 fm.save_pickle(output, outfile)
 t_end = time()
 print (len(data_), t_end - t_start)
