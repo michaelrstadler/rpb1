@@ -43,7 +43,7 @@ def parse_options():
     return options    
 t_start = time()
 options = parse_options()
-folder, outfile, sigmasstring, zdim, idim, jdim, nuc_radius, nuc_sep, numbins, histrangestring = options.folder, options.outfile, options.sigmas, options.zdim, options.idim, options.jdim, options.nuc_radius, options.nuc_sep, options.numbins, options.histrange
+folder, outfile, sigmasstring, zdim, idim, jdim, nuc_radius, nuc_sep, numbins, histrangestring = options.folder, options.outfile, options.sigmas, int(options.zdim), int(options.idim), int(options.jdim), int(options.nuc_radius), int(options.nuc_sep), int(options.numbins), options.histrange
 sigmas = [float(x) for x in sigmasstring.split(',')]
 histrange = [float(x) for x in histrangestring.split(',')]
 
