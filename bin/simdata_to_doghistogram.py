@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"""simdata_to_sshistogram.py.
+"""simdata_to_doghistogram.py.
 
 
 """
@@ -44,12 +44,23 @@ def parse_options():
 t_start = time()
 options = parse_options()
 folder, outfile, sigmasstring, zdim, idim, jdim, nuc_radius, nuc_sep, numbins, histrangestring = options.folder, options.outfile, options.sigmas, options.zdim, options.idim, options.jdim, options.nuc_radius, options.nuc_sep, options.numbins, options.histrange
-sigmas = [float(x) for x in sigmasstring.split(',')]
 histrange = [float(x) for x in histrangestring.split(',')]
 
-mask = fm.make_dummy_mask(zdim, idim, jdim, nuc_sep, nuc_radius)
-width = len(sigmas) * numbins
-output = fm.sims_to_data(folder, mask, width, fm.make_scalespace_2dhist, sigmas=sigmas, numbins=numbins, histrange=histrange)
-fm.save_pickle(output, outfile)
-t_end = time()
-print (t_end - t_start)
+sigmas = []
+tuple_list = sigmasstring.split('),(')
+for t in tuple_list:
+    if t[0] == '(':
+        t = t[1:]
+    if t[-1] == ')':
+        t = t[:-1]
+    s1, s2 = [float(x) for x in t.split(',')]
+    sigmas.append((s1, s2))
+
+if __name__ == '__main__':
+    mask = fm.make_dummy_mask(zdim, idim, jdim, nuc_sep, nuc_radius)
+    width = len(sigmas) * numbins
+    output = fm.sims_to_data(folder, mask, width, fm.make_DoG_histograms, sigmas=sigmas, numbins=numbins, histrange=histrange)
+    fm.save_pickle(output, outfile)
+    t_end = time()
+    print (t_end - t_start)
+

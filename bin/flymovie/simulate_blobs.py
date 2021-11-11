@@ -533,6 +533,7 @@ def sims_to_data(folder, mask, width, t_function, **kwargs):
         stack = load_pickle(os.path.join(folder, file))
         list.append((params, t_function(stack=stack, mask=mask, **kwargs)))
 
+    multiprocessing.set_start_method('fork') # On MacOS, pythons after 3.8 use 'spawn' by default, causes errors
     files = listdir_nohidden(folder)
     manager = multiprocessing.Manager()
     processes = []
