@@ -261,7 +261,7 @@ def save_pickle(obj, filename):
             Python object to serialize
     """
     with open(filename, 'wb') as file:
-        pickle.dump(obj, file)
+        pickle.dump(obj, file, protocol=4)
 
 ############################################################################
 def load_pickle(filename):
