@@ -39,11 +39,14 @@ x, y = fm.load_pickle(options.data)
 print('Done.')
 # Set up output folder.
 outfolder = options.outfolder
+modelfolder = os.path.join(outfolder, 'model')
 if not os.path.isdir(outfolder):
     os.mkdir(outfolder)
-    os.mkdir(os.path.join(outfolder, 'model'))
+    os.mkdir(modelfolder)
 
 # Load model from file.
 tempmodule = SourceFileLoader('',options.model).load_module()
 model, history = tempmodule.train_model(x, y)
+model.save(modelfolder)
+fm.save_pickle(history, os.path.join(outfolder, 'history.pkl'))
 
