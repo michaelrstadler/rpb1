@@ -375,6 +375,7 @@ def make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range,
             blob_radius_var, blob_number]
         data_.append((params, hist_))
 
+    multiprocessing.set_start_method('fork') # Needed to work python 3.5+ on macOS
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     # Make a manager to allow passing of list around to multiprocessing threads.
     manager = multiprocessing.Manager()
