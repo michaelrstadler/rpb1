@@ -4,9 +4,6 @@ import numpy as np
 import flymovie
 from time import time, process_time
 
-from dask.distributed import Client
-if __name__ == "__main__":
-    client = Client(n_workers=4)
 
 outfile = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/histparams_test2.pkl'
 """

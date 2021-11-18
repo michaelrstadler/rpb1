@@ -225,7 +225,7 @@ def make_scalespace_hist(scalespace, mask=None, numbins=100, histrange=(0,25)):
 
 ############################################################################
 def make_DoG_histograms(stack, mask=None, sigmas=[(1,2),(1,3),(1,5)], 
-    numbins=100, histrange=(0,65_000)):
+    numbins=325, histrange=(-10_000, 10_000)):
     """Make a 2D scale-space histogram of an image stack using difference
     of Gaussian (DoG) filter for scale axis.
 
@@ -265,36 +265,68 @@ def make_DoG_histograms(stack, mask=None, sigmas=[(1,2),(1,3),(1,5)],
     return hist_data
 
 ############################################################################
-def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_range, 
-    blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, 
-    blob_number_range, z_ij_ratio=2, sigmas=[0,0.5,1,1.5,2,4,6], numbins=100, 
-    histrange=(0,25), zdim=40, idim=800, jdim=800, nuc_spacing=200, nuc_rad=50):
-    """Simulate blobs with a range of parameters, record scale-space histograms.
+def make_scalespace_dog_hist(stack, mask, numbins=325, ss_sigmas=[0,0.5,1,2,4], 
+    ss_histrange=(0,66_000), dog_sigmas=[(1,2),(1,3),(1,5)], 
+    dog_histrange=(-10_000, 10_000)):
+    """Wrapper for making scalespace and DoG-space histograms.
     
     Args:
-        bg_mean_range: iterable
-            Range of values for the nuclear baground mean
-        bg_var_range= iterable
-            Range of values for the nuclear background variance
-        blob_intensity_mean_range: iterable
-            Range of values for the blob intensity mean
-        blob_intensity_var_range: iterable
-            Range of values for the blob intensity variance
-        blob_radius_mean_range: iterable
-            Range of values for the blob radius mean
-        blob_radius_var_range: iterable
-            Range of values for the blob radius variance
-        blob_number_range: iterable
-            Range of values for the number of blobs per nucleuc
+        stack: ndarray
+            Image stack
+        mask: ndarray
+            (optional) Mask for values to be included in histogram 
+            calculation
+        numbins: int
+            Number of bins to use for histograms
+        ss_sigmas: iterable of numeric
+            Values to use for the sigmas in scalespace representation
+        ss_histrange: tuple of ints
+            Lower and upper range for values to be included in scalespace
+            histogram
+        dog_sigmas: iterable of tuples (numeric, numeric)
+            Values to use for the smaller sigma value in DoG filter
+        dog_histrange: (int, int)
+            Lower and upper range for values to be included in DoG
+            histogram
+
+    Returns:
+        ndarray
+        Vertical stack of 2D histogram outputs for the two functions
+    """
+    ss_hist = make_scalespace_2dhist(stack, ss_sigmas, mask, numbins, 
+        ss_histrange)
+    dog_hist = make_DoG_histograms(stack, mask, dog_sigmas, numbins, 
+        dog_histrange)
+    return np.vstack((ss_hist, dog_hist))
+
+############################################################################
+def make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range, 
+    blob_intensity_mean_range, blob_intensity_var_range, 
+    blob_radius_mean_range, blob_radius_var_range, blob_number_range, 
+    z_ij_ratio=2, zdim=20, idim=300, jdim=200, nuc_spacing=100, 
+    nuc_rad=50, process_function=make_scalespace_dog_hist, **kwargs):
+    """Simulate nuclei with a parameters selected from ranges, create 
+    representations of simulated images with supplied function.
+    
+    Args:
+        num_sims: int
+            Number of simulations to performs
+        bg_mean_range: tuple of numeric
+            Lower and upper range values for background mean
+        bg_var_range= tuple of numeric
+            Lower and upper range values for background variance
+        blob_intensity_mean_range: tuple of numeric
+            Lower and upper range values for intensity mean
+        blob_intensity_var_range: tuple of numeric
+            Lower and upper range values for blob intensity variance
+        blob_radius_mean_range: tuple of numeric
+            Lower and upper range values for blob radius mean
+        blob_radius_var_range: tuple of numeric
+            Lower and upper range values for blob radius variance
+        blob_number_range: tuple of ints
+            Lower and upper range values for number of blobs per nucleus
         z_ij_ratio: numeric
             Ratio of the size of voxels in z to ji dimensions
-        sigmas: iterable
-            Sigma values to use in constructing scale-space representations
-            of simulated stacks.
-        numbins: int
-            Number of bins for histogram
-        histrange: tuple of ints
-            End points for histogram values
         zdim: int
             Size of simulated stack in pixels in z.
         idim: int
@@ -305,10 +337,14 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
             The spacing, in pixels, between nuclei in i and j.
         nuc_rad: int
             Radius, in pixels, of simulated nuclei.
+        process_function: function
+            Function that processes simulated images. Takes stack and mask
+            as first two arguments, returns ndarray.
+        kwargs:
+            Arguments to process_function
 
     Returns:
-        data_: delayed list
-            Dask delayed object, must be computed using dask.compute(data_).
+        data_: list of tuples
             Each list item is the outcome of a simulation. Items are tuples.
             First (0) item is a list of simulation parameters:
                 0: bg_mean 
@@ -320,47 +356,61 @@ def make_parameter_hist_data(bg_mean_range, bg_var_range, blob_intensity_mean_ra
                 6: blob_number
             Second item (1) is the 2D histogram of the scale-space representation  
     """
+    def random(ab):
+        """Find random float number between a and b, given b > a."""
+        a, b = ab
+        if (b <= a):
+            raise ValueError('b must be greater than a')
+        return (np.random.random() * (b - a)) + a
+
     def sim_and_hist(mask, bg_mean, bg_var, blob_intensity_mean, 
         blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-        z_ij_ratio, sigmas, histrange, numbins, data_):
+        z_ij_ratio, data_, process_function, **kwargs):
         """Call simulation, generate histogram, add to shared list."""
         simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
             blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
             z_ij_ratio)
-        hist_ = make_scalespace_2dhist(simstack, sigmas, mask, numbins, histrange)
+        hist_ = process_function(simstack, mask, **kwargs)
         params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
             blob_radius_var, blob_number]
         data_.append((params, hist_))
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
+    # Make a manager to allow passing of list around to multiprocessing threads.
     manager = multiprocessing.Manager()
     processes = []
     args = []
     with multiprocessing.Manager() as manager:
+        # Create sharable list to store outputs.
         data_ = manager.list()
-        l = manager.list()
-        for bg_mean in bg_mean_range:
-            for bg_var in bg_var_range:
-                for blob_intensity_mean in blob_intensity_mean_range:
-                    for blob_intensity_var in blob_intensity_var_range:
-                        for blob_radius_mean in blob_radius_mean_range:
-                            for blob_radius_var in blob_radius_var_range:
-                                for blob_number in blob_number_range:
-                                    args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
-                                        blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                        z_ij_ratio, sigmas, histrange, numbins, data_])
-        batch_size = 200
+        # Generate parameters by sampling for the sims to run, store in args.
+        for sim_num in range(num_sims):
+            bg_mean = random(bg_mean_range)
+            bg_var = random(bg_var_range)
+            blob_intensity_mean = random(blob_intensity_mean_range)
+            blob_intensity_var = random(blob_intensity_var_range)
+            blob_radius_mean = random(blob_radius_mean_range)
+            blob_radius_var = random(blob_radius_var_range)
+            blob_number = np.random.randint(blob_number_range[0], blob_number_range[1])
+            args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
+                blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+                z_ij_ratio, data_, process_function])
+
+        # Execute simulations in parallel in batches of 200. The proper way to do this
+        # is to use multiprocessing pool but I had some trouble getting it to work. This
+        # solution is sub-optimal but works and probably doesn't have huge costs in speed.
+        batch_size = 1000
         for i in range(0, len(args), batch_size):
             processes = []
             start = i
             end = min(start + batch_size, len(args))
             for j in range(start, end):
-                p = multiprocessing.Process(target=sim_and_hist, args=args[j])
+                p = multiprocessing.Process(target=sim_and_hist, args=args[j], kwargs=kwargs)
                 p.start()
                 processes.append(p)                           
             for process in processes:
                 process.join()
-
+        # Convert manager shareable list to regular list (necessary before exiting 'with' block)
         data_ = list(data_)
         sleep(20) # Prevents errors at the end of computation
 
