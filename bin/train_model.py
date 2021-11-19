@@ -48,5 +48,5 @@ if not os.path.isdir(outfolder):
 tempmodule = SourceFileLoader('',options.model).load_module()
 model, history = tempmodule.train_model(x, y)
 model.save(modelfolder)
-fm.save_pickle(history, os.path.join(outfolder, 'history.pkl'))
+fm.save_pickle(history.history, os.path.join(outfolder, 'history.pkl'))
 
