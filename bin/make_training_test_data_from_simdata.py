@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """make_training_test_data_from_simdata.py.
-
+Takes an output from simulation (histogram and params) and prepares training and test data for learning parameters and image differences.
 
 """
 __author__      = "Michael Stadler"
