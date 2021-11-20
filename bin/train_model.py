@@ -47,6 +47,6 @@ if not os.path.isdir(outfolder):
 # Load model from file.
 tempmodule = SourceFileLoader('',options.model).load_module()
 model, history = tempmodule.train_model(x, y)
-model.save(modelfolder)
+tf.keras.models.save_model(model, modelfolder)
 fm.save_pickle(history.history, os.path.join(outfolder, 'history.pkl'))
 
