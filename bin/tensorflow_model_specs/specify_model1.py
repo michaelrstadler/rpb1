@@ -30,5 +30,5 @@ def train_model(x, y):
         return model
 
     model = get_model(2600, 1)
-    history = model.fit(x, y, validation_split=0.1,epochs=2, callbacks=[callback], verbose=False)
+    history = model.fit(x, y, validation_split=0.1,epochs=40, callbacks=[callback], verbose=False)
     return model, history
