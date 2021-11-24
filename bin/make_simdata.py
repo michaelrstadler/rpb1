@@ -4,9 +4,18 @@ import flymovie
 from time import time, process_time
 import sys
 import os
+import random
+import string
+import re
 
 #outfile = '/global/home/users/mstadler/scratch/sims1-6-57k-2'
-outfile = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/simulations/test.pkl'
+outfile_stem = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/simulations/test'
+
+# Get unique string to identify files and log.
+characters = string.ascii_letters + string.digits
+unique_id = ''.join(random.choice(characters) for i in range(10))
+outfile = outfile_stem + '_' + unique_id + '.pkl'
+logfile = outfile_stem + '_' + unique_id + '_log.txt'
 
 num_sims = 200
 bg_mean_range=[9_000, 11_000]
@@ -43,4 +52,18 @@ data_ = fm.make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range,
 t_end = time()
 print (t_end - t_start)
 fm.save_pickle(data_, outfile)
+
+param_names_cat = 'num_sims, bg_mean_range, bg_var_range, blob_intensity_mean_range, blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, blob_number_range, z_ij_ratio, zdim, idim, jdim, nuc_spacing, nuc_rad, process_function, numbins, ss_sigmas, ss_histrange, dog_sigmas, dog_histrange'
+param_names = re.split(',\s*', param_names_cat)
+
+params = (num_sims, bg_mean_range, bg_var_range, 
+    blob_intensity_mean_range, blob_intensity_var_range, 
+    blob_radius_mean_range, blob_radius_var_range, blob_number_range, 
+    z_ij_ratio, zdim, idim, jdim, nuc_spacing, nuc_rad, process_function, 
+    numbins, ss_sigmas, ss_histrange, dog_sigmas, dog_histrange)
+
+with open(logfile, 'w') as log:
+    for i in range(0, len(params)):
+        log.write(param_names[i] + ': ' + str(params[i]) + '\n')
+
 sys.exit()
