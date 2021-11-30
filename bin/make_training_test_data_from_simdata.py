@@ -147,7 +147,7 @@ def make_similarity_data(x_in, y_in, num_sample, num_diff):
         x_sub = x_in[sampled_indexes2]
         y_sub = y_in[sampled_indexes2]
         # Get differences between reference entry and sampled comparison entries.
-        x_diffs = x_sub - x_in[index1]
+        x_diffs = (x_sub - x_in[index1]) ** 2
         y_diffs = np.sum((y_sub - y_in[index1]) ** 2, axis=1) # sum of squared differences
         # Assign difference scores to empty positions in container.
         start = i * num_diff
