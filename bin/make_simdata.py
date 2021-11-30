@@ -17,7 +17,7 @@ unique_id = ''.join(random.choice(characters) for i in range(10))
 outfile = outfile_stem + '_' + unique_id + '.pkl'
 logfile = outfile_stem + '_' + unique_id + '_log.txt'
 
-num_sims = 200
+num_sims = 100_000
 bg_mean_range=[9_000, 11_000]
 bg_var_range=[2700, 3300] 
 blob_intensity_mean_range=[15_000, 25_000]

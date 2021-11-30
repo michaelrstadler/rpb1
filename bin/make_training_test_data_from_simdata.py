@@ -176,7 +176,7 @@ if __name__ == '__main__':
     num_diff = int(options.num_diff)
 
     x_train_diff, y_train_diff = make_similarity_data(x_train, y_train, num_sample, num_diff)
-    x_test_diff, y_test_diff = make_similarity_data(x_test, y_test, num_sample_test, num_diff_test)
+    #x_test_diff, y_test_diff = make_similarity_data(x_test, y_test, num_sample_test, num_diff_test)
 
     hist_training_outfile = options.outfilestem + '_hist_training.pkl'
     hist_test_outfile = options.outfilestem + '_hist_test.pkl'
@@ -186,4 +186,4 @@ if __name__ == '__main__':
     fm.save_pickle((x_train, y_train), hist_training_outfile)
     fm.save_pickle((x_test, y_test), hist_test_outfile)
     fm.save_pickle((x_train_diff, y_train_diff), diff_training_outfile)
-    fm.save_pickle((x_test_diff, y_test_diff), diff_test_outfile)
+    #fm.save_pickle((x_test_diff, y_test_diff), diff_test_outfile)
