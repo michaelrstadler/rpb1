@@ -128,7 +128,7 @@ def merge_data(x_train1, x_train2, y_train1, y_train2):
     x_train_new = np.hstack((x_train1[order1], x_train2[order2]))
     return x_train_new, y_train1_new
 
-def orient_diffhist(x):
+def orient_positive_sum(x):
     """Orient difference histogram so that is has a positive sum."""
     if np.sum(x) < 0:
         return -1 * x
@@ -153,13 +153,14 @@ def make_similarity_data(x_in, y_in, num_sample, num_diff):
         x_sub = x_in[sampled_indexes2]
         y_sub = y_in[sampled_indexes2]
         # Get differences between reference entry and sampled comparison entries.
-        x_diffs = orient_diffhist(x_sub - x_in[index1])
+        x_diffs = x_sub - x_in[index1]
         y_diffs = np.sum((y_sub - y_in[index1]) ** 2, axis=1) # sum of squared differences
         # Assign difference scores to empty positions in container.
         start = i * num_diff
         end = start + num_diff
         x[start:end] = x_diffs
         y[start:end] = np.expand_dims(y_diffs, axis=1)
+    x = np.apply_along_axis(orient_positive_sum, axis=1, arr=x)
     return x, y
 
 if __name__ == '__main__':
