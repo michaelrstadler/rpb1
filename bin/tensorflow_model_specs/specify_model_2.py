@@ -31,6 +31,6 @@ def train_model(x, y):
         model.compile(loss='mse', optimizer=optimizer)
         return model
 
-    model = get_model(2600, 7)
-    history = model.fit(x, y, validation_split=0.1, epochs=40, callbacks=[callback], verbose=False)
+    model = get_model(4875, 1)
+    history = model.fit(x, y, validation_split=0.1, epochs=50, callbacks=[callback], verbose=False)
     return model, history
