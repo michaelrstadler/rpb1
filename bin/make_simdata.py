@@ -17,7 +17,7 @@ unique_id = ''.join(random.choice(characters) for i in range(10))
 outfile = outfile_stem + '_' + unique_id + '.pkl'
 logfile = outfile_stem + '_' + unique_id + '_log.txt'
 
-num_sims = 100_000
+num_sims = 10
 bg_mean_range=[9_000, 11_000]
 bg_var_range=[2700, 3300] 
 blob_intensity_mean_range=[15_000, 25_000]
@@ -42,7 +42,7 @@ dog_sigmas=[(1,2),(1,3),(1,5)]
 dog_histrange=(-10_000, 10_000)
 
 t_start = time()
-data_ = fm.make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range, 
+data_ = fm.make_simulations_representations_from_sampled_params(num_sims, bg_mean_range, bg_var_range, 
     blob_intensity_mean_range, blob_intensity_var_range, 
     blob_radius_mean_range, blob_radius_var_range, blob_number_range, 
     z_ij_ratio, zdim, idim, jdim, nuc_spacing, nuc_rad, process_function, 

@@ -300,7 +300,7 @@ def make_scalespace_dog_hist(stack, mask, numbins=325, ss_sigmas=[0,0.5,1,2,4],
     return np.vstack((ss_hist, dog_hist))
 
 ############################################################################
-def make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range, 
+def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range, bg_var_range, 
     blob_intensity_mean_range, blob_intensity_var_range, 
     blob_radius_mean_range, blob_radius_var_range, blob_number_range, 
     z_ij_ratio=2, zdim=20, idim=300, jdim=200, nuc_spacing=100, 
@@ -370,6 +370,8 @@ def make_parameter_hist_data(num_sims, bg_mean_range, bg_var_range,
         simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
             blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
             z_ij_ratio)
+        # Normalize simulated stack using mean and a scale factor.
+        simstack = simstack / np.mean(simstack[np.where(mask)]) * 10_000
         hist_ = process_function(simstack, mask, **kwargs)
         params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
             blob_radius_var, blob_number]
