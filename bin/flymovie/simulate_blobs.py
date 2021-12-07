@@ -371,7 +371,7 @@ def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range
             blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
             z_ij_ratio)
         # Normalize simulated stack using mean and a scale factor.
-        simstack = simstack / np.mean(simstack[np.where(mask)]) * 10_000
+        simstack = simstack / np.median(simstack[np.where(mask)]) * 10_000
         hist_ = process_function(simstack, mask, **kwargs)
         params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
             blob_radius_var, blob_number]
