@@ -9,6 +9,7 @@ import warnings
 import gc
 import os
 import multiprocessing
+import random
 from time import sleep
 
 ############################################################################
@@ -111,6 +112,8 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
     # Initialize stack with just nuclear backgrounds.
     bg_stack = np.random.normal(bg_mean, bg_var, size=nucmask.shape)
     simstack = np.where(nucmask, bg_stack, 0)
+    # Initialize a randomly seeded random state to make thread safe.
+    rs = np.random.RandomState()
     # Go through each nucleus, add specified blobs.
     for nuc_id in np.unique(nucmask)[1:]:
         # Get the set of coordinates for this nucleus.
@@ -118,12 +121,12 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
         nuc_numpixels = len(nuc_coords[0])
         for n in range(0, blob_number):
             # Get blob radii in ij (lateral) and z (axial) dimensions.
-            r_ij = np.random.normal(blob_radius_mean, blob_radius_var)
+            r_ij = rs.normal(blob_radius_mean, blob_radius_var)
             r_z = r_ij / z_ij_ratio
             # Get randomly-generated intensity.
-            intensity = np.random.normal(blob_intensity_mean, blob_intensity_var)
+            intensity = rs.normal(blob_intensity_mean, blob_intensity_var)
             # Select a random coordinat in the nucleus.
-            rand_pixel_num = np.random.randint(0, nuc_numpixels - 1)
+            rand_pixel_num = rs.randint(0, nuc_numpixels - 1)
             z, i, j = nuc_coords[0][rand_pixel_num], nuc_coords[1][rand_pixel_num], nuc_coords[2][rand_pixel_num]
             #gaussian_function = gaussian3d(z, i, j, intensity, r_z, r_ij, r_ij)
             # Make a 3D "box" with values from specified 3D gaussian function, then
@@ -300,6 +303,22 @@ def make_scalespace_dog_hist(stack, mask, numbins=325, ss_sigmas=[0,0.5,1,2,4],
     return np.vstack((ss_hist, dog_hist))
 
 ############################################################################
+def randomize_ab(ab):
+    """Find random float number between a and b, given b > a.
+    
+    Args:
+        ab: iterable
+            Two numbers in an iterable, b > a.
+    
+    Returns:
+        random float between a and b
+    """
+    a, b = ab
+    if (b <= a):
+        raise ValueError('b must be greater than a')
+    return (np.random.random() * (b - a)) + a
+
+############################################################################
 def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range, bg_var_range, 
     blob_intensity_mean_range, blob_intensity_var_range, 
     blob_radius_mean_range, blob_radius_var_range, blob_number_range, 
@@ -356,12 +375,6 @@ def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range
                 6: blob_number
             Second item (1) is the 2D histogram of the scale-space representation  
     """
-    def random(ab):
-        """Find random float number between a and b, given b > a."""
-        a, b = ab
-        if (b <= a):
-            raise ValueError('b must be greater than a')
-        return (np.random.random() * (b - a)) + a
 
     def sim_and_hist(mask, bg_mean, bg_var, blob_intensity_mean, 
         blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
@@ -388,12 +401,12 @@ def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range
         data_ = manager.list()
         # Generate parameters by sampling for the sims to run, store in args.
         for sim_num in range(num_sims):
-            bg_mean = random(bg_mean_range)
-            bg_var = random(bg_var_range)
-            blob_intensity_mean = random(blob_intensity_mean_range)
-            blob_intensity_var = random(blob_intensity_var_range)
-            blob_radius_mean = random(blob_radius_mean_range)
-            blob_radius_var = random(blob_radius_var_range)
+            bg_mean = randomize_ab(bg_mean_range)
+            bg_var = randomize_ab(bg_var_range)
+            blob_intensity_mean = randomize_ab(blob_intensity_mean_range)
+            blob_intensity_var = randomize_ab(blob_intensity_var_range)
+            blob_radius_mean = randomize_ab(blob_radius_mean_range)
+            blob_radius_var = randomize_ab(blob_radius_var_range)
             blob_number = np.random.randint(blob_number_range[0], blob_number_range[1])
             args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
                 blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
@@ -421,27 +434,33 @@ def make_simulations_representations_from_sampled_params(num_sims, bg_mean_range
     
 
 ############################################################################
-def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_mean_range, 
+def make_simulations_from_sampled_params(outfolder, bg_mean_range, bg_var_range, blob_intensity_mean_range, 
     blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, 
-    blob_number_range, z_ij_ratio=2, zdim=20, idim=200, jdim=200, 
+    blob_number_range, num_sims, num_replicates, z_ij_ratio=2, zdim=20, idim=200, jdim=200, 
     nuc_spacing=100, nuc_rad=50):
     """Simulate blobs with a range of parameters, return simulations.
     
     Args:
-        bg_mean_range: iterable
-            Range of values for the nuclear baground mean
-        bg_var_range= iterable
-            Range of values for the nuclear background variance
-        blob_intensity_mean_range: iterable
-            Range of values for the blob intensity mean
-        blob_intensity_var_range: iterable
-            Range of values for the blob intensity variance
-        blob_radius_mean_range: iterable
-            Range of values for the blob radius mean
-        blob_radius_var_range: iterable
-            Range of values for the blob radius variance
-        blob_number_range: iterable
-            Range of values for the number of blobs per nucleuc
+        outfolder: folder
+            Folder in which to write simulation files.
+        bg_mean_range: tuple of numeric
+            Lower and upper range values for background mean
+        bg_var_range= tuple of numeric
+            Lower and upper range values for background variance
+        blob_intensity_mean_range: tuple of numeric
+            Lower and upper range values for intensity mean
+        blob_intensity_var_range: tuple of numeric
+            Lower and upper range values for blob intensity variance
+        blob_radius_mean_range: tuple of numeric
+            Lower and upper range values for blob radius mean
+        blob_radius_var_range: tuple of numeric
+            Lower and upper range values for blob radius variance
+        blob_number_range: tuple of ints
+            Lower and upper range values for number of blobs per nucleus
+        num_sims: int
+            Number of parameter combinations to simulate
+        num_replicates: int
+            Number of simulations to perform for each parameter set
         z_ij_ratio: numeric
             Ratio of the size of voxels in z to ji dimensions
         zdim: int
@@ -456,45 +475,40 @@ def simulate_param_range(outfolder, bg_mean_range, bg_var_range, blob_intensity_
             Radius, in pixels, of simulated nuclei.
 
     Returns:
-        data_: delayed list
-            Dask delayed object, must be computed using dask.compute(data_).
-            Each list item is the outcome of a simulation. Items are tuples.
-            First (0) item is a list of simulation parameters:
-                0: bg_mean 
-                1: bg_var 
-                2: blob_intensity_mean 
-                3: blob_intensity_var 
-                4: blob_radius_mean 
-                5: blob_radius_var
-                6: blob_number
-            Second item (1) is the simulated image stack.
+        Pickled ndarrays representing simulated image stacks. Parameters 
+        (with replicate number) are separated by _ in filenames.
     """
     def sim_and_save(mask, bg_mean, bg_var, blob_intensity_mean, 
         blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-        z_ij_ratio):
+        z_ij_ratio, rep_num):
+        """"""
         simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
             blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
             z_ij_ratio)
         params = [bg_mean, bg_var, blob_intensity_mean, blob_intensity_var, blob_radius_mean, 
             blob_radius_var, blob_number]
-        param_string = '_'.join([str(x) for x in params])
-        filename = os.path.join(outfolder, param_string + '.pkl')
+        param_string = '_'.join([str(round(x, 2)) for x in params])
+        filename = os.path.join(outfolder, param_string + '_' + str(rep_num) + '.pkl')
         save_pickle(simstack, filename)
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     args = []
-    for bg_mean in bg_mean_range:
-        for bg_var in bg_var_range:
-            for blob_intensity_mean in blob_intensity_mean_range:
-                for blob_intensity_var in blob_intensity_var_range:
-                    for blob_radius_mean in blob_radius_mean_range:
-                        for blob_radius_var in blob_radius_var_range:
-                            for blob_number in blob_number_range:
-                                args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
-                                    blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
-                                    z_ij_ratio])
-                                
-    batch_size = 2000
+    for sim_num in range(num_sims):
+        bg_mean = randomize_ab(bg_mean_range)
+        bg_var = randomize_ab(bg_var_range)
+        blob_intensity_mean = randomize_ab(blob_intensity_mean_range)
+        blob_intensity_var = randomize_ab(blob_intensity_var_range)
+        blob_radius_mean = randomize_ab(blob_radius_mean_range)
+        blob_radius_var = randomize_ab(blob_radius_var_range)
+        blob_number = np.random.randint(blob_number_range[0], blob_number_range[1])
+        for rep_num in range(num_replicates):
+            args.append([mask, bg_mean, bg_var, blob_intensity_mean, 
+                blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
+                z_ij_ratio, rep_num])
+
+    multiprocessing.set_start_method('fork', force=True) 
+    random.shuffle(args)
+    batch_size = 1000
     for i in range(0, len(args), batch_size):
         processes = []
         start = i
