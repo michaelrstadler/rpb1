@@ -109,11 +109,11 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
     
     ij_windowlen = make_odd(blob_radius_mean * 10.5)
     z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
-    # Initialize stack with just nuclear backgrounds.
-    bg_stack = np.random.normal(bg_mean, bg_var, size=nucmask.shape)
+    # Initialize stack with just randomized nuclear backgrounds.
+    rs = np.random.RandomState()
+    bg_stack = rs.random.normal(bg_mean, bg_var, size=nucmask.shape)
     simstack = np.where(nucmask, bg_stack, 0)
     # Initialize a randomly seeded random state to make thread safe.
-    rs = np.random.RandomState()
     # Go through each nucleus, add specified blobs.
     for nuc_id in np.unique(nucmask)[1:]:
         # Get the set of coordinates for this nucleus.
@@ -125,6 +125,7 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
             r_z = r_ij / z_ij_ratio
             # Get randomly-generated intensity.
             intensity = rs.normal(blob_intensity_mean, blob_intensity_var)
+            intensity = np.max([0, intensity])
             # Select a random coordinat in the nucleus.
             rand_pixel_num = rs.randint(0, nuc_numpixels - 1)
             z, i, j = nuc_coords[0][rand_pixel_num], nuc_coords[1][rand_pixel_num], nuc_coords[2][rand_pixel_num]
@@ -481,7 +482,9 @@ def make_simulations_from_sampled_params(outfolder, bg_mean_range, bg_var_range,
     def sim_and_save(mask, bg_mean, bg_var, blob_intensity_mean, 
         blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
         z_ij_ratio, rep_num):
-        """"""
+        """Simulate stack, save to disk.
+        (This is the packet that is parallelized)
+        """
         simstack = simulate_blobs(mask, bg_mean, bg_var, blob_intensity_mean, 
             blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
             z_ij_ratio)
@@ -493,6 +496,7 @@ def make_simulations_from_sampled_params(outfolder, bg_mean_range, bg_var_range,
 
     mask = make_dummy_mask(zdim, idim, jdim, nuc_spacing, nuc_rad)
     args = []
+    # Populate args with parameter sets drawn randomly from supplied ranges.
     for sim_num in range(num_sims):
         bg_mean = randomize_ab(bg_mean_range)
         bg_var = randomize_ab(bg_var_range)
@@ -506,8 +510,8 @@ def make_simulations_from_sampled_params(outfolder, bg_mean_range, bg_var_range,
                 blob_intensity_var, blob_radius_mean, blob_radius_var, blob_number, 
                 z_ij_ratio, rep_num])
 
-    multiprocessing.set_start_method('fork', force=True) 
-    random.shuffle(args)
+    multiprocessing.set_start_method('fork', force=True) # Important for macOS.
+    random.shuffle(args) # Unecessary, but helps alleviate potential concerns with random number generation.
     batch_size = 1000
     for i in range(0, len(args), batch_size):
         processes = []
