@@ -111,7 +111,8 @@ def simulate_blobs(nucmask, bg_mean=10000, bg_var=10, blob_intensity_mean=20000,
     z_windowlen = make_odd(ij_windowlen / z_ij_ratio)
     # Initialize stack with just randomized nuclear backgrounds.
     rs = np.random.RandomState()
-    bg_stack = rs.random.normal(bg_mean, bg_var, size=nucmask.shape)
+    bg_stack = rs.normal(bg_mean, bg_var, size=nucmask.shape)
+    bg_stack = np.where(bg_stack >= 0, bg_stack, 0)
     simstack = np.where(nucmask, bg_stack, 0)
     # Initialize a randomly seeded random state to make thread safe.
     # Go through each nucleus, add specified blobs.
