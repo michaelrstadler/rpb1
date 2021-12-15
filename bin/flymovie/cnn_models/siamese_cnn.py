@@ -11,6 +11,8 @@ from tensorflow.keras import metrics
 from tensorflow.keras import Model
 from tensorflow.keras.applications import resnet
 
+from flymovie.load_save import load_pickle
+
 ############################################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block, 
 		channels_axis=1):
@@ -229,7 +231,7 @@ def make_siamese_network(input_model, name='siamese_network'):
         keras model
     """
     input_shape = input_model.input_shape
-    print(input_shape[1:])
+
     anchor_input = layers.Input(name="anchor", shape=input_shape[1:])
     positive_input = layers.Input(name="positive", shape=input_shape[1:])
     negative_input = layers.Input(name="negative", shape=input_shape[1:])
@@ -318,3 +320,75 @@ class SiameseModel(Model):
         # We need to list our metrics here so the `reset_states()` can be
         # called automatically.
         return [self.loss_tracker]
+
+############################################################################
+def make_triplet_inputs(folder):
+    def preprocess_image_fromfile(filename):
+        image = load_pickle(filename)
+        return preprocess_image(image)
+    
+    def preprocess_image(image):
+        """
+        Load the specified pkl file, make max intensity projection, normalize.
+        """
+        mip = image.max(axis=0)
+        mip = mip.astype('float32')
+        mip = np.expand_dims(mip, axis=0)
+        #mip = np.vstack([mip, mip, mip])
+        #mip = np.swapaxes(mip, 0, 2)
+        # Normalize 0-1.
+        mip = (mip - np.min(mip)) / np.max(mip) 
+        return mip
+
+    ## Make lists of anchor, positive, and negative datasets.
+
+    # Set directories.
+    cache_dir = Path(folder)
+    anchor_images_path = cache_dir / "left"
+    positive_images_path = cache_dir / "right"
+
+    # Create lists of sorted files for anchor and positive images.
+    anchor_image_files = sorted(
+        [str(anchor_images_path / f) for f in os.listdir(anchor_images_path)]
+    )
+
+    positive_image_files = sorted(
+        [str(positive_images_path / f) for f in os.listdir(positive_images_path)]
+    )
+
+    image_count = len(anchor_image_files)
+
+    # To generate the list of negative images, randomize the list of
+    # available images and concatenate them together.
+    negative_image_files = anchor_image_files + positive_image_files
+    np.random.RandomState(seed=32).shuffle(negative_image_files)
+    np.random.RandomState(seed=16).shuffle(negative_image_files)
+    np.random.RandomState(seed=8).shuffle(negative_image_files)
+
+    # Apply preprocessing to all input images, return as lists.
+    anchor_images = list(map(preprocess_image_fromfile, anchor_image_files))
+    positive_images = list(map(preprocess_image_fromfile, positive_image_files))
+    negative_images = list(map(preprocess_image_fromfile, negative_image_files))
+
+    # Convert lists to tf datasets, shuffle the negatives again for good measure.
+    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_images)
+    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_images)
+    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_images)
+    negative_dataset = negative_dataset.shuffle(buffer_size=4096)
+
+    # Zip three datasets together to make final dataset, where each entry is a triplet of anchor, positive, and negative images.
+    dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
+
+    # Split dataset into training and validation sets.
+    train_dataset = dataset.take(round(image_count * 0.8))
+    val_dataset = dataset.skip(round(image_count * 0.8))
+
+    # Divide training and validation datasets into batches of size 32, prefetch them 
+    # (which I still don't totally understand but seems to pre-activate them in some
+    # meaningrul way).
+    train_dataset = train_dataset.batch(32, drop_remainder=False)
+    train_dataset = train_dataset.prefetch(8)
+
+    val_dataset = val_dataset.batch(32, drop_remainder=False)
+    val_dataset = val_dataset.prefetch(8)
+    return train_dataset, val_dataset
