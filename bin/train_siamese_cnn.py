@@ -2,11 +2,13 @@ import flymovie as fm
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
+import sys
+import os
 
-train_data_file = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/simulations/sims-test_kXXU9jhTIa'
-model_save_file = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/simulations/sims-test_model'
+train_data_folder = sys.argv[1]
+model_save_file = os.path.join(train_data_folder, 'model')
 
-cache_dir = Path(train_data_file)
+cache_dir = Path(train_data_folder)
 target_shape = (100, 100)
 channels_axis=1
 
