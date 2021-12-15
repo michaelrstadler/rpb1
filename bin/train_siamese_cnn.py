@@ -11,9 +11,9 @@ model_save_file = os.path.join(train_data_folder, 'model')
 cache_dir = Path(train_data_folder)
 target_shape = (100, 100)
 channels_axis=1
-
+print('Loading training data...', end='')
 train_dataset, val_dataset = fm.make_triplet_inputs(cache_dir)
-
+print('finished.')
 base_cnn = fm.cnn_models.siamese_cnn.make_base_cnn(image_shape=(100,100))
 embedding = fm.cnn_models.siamese_cnn.make_embedding(base_cnn)
 siamese_network = fm.cnn_models.siamese_cnn.make_siamese_network(embedding)
