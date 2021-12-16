@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import random
+import pickle
 import tensorflow as tf
 from pathlib import Path
 from tensorflow.keras import applications
@@ -11,7 +12,7 @@ from tensorflow.keras import metrics
 from tensorflow.keras import Model
 from tensorflow.keras.applications import resnet
 
-from flymovie.load_save import load_pickle
+#from flymovie.load_save import load_pickle
 
 ############################################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block, 
@@ -323,8 +324,10 @@ class SiameseModel(Model):
 
 ############################################################################
 def make_triplet_inputs(folder):
+
     def preprocess_image_fromfile(filename):
-        image = load_pickle(filename)
+        with open(filename, 'rb') as file:
+            image = pickle.load(file)
         return preprocess_image(image)
     
     def preprocess_image(image):
