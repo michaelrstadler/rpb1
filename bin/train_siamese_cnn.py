@@ -21,4 +21,5 @@ siamese_model = cn.SiameseModel(siamese_network)
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 history = siamese_model.fit(train_dataset, epochs=2, validation_data=val_dataset, verbose=True)
 
+tf.keras.models.save_model(siamese_model, model_save_file)
 #tf.saved_model.save(siamese_model, model_save_file)
