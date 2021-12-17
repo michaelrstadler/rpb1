@@ -562,7 +562,7 @@ def connect_ms2_fits_focuscorrect(fits_orig, z_frames, z_corrs, nucmask,
         frame_corrs = np.concatenate((frame_corrs, np.repeat(corr, end_frame - start_frame + 1)))
     
     ## SECOND PART: Run spot connection on "corrected" fits object.
-    spots_connected = connect_ms2_frames(fits_adj, nucmask, max_frame_gap, max_jump, scale_xy, scale_z)
+    spots_connected = connect_ms2_frames_nearest(fits_adj, nucmask, max_frame_gap, max_jump, scale_xy, scale_z)
     
     ## THIRD PART: Undo the adjustments in Z to make the spot coordinates match the concatenated
     ## stack.
