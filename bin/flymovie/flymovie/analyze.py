@@ -409,7 +409,7 @@ def spot_data_bleach_correct_constantdepth(spot_data, stack, channel,
     return spot_data_corr
 
 #######################################################################
-def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True, 
+def spotdf_plot_traces(df_list, minlen, sigma=0.8, 
     figsize=None):
     """Plot individual traces from MS2 spot pandas dfs with a minimum 
     trajectory length filter.
@@ -423,10 +423,7 @@ def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True,
             Minimum length (number of non-nan values) of trajectories to plot
         sigma: numeric
             Sigma for gaussian smoothing of traces
-        norm: bool
-            If true, traces are normalized between the 5th and 95th percentile
-            of all non-nan values in the dataset
-    
+        
     Returns: none 
     """
     dfs = copy.deepcopy(df_list)
@@ -446,12 +443,6 @@ def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True,
     # Filter input dfs for trajectory length.
     for i in range(0, len(dfs)):
         dfs[i] = df_process(dfs[i], dfs[i], minlen)
-
-    # Get limits for normalization.
-    if norm:
-        for i in range(0, len(dfs)):
-            lower, upper = np.nanpercentile(dfs[i].to_numpy().flatten(), [5, 95])
-            dfs[i] = dfs[i].apply(norm_trace, 0)
     
     num_to_plot=dfs[0].shape[1]
     
@@ -468,32 +459,6 @@ def spotdf_plot_traces(df_list, minlen, sigma=0.8, norm=True,
         figsize=(16, 1.5*nrow)
     plot_ps(plot_function, range(0,num_to_plot), figsize=figsize)
     plt.tight_layout()
-
-############################################################################
-def spotdf_plot_traces_bleachcorrect(df1, df2, minlen, stack4d, sigma=0.8, 
-        norm=True):
-    """Plot individual traces from MS2 spot pandas dfs with a minimum 
-    trajectory length filter and bleaching correction with the 
-    spotdf_bleach_correct function.
-    
-    Args:
-        df1: pandas df
-            First dataset to plot
-        df2: pandas df
-            Second dataset to plot
-        minlen: int
-            Minimum length (number of non-nan values) of trajectories to plot
-        stack4d: 4d ndarray
-            Stack used for bleaching correction
-        sigma: numeric
-            Sigma for gaussian smoothing of traces
-        norm: bool
-            If true, traces are normalized between the 5th and 95th percentile
-            of all non-nan values in the dataset
-    
-    Returns: none 
-    """
-    spotdf_plot_traces(spotdf_bleach_correct(df1, stack4d), spotdf_bleach_correct(df2, stack4d), minlen, sigma, norm)
 
 ############################################################################
 def correct_spot_data_depth(spot_data, slope=-338, slice_thickness=0.66, 

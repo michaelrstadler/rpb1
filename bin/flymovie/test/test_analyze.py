@@ -12,7 +12,7 @@ from flymovie.load_save import load_pickle
 # load_test_data function in test package.
 wkdir = os.getcwd()
 sys.path.append(wkdir)
-from load_test_data import load_test_data
+from .load_test_data import load_test_data
 
 class TestData():
     def __init__(self):
@@ -51,12 +51,7 @@ class TestAnalyzeFunctions(unittest.TestCase):
 
 	def test_spotdf_plot_traces(self):
 		# Test if it runs.
-		spotdf_plot_traces(test_data.df, test_data.df, 0)
-
-	def test_spotdf_plot_traces_bleachcorrect(self):
-		# Test if it runs.
-		spotdf_plot_traces_bleachcorrect(test_data.df, test_data.df, 0, 
-			test_data.df_stack[1])	
+		spotdf_plot_traces([test_data.df, test_data.df], 0)
 
 	def test_threshold_w_slope(self):
 		input_ = np.ones((5,10,10)) * 10
@@ -116,17 +111,18 @@ class TestAnalyzeFunctions(unittest.TestCase):
 			# Set frames.
 			input_[n][:, 0] = np.arange(0,20)
 			# Set depths.
-			input_[n][:, 12] = np.arange(0, 10, 0.5)
+			input_[n][:, 12] = np.ones(20)
 			# Set intensities.
 			input_[n][:, 9] = np.arange(0, 10, 0.5)
 
 		paramgrid_a = np.ones((250,200))
-		paramgrid_b = np.zeros((250,200))
+		paramgrid_b = np.ones((250,200))
 		paramgrid_c = np.ones((250,200))
 		paramgrids = (paramgrid_a, paramgrid_b, paramgrid_c)
 		output = spot_data_depth_correct_stdcandle(input_, paramgrids, col_to_correct=9, col_depth=12, target_depth=10)
+		#print(output)
 		for spot_id in output:
-			self.assertTrue(np.array_equal(output[spot_id][:,9], np.repeat(2, 20)), 'Should be all 2s.')
+			self.assertTrue(np.allclose(output[spot_id][:,9], np.repeat(np.exp(-10) + 1, 20)), 'Should be equal.')
 
 	def test_spot_data_depth_correct_fromdata(self):
 		input_ = {}
