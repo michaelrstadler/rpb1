@@ -41,7 +41,11 @@ class TestDetectSpots(unittest.TestCase):
 		max_ = 0
 		for n in range(0, len(test_output)):
 			# Fitting is not deterministic, so some tolerance must be allowed.
-			err = np.nanpercentile(test_output[n] - correct_output[n], 95)
+			#print(len(np.count_nonzero(np.isnan(test_output[n]))))
+			test_ = test_output[n]
+			test_[test_ == np.inf] = 1e10
+			correct = correct_output[n]
+			err = np.nanpercentile(test_ - correct, 95)
 			self.assertTrue(err <= 0.01, 'Should be the same')
 		
 	

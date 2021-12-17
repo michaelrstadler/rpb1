@@ -19,7 +19,6 @@ def load_test_data(dir_):
     class TestData():
         def __init__(self):
             pass
-    print(os.path.join(dir_, 'test', 'test_data', 'test_data1.pkl'))
     with open(os.path.join(dir_, 'test', 'test_data', 'test_data1.pkl'), 'rb') as file:
         test_data = pickle.load(file)
     with open(os.path.join(dir_, 'test', 'test_data', 'test_data2.pkl'), 'rb') as file:

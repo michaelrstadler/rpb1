@@ -120,7 +120,6 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		paramgrid_c = np.ones((250,200))
 		paramgrids = (paramgrid_a, paramgrid_b, paramgrid_c)
 		output = spot_data_depth_correct_stdcandle(input_, paramgrids, col_to_correct=9, col_depth=12, target_depth=10)
-		#print(output)
 		for spot_id in output:
 			self.assertTrue(np.allclose(output[spot_id][:,9], np.repeat(np.exp(-10) + 1, 20)), 'Should be equal.')
 
@@ -155,7 +154,6 @@ class TestAnalyzeFunctions(unittest.TestCase):
 		# Make stack means 1, 2, 3, 4, 5.
 		for i in range(1,5):
 			stack[:, i] = stack[:, i] * (i+1)
-		#print(np.mean(stack[1,3]))
 		output = spot_data_bleach_correct_constantdepth(spot_data, 
 		stack, 1, 0, 0.000001, [5, 5], [2], 0.5, ref_depth=6)
 		
