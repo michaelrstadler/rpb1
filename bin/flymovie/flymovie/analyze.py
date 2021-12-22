@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+
+"""
+Functions for analyzing MS2 trace data.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
+
 import numpy as np
 from scipy import ndimage as ndi
 import pandas as pd

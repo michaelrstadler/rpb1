@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+
+"""
+Functions for loading and saving imaging data.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
 
 import numpy as np
 import os

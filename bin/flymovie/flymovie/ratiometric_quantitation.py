@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+
+"""
+Functions for performing ratiometric quantitation of fluorescence images.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
+
 import numpy as np
 import os
 import matplotlib.pyplot as plt

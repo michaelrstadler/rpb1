@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+
+"""
+General functions for analyzing image data.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
+
 import numpy as np
 import os
 from scipy import ndimage as ndi

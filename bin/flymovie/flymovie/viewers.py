@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+
+"""
+An interactive viewer for viewing imaging data in Jupyter notebooks.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
+
 import numpy as np
 import matplotlib as mpl
 import os
