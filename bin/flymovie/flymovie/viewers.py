@@ -489,7 +489,7 @@ def spot_movies(stack, spot_data, channel=0, len_ij=15, len_z=7, fill=np.nan, vi
 
     # Check that window dimensions are appropriate.
     if ((len_ij % 2 == 0) or (len_z % 2 == 0)):
-        raise ValuError('len_ij and len_z must be odd')
+        raise ValueError('len_ij and len_z must be odd')
     # Define 'radii' for window (distance to go from home pixel in each direction).
     z_rad = int((len_z - 1) / 2)
     ij_rad = int((len_ij - 1) / 2)
