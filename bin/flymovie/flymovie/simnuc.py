@@ -150,37 +150,11 @@ class Sim():
 
         else:
             raise ValueError('Only poisson+gaussian model currently supported.')
-    
-    #-----------------------------------------------------------------------
-    @staticmethod
-    def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
-            z_windowlen, ij_windowlen):
-        """Make a 3D gaussian signal within a box of defined size.
-        
-        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
-        together to produce a proper 3D gaussian.
-        
-        Args:
-            intensity: numeric, intensity of gaussian (height in 1d)
-            sigma_z: numeric, sigma of gaussian in Z dimension
-            sigma_ij: numeric, sigma of gaussian in ij dimension
-            z_windowlen: int, length in z dimension of box will be 2X this
-            ij_windowlen: int, length in ij dimension of box will be 2X this
-        """
-        d1 = scipy.signal.gaussian(ij_windowlen, sigma_ij)
-        d2 = np.outer(d1, d1)
-        z_1dvector = scipy.signal.gaussian(z_windowlen, sigma_z)
-        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
-        return intensity * d3
 
     #-----------------------------------------------------------------------
-    @staticmethod
-    def make_flattop_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
-            z_windowlen, ij_windowlen):
+    def make_3d_gaussian_inabox(self, intensity, sigma, 
+            z_windowlen, ij_windowlen, p=1):
         """Make a 3D gaussian signal within a box of defined size.
-        
-        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
-        together to produce a proper 3D gaussian.
         
         Args:
             intensity: numeric, intensity of gaussian (height in 1d)
@@ -189,11 +163,18 @@ class Sim():
             z_windowlen: int, length in z dimension of box will be 2X this
             ij_windowlen: int, length in ij dimension of box will be 2X this
         """
-        d1 = scipy.signal.gaussian(ij_windowlen, sigma_ij)
-        d2 = np.outer(d1, d1)
-        z_1dvector = scipy.signal.gaussian(z_windowlen, sigma_z)
-        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
-        return intensity * d3
+        mesh = mesh_like(np.ones((z_windowlen, ij_windowlen, ij_windowlen)), n=3)
+        # Adjust z coordinates to account for non-isotropy.
+        mesh[0] = mesh[0] * self.z_ij_ratio
+        midpoint_z = int(z_windowlen / 2 * self.z_ij_ratio)
+        midpoint_ij = int(ij_windowlen / 2)
+        # Calculate squares distance of each point.
+        d2 = ((mesh[0] - midpoint_z) ** 2) + ((mesh[1] - midpoint_ij) ** 2) + ((mesh[2] - midpoint_ij) ** 2)
+        # Calculate gaussian as PDF.
+        gauss = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-1. * ((d2) / (2 * (sigma ** 2))) ** p))
+        # Scale gaussian to have max of 1.
+        gauss = gauss * (1 / np.max(gauss))
+        return gauss
 
     #-----------------------------------------------------------------------
     @staticmethod
@@ -270,8 +251,7 @@ class Sim():
 
         ij_windowlen = make_odd(sigma * 10.5)
         z_windowlen = make_odd(ij_windowlen / self.z_ij_ratio)
-        sigma_z = sigma / self.z_ij_ratio
-        box = self.make_3d_gaussian_inabox(intensity, sigma_z, sigma, 
+        box = self.make_3d_gaussian_inabox(intensity, sigma, 
             z_windowlen, ij_windowlen)
         self.add_box_to_stack(self.im, box, coords)
     
