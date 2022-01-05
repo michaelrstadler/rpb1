@@ -31,7 +31,6 @@ class TestExtractNuclearMasks(unittest.TestCase):
         self.assertEqual(len(masks), 9, "Should be 9 masks.")
         for m in masks:
             self.assertTrue(np.array_equal(m.shape, target_size), 'Masks should match target size.')
-
     
 #---------------------------------------------------------------------------
 class TestAddBackground(unittest.TestCase):
@@ -62,6 +61,21 @@ class TestAddBackground(unittest.TestCase):
         bg_val = np.unique(sim.im[~sim.mask])[0]
         self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
         self.assertEqual(bg_val, 500., 'Background should just be 500.')
+
+#---------------------------------------------------------------------------
+class TestAddNoise(unittest.TestCase):
+
+    def test_add_noise(self):
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
+        nuc_rad=50, z_ij_ratio=4.5)
+        sim = Sim(mask)
+        sim.add_background(inverse=False, val=10_000)
+        std_before = np.std(sim.im[sim.mask])
+        self.assertEqual(std_before, 0, 'Std before should be 0.')
+        sim.add_noise(model="poisson+gaussian", sigma=100)
+        std_after = np.std(sim.im[sim.mask])
+        self.assertGreater(std_after, std_before, 
+            'Std should increase with added noise.')
 
 
 #---------------------------------------------------------------------------
@@ -117,7 +131,7 @@ class TestAddNBlobs(unittest.TestCase):
         self.assertGreater(var2, var1, 'Variance should have increased')
 
 #---------------------------------------------------------------------------
-class TestHLB(unittest.TestCase):
+class TestAddHLB(unittest.TestCase):
 
     def test_add_hlb(self):
         mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 

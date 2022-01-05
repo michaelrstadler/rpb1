@@ -160,7 +160,7 @@ class Sim():
         else:
             raise ValueError('Only poisson+gaussian and uniform models currently supported.')
 
-#-----------------------------------------------------------------------
+    #-----------------------------------------------------------------------
     def add_noise(self, model='poisson+gaussian',  **kwargs):
         """Add noise to image according to a model.
 
