@@ -128,8 +128,11 @@ class Sim():
             inverse: bool
                 If true, replace foreground, if false, background.
             kwargs:
-                lam: lambda value for poisson distribution (mean and variance)
-                sigma: standard deviation for gaussian noise            
+                poisson+gaussian:
+                    lam: lambda value for poisson distribution (mean and variance)
+                    sigma: standard deviation for gaussian noise     
+                uniform:
+                    val: value to set pixels to       
         """
         if model == 'poisson+gaussian':
             if not all(arg in kwargs for arg in ['lam', 'sigma']):
@@ -147,10 +150,76 @@ class Sim():
             pixels = pixels + noise
             pixels[pixels < 0] = 0
             self.im[coords] = pixels
+        
+        elif model == 'uniform':
+            if not all(arg in kwargs for arg in ['val']):
+                raise ValueError('uniform mode requires kwarg val.')
+            val = kwargs['val']
+            self.im[coords] = val
+  
+            else:
+                raise ValueError('Only poisson+gaussian and uniform models currently supported.')
 
         else:
+<<<<<<< Updated upstream
             raise ValueError('Only poisson+gaussian model currently supported.')
+=======
+            raise ValueError('Only poisson+gaussian mode supported currently.')
 
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
+            z_windowlen, ij_windowlen, p=1):
+        """Make a 3D gaussian signal within a box of defined size.
+        
+        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
+        together to produce a proper 3D gaussian.
+        
+        Args:
+            intensity: numeric, intensity of gaussian (height in 1d)
+            sigma_z: numeric, sigma of gaussian in Z dimension
+            sigma_ij: numeric, sigma of gaussian in ij dimension
+            z_windowlen: int, length in z dimension of box will be 2X this
+            ij_windowlen: int, length in ij dimension of box will be 2X this
+            p: float, shape parameter for general gaussian. Default=1 is
+                standard gaussian.
+        """
+        d1 = scipy.signal.general_gaussian(M=ij_windowlen, sig=sigma_ij, 
+            p=p)
+        d2 = np.outer(d1, d1)
+        z_1dvector = scipy.signal.general_gaussian(M=z_windowlen, 
+            sig=sigma_z, p=p)
+        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
+        return intensity * d3
+>>>>>>> Stashed changes
+#-----------------------------------------------------------------------
+    def add_noise(self, model='poisson+gaussian',  **kwargs):
+        """Add noise to image according to a model.
+
+        poisson+gaussian: Pixels drawn from poisson distribution, then 
+        gaussian noise added
+        
+        Args:
+            model: string
+                Currently only 'poisson+gaussian' is supported
+            kwargs:
+                poisson+gaussian:
+                sigma: standard deviation for gaussian noise      
+        """
+        if model == 'poisson+gaussian':
+            if 'sigma' not in kwargs:
+                raise ValueError('poisson+gaussian mode requires kwarg sigma.')
+            sigma = kwargs['sigma']
+            rs = np.random.RandomState()
+            poisson = rs.poisson(self.im)
+            gaussian = rs.normal(scale = (sigma * np.ones_like(self.im)))
+            self.im = poisson + gaussian
+            self.im[self.im < 0] = 0
+
+            else:
+                raise ValueError('Only poisson+gaussian model currently supported.')
+            raise ValueError('Only poisson+gaussian mode supported currently.')
+            
     #-----------------------------------------------------------------------
     def make_3d_gaussian_inabox(self, intensity, sigma, 
             z_windowlen, ij_windowlen, p=1):
@@ -230,7 +299,7 @@ class Sim():
             warnings.warn('Dimensions of box to add and stack to replace do not match.')
 
     #-----------------------------------------------------------------------
-    def add_gaussian_blob(self, coords, intensity, sigma):
+    def add_gaussian_blob(self, coords, intensity, sigma, p=1):
         """Add a gaussian blob to image.
         
         Args:
@@ -240,6 +309,9 @@ class Sim():
                 "Height" of gaussian
             sigma: numeric
                 Standard deviation of gaussian
+            p: float 
+                Shape parameter for general gaussian (default of 1
+                is for standard gaussian)
         """
         def make_odd(n):
             """Ensure box dimension is an odd integer to make math work."""
@@ -251,8 +323,14 @@ class Sim():
 
         ij_windowlen = make_odd(sigma * 10.5)
         z_windowlen = make_odd(ij_windowlen / self.z_ij_ratio)
+<<<<<<< Updated upstream
         box = self.make_3d_gaussian_inabox(intensity, sigma, 
             z_windowlen, ij_windowlen)
+=======
+        sigma_z = sigma / self.z_ij_ratio
+        box = self.make_3d_gaussian_inabox(intensity, sigma_z, sigma, 
+            z_windowlen, ij_windowlen, p=p)
+>>>>>>> Stashed changes
         self.add_box_to_stack(self.im, box, coords)
     
     #-----------------------------------------------------------------------
@@ -313,7 +391,7 @@ class Sim():
             self.add_gaussian_blob(random_coords, intensity, sigma)
 
     #-----------------------------------------------------------------------
-    def add_hlb(self, intensity, sigma):
+    def add_hlb(self, intensity, sigma, p=2):
         """Add histone locus bodies to nucleus. HLBs simulated as gaussian
         blobs.
         
@@ -323,6 +401,8 @@ class Sim():
         Args:
             intensity: number, intensity of gaussian representing HLB
             sigma: number, width of 3D gaussian representing HLB
+            p: float, shape parameter for general gaussian. Higher gives
+                flatter top.
         """
         min_dist = sigma
         # Pick location 1, constrained to no to too close to edge.
@@ -341,8 +421,8 @@ class Sim():
             dist_hlb_1_2 = scipy.spatial.distance.euclidean(coords_hlb2, coords_hlb1)
             if dist_hlb_1_2 > min_dist:
                 good_coords = True
-        self.add_gaussian_blob(coords_hlb1, intensity, sigma)
-        self.add_gaussian_blob(coords_hlb2, intensity, sigma)
+        self.add_gaussian_blob(coords_hlb1, intensity, sigma, p=p)
+        self.add_gaussian_blob(coords_hlb2, intensity, sigma, p=p)
 
     #-----------------------------------------------------------------------
     def add_nblobs_zschedule(self, numblobs, intensity_mean, intensity_std, 
