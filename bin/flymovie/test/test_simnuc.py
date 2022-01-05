@@ -37,17 +37,32 @@ class TestExtractNuclearMasks(unittest.TestCase):
 class TestAddBackground(unittest.TestCase):
 
     def test_add_background(self):
+        # poisson + gaussian.
         mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
         nuc_rad=50, z_ij_ratio=4.5)
         sim = Sim(mask)
-        sim.add_background(inverse=False, lam=1_000,sigma=100)
+        sim.add_background(model='poisson+gaussian', inverse=False, lam=1_000,sigma=100)
         fg_mean = np.mean(sim.im[sim.mask])
         bg_mean = np.mean(sim.im[~sim.mask])
         self.assertGreater(fg_mean, bg_mean, "Foreground should be greater than background.")
-        sim.add_background(inverse=True, lam=10_000,sigma=100)
+        sim.add_background(model='poisson+gaussian', inverse=True, lam=10_000,sigma=100)
         fg_mean = np.mean(sim.im[sim.mask])
         bg_mean = np.mean(sim.im[~sim.mask])
         self.assertGreater(bg_mean, fg_mean, "Background should be greater than foreground.")
+
+        # uniform.
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
+        nuc_rad=50, z_ij_ratio=4.5)
+        sim = Sim(mask)
+        sim.add_background(inverse=False, val = 1_000)
+        nuc_val = np.unique(sim.im[sim.mask])[0]
+        self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
+        sim.add_background(inverse=True, val = 500)
+        nuc_val = np.unique(sim.im[sim.mask])[0]
+        bg_val = np.unique(sim.im[~sim.mask])[0]
+        self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
+        self.assertEqual(bg_val, 500., 'Background should just be 500.')
+
 
 #---------------------------------------------------------------------------
 class TestMake3dGaussianInABox(unittest.TestCase):
@@ -72,7 +87,7 @@ class TestAddGaussianBlob(unittest.TestCase):
         sim = Sim(mask)
         sim.add_gaussian_blob((10,50,50),intensity=2_000,sigma=10)
         self.assertAlmostEqual(sim.im[10,50,50], 2001.0, 3,'Should be equal')
-        self.assertAlmostEqual(sim.im[9,53,53], 1652.8521616372966, 'Should be equal')
+        self.assertAlmostEqual(sim.im[9,53,53], 1545.032005, 3, 'Should be equal')
 
 #---------------------------------------------------------------------------
 class TestGetErodedCoordinates(unittest.TestCase):

@@ -113,7 +113,7 @@ class Sim():
         return masks
 
     #-----------------------------------------------------------------------
-    def add_background(self, model='poisson+gaussian', inverse=False, 
+    def add_background(self, model='uniform', inverse=False, 
             **kwargs):
         """Replace foreground or background pixels with pixel values from
         a background model.
@@ -134,13 +134,14 @@ class Sim():
                 uniform:
                     val: value to set pixels to       
         """
+        coords = self.fg_coords
+        if inverse:
+            coords = self.bg_coords
+
         if model == 'poisson+gaussian':
             if not all(arg in kwargs for arg in ['lam', 'sigma']):
                 raise ValueError('poisson+gaussian mode requires kwargs lam, sigma.')
             lam, sigma = kwargs['lam'], kwargs['sigma']
-            coords = self.fg_coords
-            if inverse:
-                coords = self.bg_coords
             num_pixels = len(coords[0])
             rs = np.random.RandomState()
             # Start with poisson distributed background pixels.
@@ -157,41 +158,9 @@ class Sim():
             val = kwargs['val']
             self.im[coords] = val
   
-            else:
-                raise ValueError('Only poisson+gaussian and uniform models currently supported.')
-
         else:
-<<<<<<< Updated upstream
-            raise ValueError('Only poisson+gaussian model currently supported.')
-=======
-            raise ValueError('Only poisson+gaussian mode supported currently.')
+            raise ValueError('Only poisson+gaussian and uniform models currently supported.')
 
-    #-----------------------------------------------------------------------
-    @staticmethod
-    def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
-            z_windowlen, ij_windowlen, p=1):
-        """Make a 3D gaussian signal within a box of defined size.
-        
-        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
-        together to produce a proper 3D gaussian.
-        
-        Args:
-            intensity: numeric, intensity of gaussian (height in 1d)
-            sigma_z: numeric, sigma of gaussian in Z dimension
-            sigma_ij: numeric, sigma of gaussian in ij dimension
-            z_windowlen: int, length in z dimension of box will be 2X this
-            ij_windowlen: int, length in ij dimension of box will be 2X this
-            p: float, shape parameter for general gaussian. Default=1 is
-                standard gaussian.
-        """
-        d1 = scipy.signal.general_gaussian(M=ij_windowlen, sig=sigma_ij, 
-            p=p)
-        d2 = np.outer(d1, d1)
-        z_1dvector = scipy.signal.general_gaussian(M=z_windowlen, 
-            sig=sigma_z, p=p)
-        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
-        return intensity * d3
->>>>>>> Stashed changes
 #-----------------------------------------------------------------------
     def add_noise(self, model='poisson+gaussian',  **kwargs):
         """Add noise to image according to a model.
@@ -216,9 +185,8 @@ class Sim():
             self.im = poisson + gaussian
             self.im[self.im < 0] = 0
 
-            else:
-                raise ValueError('Only poisson+gaussian model currently supported.')
-            raise ValueError('Only poisson+gaussian mode supported currently.')
+        else:
+            raise ValueError('Only poisson+gaussian model currently supported.')
             
     #-----------------------------------------------------------------------
     def make_3d_gaussian_inabox(self, intensity, sigma, 
@@ -243,7 +211,7 @@ class Sim():
         gauss = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-1. * ((d2) / (2 * (sigma ** 2))) ** p))
         # Scale gaussian to have max of 1.
         gauss = gauss * (1 / np.max(gauss))
-        return gauss
+        return gauss * intensity
 
     #-----------------------------------------------------------------------
     @staticmethod
@@ -323,14 +291,8 @@ class Sim():
 
         ij_windowlen = make_odd(sigma * 10.5)
         z_windowlen = make_odd(ij_windowlen / self.z_ij_ratio)
-<<<<<<< Updated upstream
         box = self.make_3d_gaussian_inabox(intensity, sigma, 
-            z_windowlen, ij_windowlen)
-=======
-        sigma_z = sigma / self.z_ij_ratio
-        box = self.make_3d_gaussian_inabox(intensity, sigma_z, sigma, 
             z_windowlen, ij_windowlen, p=p)
->>>>>>> Stashed changes
         self.add_box_to_stack(self.im, box, coords)
     
     #-----------------------------------------------------------------------
