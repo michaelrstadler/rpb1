@@ -31,7 +31,31 @@ class TestExtractNuclearMasks(unittest.TestCase):
         self.assertEqual(len(masks), 9, "Should be 9 masks.")
         for m in masks:
             self.assertTrue(np.array_equal(m.shape, target_size), 'Masks should match target size.')
-    
+
+#---------------------------------------------------------------------------
+class TestExtractResizeMaskobject(unittest.TestCase):
+
+    def test_extract_resize_maskobject(self):
+        mask = np.zeros((10,100,100))
+        mask[4:6, 10:20, 10:20] = 7
+        extraction1 = Sim.extract_resize_maskobject(mask, (2,10,10), 7)
+        self.assertEqual(np.max(extraction1), 1, 'Should be a binary mask.')
+        self.assertEqual(np.sum(extraction1), 200, 'Should be 200 pixels')
+        extraction2 = Sim.extract_resize_maskobject(mask, (2,20,20), 7)
+        self.assertEqual(np.sum(extraction2), 800, 'Should be 800 pixels')
+
+#---------------------------------------------------------------------------
+class TestRotateBinaryMask(unittest.TestCase):
+
+    def test_rotate_binary_mask(self):
+        mask = np.zeros((3,100,100))
+        mask[1:, 30:70, 40:60] = 1
+        rot45 = Sim.rotate_binary_mask(mask, 45)
+        self.assertEqual(rot45[1,60,20], 0, 'Should be 0.')
+        self.assertEqual(rot45[1,35,0], 1, 'Should be 1.')
+        self.assertEqual(rot45[1,20,60], 0, 'Should be 0.')
+        self.assertEqual(rot45[1,82,80], 1, 'Should be 1.')
+
 #---------------------------------------------------------------------------
 class TestAddBackground(unittest.TestCase):
 

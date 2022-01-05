@@ -93,24 +93,70 @@ class Sim():
                 
         masks = []
         for n in range(1, np.max(lmask) + 1):
+            # Current implementation does this np.where twice (once in 
+            # mask_extract_resize). Suboptimal but this function shouldn't
+            # be called much.
             coords = np.where(lmask == n)
             if touches_edge(coords, lmask.shape):
                 continue
-            # Extract image segment constituting a bounding box for nucleus.
-            cutout = lmask[np.min(coords[0]):np.max(coords[0]),
+            # Extract image segment constituting a bounding box for nucleus 
+            # and resize.
+            cutout = Sim.extract_resize_maskobject(lmask, target_size, n=n)
+            masks.append(cutout)
+
+        return masks
+    
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def extract_resize_maskobject(stack, target_size, n=1):
+        """Extract an object from a labelmask by cutting out 
+        the bounding box containing the object and resizing it to match
+        supplied target size.
+        
+        Args:
+            stack: ndarray, 3D image stack
+            target_size: tuple of 3 ints, size of final box
+            n: int, label of object to extract
+        
+        Returns:
+            resized: ndarray, object in its bounding box matched
+                to target size
+        """
+        coords = np.where(stack == n)
+        cutout = stack[np.min(coords[0]):np.max(coords[0]),
                 np.min(coords[1]):np.max(coords[1]),
                 np.min(coords[2]):np.max(coords[2])
                 ]
-            cutout_mask = np.where(cutout == n, 1, 0)
-            # Resize to fit target size.
-            zoom_factors = [
-                target_size[0] / cutout_mask.shape[0],
-                target_size[1] / cutout_mask.shape[1],
-                target_size[2] / cutout_mask.shape[2]
-            ]
-            resized = ndi.zoom(cutout_mask, zoom_factors, order=0)
-            masks.append(resized)
-        return masks
+        cutout_mask = np.where(cutout == n, 1, 0)
+        # Resize to fit target size.
+        zoom_factors = [
+            target_size[0] / cutout_mask.shape[0],
+            target_size[1] / cutout_mask.shape[1],
+            target_size[2] / cutout_mask.shape[2]
+        ]
+        resized = ndi.zoom(cutout_mask, zoom_factors, order=0)
+        return resized
+
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def rotate_binary_mask(mask, degree):
+        """Rotates a binary mask in a way that doesn't chop things off at
+        the edges.
+        
+        Image is padded, rotated, than the object is re-extracted by finding
+        its bounding box and resizing to match original.
+
+        Args:
+            mask: ndarray, a 3d binary mask
+            degree: int, degrees counter-clockwise to rotate
+
+        Return:
+            extracted: ndarray, rotated mask
+        """
+        padded = np.pad(mask, [(20,20),(50,50),(50,50)])
+        rotated = ndi.rotate(padded, degree, axes=(1,2), order=0, reshape=False)
+        extracted = Sim.extract_resize_maskobject(rotated, mask.shape, n=1)
+        return extracted
 
     #-----------------------------------------------------------------------
     def add_background(self, model='uniform', inverse=False, 
@@ -192,12 +238,21 @@ class Sim():
             z_windowlen, ij_windowlen, p=1):
         """Make a 3D gaussian signal within a box of defined size.
         
+        Implementation is of a generalize or super gaussian:
+        1 / (sigma * sqrt(2 pi)) * exp(-1 * (d^2 / (2 * sigma^2))^p)
+
+        When p = 1, it's a normal gaussian. For higher powers, the function
+        becomes more 'flat-topped'.
+
+        The distances are scaled to account for anisotropic z vs. ij 
+        dimensions.
+
         Args:
             intensity: numeric, intensity of gaussian (height in 1d)
-            sigma_z: numeric, sigma of gaussian in Z dimension
-            sigma_ij: numeric, sigma of gaussian in ij dimension
-            z_windowlen: int, length in z dimension of box will be 2X this
-            ij_windowlen: int, length in ij dimension of box will be 2X this
+            sigma: numeric, sigma of gaussian
+            z_windowlen: int, length in z dimension
+            ij_windowlen: int, length in ij dimension
+            p: float, shape parameter for generalize (super-) gaussian
         """
         mesh = mesh_like(np.ones((z_windowlen, ij_windowlen, ij_windowlen)), n=3)
         # Adjust z coordinates to account for non-isotropy.
@@ -208,9 +263,9 @@ class Sim():
         d2 = ((mesh[0] - midpoint_z) ** 2) + ((mesh[1] - midpoint_ij) ** 2) + ((mesh[2] - midpoint_ij) ** 2)
         # Calculate gaussian as PDF.
         gauss = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-1. * ((d2) / (2 * (sigma ** 2))) ** p))
-        # Scale gaussian to have max of 1.
-        gauss = gauss * (1 / np.max(gauss))
-        return gauss * intensity
+        # Scale gaussian to have max of 1, multiply by intensity.
+        gauss = gauss * (1 / np.max(gauss)) * intensity
+        return gauss 
 
     #-----------------------------------------------------------------------
     @staticmethod
