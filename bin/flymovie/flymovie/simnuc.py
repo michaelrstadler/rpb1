@@ -113,31 +113,35 @@ class Sim():
         return masks
 
     #-----------------------------------------------------------------------
-    def add_background(self, model='poisson+gaussian', inverse=False, 
+    def add_background(self, model='uniform', inverse=False, 
             **kwargs):
         """Replace foreground or background pixels with pixel values from
         a background model.
 
         poisson+gaussian: Pixels drawn from poisson distribution, then 
             gaussian noise added
-        [Currently only one model implemented]
+        uniform: Pixels are a uniform value (noise added later).
 
         Args:
             model: string
                 Currently only 'poisson+gaussian' is supported
             inverse: bool
-                If true, replace foreground, if false, background.
+                If true, replace foreground, if false, background
             kwargs:
-                lam: lambda value for poisson distribution (mean and variance)
-                sigma: standard deviation for gaussian noise            
+                poisson+gaussian:
+                    lam: lambda value for poisson distribution (mean and variance)
+                    sigma: standard deviation for gaussian noise   
+                uniform:
+                    val: numeric, uniform value         
         """
+        coords = self.fg_coords
+        if inverse:
+            coords = self.bg_coords
+        
         if model == 'poisson+gaussian':
             if not all(arg in kwargs for arg in ['lam', 'sigma']):
                 raise ValueError('poisson+gaussian mode requires kwargs lam, sigma.')
             lam, sigma = kwargs['lam'], kwargs['sigma']
-            coords = self.fg_coords
-            if inverse:
-                coords = self.bg_coords
             num_pixels = len(coords[0])
             rs = np.random.RandomState()
             # Start with poisson distributed background pixels.
@@ -147,10 +151,43 @@ class Sim():
             pixels = pixels + noise
             pixels[pixels < 0] = 0
             self.im[coords] = pixels
+        
+        elif model == 'uniform':
+            if not all(arg in kwargs for arg in ['val']):
+                raise ValueError('uniform mode requires kwarg val.')
+            val = kwargs['val']
+            self.im[coords] = val
 
         else:
-            raise ValueError('Only poisson+gaussian model currently supported.')
+            raise ValueError('Only poisson+gaussian and uniform models currently supported.')
     
+    #-----------------------------------------------------------------------
+    def add_noise(self, model='poisson+gaussian',  **kwargs):
+        """Add noise to image according to a model.
+
+        poisson+gaussian: Pixels drawn from poisson distribution, then 
+            gaussian noise added
+
+        Args:
+            model: string
+                Currently only 'poisson+gaussian' is supported
+            kwargs:
+                poisson+gaussian:
+                    sigma: standard deviation for gaussian noise      
+        """
+        if model == 'poisson+gaussian':
+            if 'sigma' not in kwargs:
+                raise ValueError('poisson+gaussian mode requires kwarg sigma.')
+            sigma = kwargs['sigma']
+            rs = np.random.RandomState()
+            poisson = rs.poisson(self.im)
+            gaussian = rs.normal(scale = (sigma * np.ones_like(self.im)))
+            self.im = poisson + gaussian
+            self.im[self.im < 0] = 0
+        
+        else:
+            raise ValueError('Only poisson+gaussian mode supported currently.')
+
     #-----------------------------------------------------------------------
     @staticmethod
     def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
@@ -174,6 +211,7 @@ class Sim():
         return intensity * d3
 
     #-----------------------------------------------------------------------
+    #### TO DO
     @staticmethod
     def make_flattop_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
             z_windowlen, ij_windowlen):

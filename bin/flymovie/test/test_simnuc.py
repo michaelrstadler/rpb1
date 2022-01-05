@@ -37,17 +37,42 @@ class TestExtractNuclearMasks(unittest.TestCase):
 class TestAddBackground(unittest.TestCase):
 
     def test_add_background(self):
+        # poisson+gaussian mode.
         mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
         nuc_rad=50, z_ij_ratio=4.5)
         sim = Sim(mask)
-        sim.add_background(inverse=False, lam=1_000,sigma=100)
+        sim.add_background(inverse=False, model='poisson+gaussian', lam=1_000,sigma=100)
         fg_mean = np.mean(sim.im[sim.mask])
         bg_mean = np.mean(sim.im[~sim.mask])
         self.assertGreater(fg_mean, bg_mean, "Foreground should be greater than background.")
-        sim.add_background(inverse=True, lam=10_000,sigma=100)
+        sim.add_background(inverse=True, model='poisson+gaussian', lam=10_000,sigma=100)
         fg_mean = np.mean(sim.im[sim.mask])
         bg_mean = np.mean(sim.im[~sim.mask])
         self.assertGreater(bg_mean, fg_mean, "Background should be greater than foreground.")
+
+        # uniform mode.
+        sim = Sim(mask)
+        sim.add_background(inverse=False, model='uniform', val=1_000)
+        sim.add_background(inverse=True, model='uniform', val=500)
+        mask = mask.astype(bool)
+        self.assertEqual(np.min(sim.im[mask]), 1_000, 'Foreground should be 1000.')
+        self.assertEqual(np.max(sim.im[mask]), 1_000, 'Foreground should be 1000.')
+        self.assertEqual(np.min(sim.im[~mask]), 500, 'Background should be 500.')
+        self.assertEqual(np.max(sim.im[~mask]), 500, 'Background should be 500.')
+
+#---------------------------------------------------------------------------
+class TestAddNoise(unittest.TestCase):
+
+    def test_add_noise(self):
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
+        nuc_rad=50, z_ij_ratio=4.5)
+        sim = Sim(mask)
+        sim.add_background(inverse=False, model='uniform', val=1_000)
+        sim.add_noise(model='poisson+gaussian', sigma=1_000)
+        mask = mask.astype(bool)
+        self.assertGreater(np.std(sim.im[mask]), 0, 'Standard deviation should be > 0.')
+        self.assertLess(np.min(sim.im[mask]), 1_000, 'Should have values below 1000.')
+        self.assertGreater(np.max(sim.im[mask]), 1_000, 'Should have values above 1000.')
 
 #---------------------------------------------------------------------------
 class TestMake3dGaussianInABox(unittest.TestCase):
