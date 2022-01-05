@@ -5,14 +5,22 @@ A class for simulating nuclei.
 
 The Sim class 
 
+Important programming note: when running in parallel, using numpy.random
+seems to not perform random initialization, and threads launched on
+multiple cores will produce identical simulations. This is solved by
+separately initializing a numpy random state using 
+rs = np.random.RandomState() within each function where random processes
+are needed. This must be used for parallel operations.
+
 """
-__version__ = '1.1.0'
+__version__ = '1.0.0'
 __author__ = 'Michael Stadler'
 
 from flymovie.general_functions import mesh_like
 import scipy
 import random
 import numpy as np
+import scipy.ndimage as ndi
 
 class Sim():
     """A class to simulate fluorescent signal in nuclei."""
@@ -30,7 +38,8 @@ class Sim():
         nuc_rad=50, z_ij_ratio=4.5):
         """Make a label mask of spherical dummy nuclei.
         
-        Nuclei are equally spaced spheres.
+        Nuclei are equally spaced spheres. The can be squashed by playing
+        with z_ij_ratio, if desired.
 
         Args:
             zdim: int
@@ -59,6 +68,50 @@ class Sim():
 
         return mask
     
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def extract_nuclear_masks(lmask, target_size=(20,100,100)):
+        """Extract individual nuclei from a labelmask, resize them to match
+        a target size, create list of masks.
+        
+        Args:
+            lmask: ndarray, labelmask of segmented nuclei
+            target size: tuple of ints, size to which to match nuclei
+
+        Returns:
+            masks: list of ndarrays, nuclear masks
+        """
+        def touches_edge(coords, shape):
+            """Determine whether nucleus touches image edge (only in last
+            two dimensions)."""
+            for dim in range(1, len(shape)):
+                if np.min(coords[dim]) == 0:
+                    return True
+                if np.max(coords[dim]) == (shape[dim] - 1):
+                    return True
+            return False
+                
+        masks = []
+        for n in range(1, np.max(lmask) + 1):
+            coords = np.where(lmask == n)
+            if touches_edge(coords, lmask.shape):
+                continue
+            # Extract image segment constituting a bounding box for nucleus.
+            cutout = lmask[np.min(coords[0]):np.max(coords[0]),
+                np.min(coords[1]):np.max(coords[1]),
+                np.min(coords[2]):np.max(coords[2])
+                ]
+            cutout_mask = np.where(cutout == n, 1, 0)
+            # Resize to fit target size.
+            zoom_factors = [
+                target_size[0] / cutout_mask.shape[0],
+                target_size[1] / cutout_mask.shape[1],
+                target_size[2] / cutout_mask.shape[2]
+            ]
+            resized = ndi.zoom(cutout_mask, zoom_factors, order=0)
+            masks.append(resized)
+        return masks
+
     #-----------------------------------------------------------------------
     def add_background(self, model='poisson+gaussian', inverse=False, 
             **kwargs):
@@ -99,6 +152,103 @@ class Sim():
             raise ValueError('Only poisson+gaussian model currently supported.')
     
     #-----------------------------------------------------------------------
+    @staticmethod
+    def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
+            z_windowlen, ij_windowlen):
+        """Make a 3D gaussian signal within a box of defined size.
+        
+        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
+        together to produce a proper 3D gaussian.
+        
+        Args:
+            intensity: numeric, intensity of gaussian (height in 1d)
+            sigma_z: numeric, sigma of gaussian in Z dimension
+            sigma_ij: numeric, sigma of gaussian in ij dimension
+            z_windowlen: int, length in z dimension of box will be 2X this
+            ij_windowlen: int, length in ij dimension of box will be 2X this
+        """
+        d1 = scipy.signal.gaussian(ij_windowlen, sigma_ij)
+        d2 = np.outer(d1, d1)
+        z_1dvector = scipy.signal.gaussian(z_windowlen, sigma_z)
+        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
+        return intensity * d3
+
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def make_flattop_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
+            z_windowlen, ij_windowlen):
+        """Make a 3D gaussian signal within a box of defined size.
+        
+        Multiply 1D numpy vectors (generated from 1D gaussian functions) 
+        together to produce a proper 3D gaussian.
+        
+        Args:
+            intensity: numeric, intensity of gaussian (height in 1d)
+            sigma_z: numeric, sigma of gaussian in Z dimension
+            sigma_ij: numeric, sigma of gaussian in ij dimension
+            z_windowlen: int, length in z dimension of box will be 2X this
+            ij_windowlen: int, length in ij dimension of box will be 2X this
+        """
+        d1 = scipy.signal.gaussian(ij_windowlen, sigma_ij)
+        d2 = np.outer(d1, d1)
+        z_1dvector = scipy.signal.gaussian(z_windowlen, sigma_z)
+        d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
+        return intensity * d3
+
+    #-----------------------------------------------------------------------
+    @staticmethod
+    def add_box_to_stack(stack, box, coords):
+        """Add pixel values from a supplied "box" to a stack at a position 
+        centered at supplied coordinates.
+        
+        Args:
+            stack: ndarray, image stack
+            box: ndarray, the box to add to the image stack
+            coords: iterable of ints, coordinates marking center of position
+                in stack to which to add box
+        """
+        # Initialize arrays to store the start and end coordinates for the 
+        # stack and the box in each dimension. They are arrays because they
+        # will store the start/end position in each of the three dimensions.
+        box_starts = [] # Start positions relative to box [z, i, j] 
+        box_ends = []
+        stack_starts = []
+        stack_ends = []
+        # For each dimension, find the start and stop positions for the box and 
+        # the stack to be centered at coords; handle the cases where the supplied 
+        # coordinates and box size will result in trying to assign positions 
+        # outside the stack.
+        for dim in range(0, 3):
+            # Initialize start and stop locations for case where box is entirely
+            # within stack dimensions.
+            start = coords[dim] - int(box.shape[dim] / 2)
+            end = coords[dim] + int(box.shape[dim] / 2) + 1
+            stack_start = start
+            stack_end = end
+            box_start = 0
+            box_end = box.shape[dim]
+            # Adjust for cases where box falls out of bounds of stack.
+            if start < 0:
+                stack_start = 0
+                box_start = -start
+            if end > stack.shape[dim]:
+                stack_end = stack.shape[dim]
+                box_end = box.shape[dim] - (end - stack.shape[dim])
+            # Append corrected starts and stops for this dimension.
+            stack_starts.append(stack_start)
+            stack_ends.append(stack_end)
+            box_starts.append(box_start)
+            box_ends.append(box_end)
+        # Ensure that the shapes of the subsection of the stack to add to
+        # and the box to add are the same. If so, add box values to stack.
+        substack_shape = stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]].shape
+        box_to_add = box[box_starts[0]:box_ends[0], box_starts[1]:box_ends[1], box_starts[2]:box_ends[2]]
+        if substack_shape == box_to_add.shape:
+            stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
+        else:
+            warnings.warn('Dimensions of box to add and stack to replace do not match.')
+
+    #-----------------------------------------------------------------------
     def add_gaussian_blob(self, coords, intensity, sigma):
         """Add a gaussian blob to image.
         
@@ -117,74 +267,19 @@ class Sim():
                 return n + 1
             else:
                 return n
-                
-        def make_3d_gaussian_inabox(intensity, sigma_z, sigma_ij, 
-                z_windowlen, ij_windowlen):
-            """Make a 3D gaussian signal within a box of defined size.
-            
-            Multiply 1D numpy vectors (generated from 1D gaussian functions) 
-            together to produce a proper 3D gaussian."""
-            d1 = scipy.signal.gaussian(ij_windowlen, sigma_ij)
-            d2 = np.outer(d1, d1)
-            z_1dvector = scipy.signal.gaussian(z_windowlen, sigma_z)
-            d3 = d2 * np.expand_dims(z_1dvector, axis=(1,2))
-            return intensity * d3
 
-        def add_box_to_stack(stack, box, coords):
-            """Add pixel values from a supplied "box" to a stack at a position 
-            centered at supplied coordinates."""
-            # Initialize arrays to store the start and end coordinates for the 
-            # stack and the box in each dimension. They are arrays because they
-            # will store the start/end position in each of the three dimensions.
-            box_starts = [] # Start positions relative to box [z, i, j] 
-            box_ends = []
-            stack_starts = []
-            stack_ends = []
-            # For each dimension, find the start and stop positions for the box and 
-            # the stack to be centered at coords; handle the cases where the supplied 
-            # coordinates and box size will result in trying to assign positions 
-            # outside the stack.
-            for dim in range(0, 3):
-                # Initialize start and stop locations for case where box is entirely
-                # within stack dimensions.
-                start = coords[dim] - int(box.shape[dim] / 2)
-                end = coords[dim] + int(box.shape[dim] / 2) + 1
-                stack_start = start
-                stack_end = end
-                box_start = 0
-                box_end = box.shape[dim]
-                # Adjust for cases where box falls out of bounds of stack.
-                if start < 0:
-                    stack_start = 0
-                    box_start = -start
-                if end > stack.shape[dim]:
-                    stack_end = stack.shape[dim]
-                    box_end = box.shape[dim] - (end - stack.shape[dim])
-                # Append corrected starts and stops for this dimension.
-                stack_starts.append(stack_start)
-                stack_ends.append(stack_end)
-                box_starts.append(box_start)
-                box_ends.append(box_end)
-            # Ensure that the shapes of the subsection of the stack to add to
-            # and the box to add are the same. If so, add box values to stack.
-            substack_shape = stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]].shape
-            box_to_add = box[box_starts[0]:box_ends[0], box_starts[1]:box_ends[1], box_starts[2]:box_ends[2]]
-            if substack_shape == box_to_add.shape:
-                stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
-            else:
-                warnings.warn('Dimensions of box to add and stack to replace do not match.')
-        
         ij_windowlen = make_odd(sigma * 10.5)
         z_windowlen = make_odd(ij_windowlen / self.z_ij_ratio)
         sigma_z = sigma / self.z_ij_ratio
-        box = make_3d_gaussian_inabox(intensity, sigma_z, sigma, z_windowlen, ij_windowlen)
-        add_box_to_stack(self.im, box, coords)
+        box = self.make_3d_gaussian_inabox(intensity, sigma_z, sigma, 
+            z_windowlen, ij_windowlen)
+        self.add_box_to_stack(self.im, box, coords)
     
     #-----------------------------------------------------------------------
     def get_eroded_coordinates(self, erosion_size):
-        """Get the coordinates (>0) of a mask after applying binary erosion.
-        Effectively makes a coordinate set excluding pixels at the edge of 
-        the nucleus.
+        """Get the coordinates (pixels >0) of a mask after applying binary
+        erosion. Effectively makes a coordinate set excluding pixels at the 
+        edge of the nucleus.
 
         Args:
             erosion_size: numeric, size of the structure for dilation in the
@@ -221,6 +316,8 @@ class Sim():
                 to sigma_base to determine gaussian width
         """
         rs = np.random.RandomState()
+        # Use erosion to generate candidate positions that avoid the edge
+        # of the nucleus.
         erosion_size = sigma_base * 3
         eroded_coords = self.get_eroded_coordinates(erosion_size)
         num_pixels = len(eroded_coords[0])
@@ -237,8 +334,12 @@ class Sim():
 
     #-----------------------------------------------------------------------
     def add_hlb(self, intensity, sigma):
-        """Add histone locus bodies to nucleus.
+        """Add histone locus bodies to nucleus. HLBs simulated as gaussian
+        blobs.
         
+        Possible improvement: the HLBs may not be well-modeled by 3d
+        gaussian function. A more sophisticated model might be useful.
+
         Args:
             intensity: number, intensity of gaussian representing HLB
             sigma: number, width of 3D gaussian representing HLB
@@ -266,8 +367,8 @@ class Sim():
     #-----------------------------------------------------------------------
     def add_nblobs_zschedule(self, numblobs, intensity_mean, intensity_std, 
             sigma_base, z_probs, sigma_k=0.5, sigma_theta=0.5):
-        """Add gaussian blobs according with Z locations determined by a 
-        probability distribution (skewed).
+        """Add gaussian blobs according with asymmetrical Z location 
+        probabilities determined by a supplied distribution.
 
         Args:
             numblobs: int, number of blobs to add
@@ -281,7 +382,6 @@ class Sim():
                 sigma_base to determine gaussian width
             sigma_theta: numeric, scale parameter of gamma distribution added 
                 to sigma_base to determine gaussian width
-            
         """
         if len(z_probs) != self.im.shape[0]:
             raise ValueError('Length of z_probs must equal number of z slices.')
@@ -338,6 +438,11 @@ class Sim():
                 to sigma_base to determine gaussian width
             return_probs: bool, return z-slice probabilities
         
+        Possible issue: the number of available pixels is different at different
+        Z slices. Even a uniform distribution, done the way it's done here, will
+        crowd spots at the poles. It's possible there's a different version needed
+        that weights Z-slices by pixels and uses the distribution as some kind
+        of bias.
         """
         x = np.arange(0, 1, 1/self.im.shape[0])
         y = np.exp(exp_shape * x)

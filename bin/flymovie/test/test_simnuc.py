@@ -17,6 +17,21 @@ class TestMakeDummyMask(unittest.TestCase):
         mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
         nuc_rad=50, z_ij_ratio=4.5)
         self.assertEqual(np.count_nonzero(mask), 114388, "Wrong number of mask True pixels.")
+
+#---------------------------------------------------------------------------
+class TestExtractNuclearMasks(unittest.TestCase):
+
+    def test_extract_nuclear_masks(self):
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=20, 
+            nuc_rad=10, z_ij_ratio=3)
+        mask = mask[:,1:,1:] # The circle math in make_dummy_mask leaves row/column 0 empty.
+        mask = mask.astype(int)
+        target_size=[10,50,50]
+        masks = Sim.extract_nuclear_masks(mask, target_size=target_size)
+        self.assertEqual(len(masks), 9, "Should be 9 masks.")
+        for m in masks:
+            self.assertTrue(np.array_equal(m.shape, target_size), 'Masks should match target size.')
+
     
 #---------------------------------------------------------------------------
 class TestAddBackground(unittest.TestCase):
@@ -33,6 +48,17 @@ class TestAddBackground(unittest.TestCase):
         fg_mean = np.mean(sim.im[sim.mask])
         bg_mean = np.mean(sim.im[~sim.mask])
         self.assertGreater(bg_mean, fg_mean, "Background should be greater than foreground.")
+
+#---------------------------------------------------------------------------
+class TestMake3dGaussianInABox(unittest.TestCase):
+
+    def test_make_3d_gaussian_inabox(self):
+        box = Sim.make_3d_gaussian_inabox(intensity=100, sigma_z=2, 
+            sigma_ij=10, z_windowlen=20, ij_windowlen=100)
+        self.assertGreater(box[10,50,50], box[0,0,0], 
+            'Should be brighter at center')
+        self.assertEqual(box.shape[0], 20, 'Box z dimension is wrong.')
+        self.assertEqual(box.shape[1], 100, 'Box ij dimension is wrong.')
 
 #---------------------------------------------------------------------------
 class TestAddGaussianBlob(unittest.TestCase):
@@ -128,6 +154,7 @@ class TestAddNBlobsZScheduleExponential(unittest.TestCase):
         mean_bottom = np.mean(sim.im[:10])
         mean_top = np.mean(sim.im[10:])
         self.assertGreater(mean_top, mean_bottom, 'Top should be stronger than bottom.')
+        
         # Test slant to bottom.
         mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
         nuc_rad=50, z_ij_ratio=4.5)
