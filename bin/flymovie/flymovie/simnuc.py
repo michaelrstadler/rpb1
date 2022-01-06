@@ -76,13 +76,14 @@ class Sim():
     
     #-----------------------------------------------------------------------
     @staticmethod
-    def extract_nuclear_masks(lmask, target_size=(20,100,100)):
+    def extract_nuclear_masks(lmask, target_size=(20,100,100), dtype='float64'):
         """Extract individual nuclei from a labelmask, resize them to match
         a target size, create list of masks.
         
         Args:
             lmask: ndarray, labelmask of segmented nuclei
             target size: tuple of ints, size to which to match nuclei
+            dtype: type, type of numbers in returned mask
 
         Returns:
             masks: list of ndarrays, nuclear masks
@@ -108,14 +109,14 @@ class Sim():
             # Extract image segment constituting a bounding box for nucleus 
             # and resize.
             cutout = Sim.extract_resize_maskobject(lmask, target_size, n=n)
-            cutout = cutout.astype('float64')
+            cutout = cutout.astype(dtype)
             masks.append(cutout)
 
         return masks
     
     #-----------------------------------------------------------------------
     @staticmethod
-    def extract_resize_maskobject(stack, target_size, n=1):
+    def extract_resize_maskobject(stack, target_size, n=1, dtype='float64'):
         """Extract an object from a labelmask by cutting out 
         the bounding box containing the object and resizing it to match
         supplied target size.
@@ -124,6 +125,7 @@ class Sim():
             stack: ndarray, 3D image stack
             target_size: tuple of 3 ints, size of final box
             n: int, label of object to extract
+            dtype: type, type of numbers in returned mask
         
         Returns:
             resized: ndarray, object in its bounding box matched
@@ -142,7 +144,7 @@ class Sim():
             target_size[2] / cutout_mask.shape[2]
         ]
         resized = ndi.zoom(cutout_mask, zoom_factors, order=0)
-        return resized
+        return resized.astype(dtype)
 
     #-----------------------------------------------------------------------
     @staticmethod
@@ -215,7 +217,12 @@ class Sim():
 
     #-----------------------------------------------------------------------
     def smooth_edges(self, sigma=1.5):
-        """
+        """Apply a gaussian filter to image, with intended use to create
+        blurred edges of nuclei, applied after adding backgrounds and before
+        adding other features (or noise).
+
+        Args:
+            sigma: float, sigma for gaussian kernel.
         """
         self.im = ndi.gaussian_filter(self.im, sigma=(0.1,sigma,sigma))
 
