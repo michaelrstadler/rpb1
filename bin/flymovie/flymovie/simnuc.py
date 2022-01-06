@@ -28,6 +28,10 @@ import os
 import random
 import string
 
+#-----------------------------------------------------------------------
+##### Start of Sim class. #####
+#-----------------------------------------------------------------------
+
 class Sim():
     """A class to simulate fluorescent signal in nuclei."""
 
@@ -430,9 +434,10 @@ class Sim():
     def add_hlb(self, intensity, sigma, p=2):
         """Add histone locus bodies to nucleus. HLBs simulated as gaussian
         blobs.
-        
-        Possible improvement: the HLBs may not be well-modeled by 3d
-        gaussian function. A more sophisticated model might be useful.
+
+        Note: HLBs are poorly modeled by standard gaussians. They more 
+        resemble flat-topped gaussians. This can be achieved by increasing
+        p term in generalized gaussian.
 
         Args:
             intensity: number, intensity of gaussian representing HLB
@@ -554,25 +559,7 @@ class Sim():
 ##### End of Sim class. #####
 #-----------------------------------------------------------------------
 
-def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
-    noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
-    blob_intensity_std=2_000, blob_sigma_k=0.5, blob_sigma_theta=0.5, 
-    hlb_intensity=19_000, hlb_sigma=5, hlb_p=2):
-
-    # Make sure ints are ints.
-    nblobs = int(nblobs)
-
-    #mask = Sim.make_dummy_mask()
-    sim = Sim(mask)
-    sim.add_background(val=nuc_bg_mean)
-    sim.add_background(inverse=True, val=nonnuc_bg_mean)
-    sim.add_hlb(hlb_intensity, hlb_sigma, hlb_p)
-    sim.add_nblobs(nblobs, blob_intensity_mean, blob_intensity_std, 
-        sigma_base=0.5, sigma_k=blob_sigma_k, 
-        sigma_theta=blob_sigma_theta)
-    sim.add_noise(sigma=noise_sigma)
-    save_pickle(sim.im, filename)
-
+#-----------------------------------------------------------------------
 def randomize_ab(ab):
     """Find random float number between a and b, given b > a.
     
@@ -591,66 +578,153 @@ def randomize_ab(ab):
     rs = np.random.RandomState()
     return (rs.random() * (b - a)) + a
 
-def test(
+#-----------------------------------------------------------------------
+def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
+    noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
+    blob_intensity_std=2_000, blob_sigma_base=0.5, blob_sigma_k=0.5, 
+    blob_sigma_theta=0.5, hlb_intensity=19_000, hlb_sigma=5, hlb_p=2):
+    """Simulate an rpb1 nucleus, write to file.
+
+    Args:
+        mask: ndarray, input mask for building nucleus
+        filename: string or filehandle, file to write image to
+        nuc_bg_mean: number, value for nuclear background (uniform)
+        nonnuc_bg_mean: number, value for cytoplasm background (uniform)
+        noise_sigma: number, sigma value for gaussian component of 
+            add_noise function
+        nblobs: int, number of blobs to add
+        blob_intensity_mean: number, mean of distribution for blob
+            intensities
+        blob_intensity_std: number, std of distribution of blob 
+            intensities
+        blob_sigma_base: float, base value for blob size sigma
+        blob_sigma_k: float, k parameter for blob size distribution
+        blob_sigma_theta: float, theta parameter for blob size 
+            distribution
+        hlb_intensity: number, intensity for HLB
+        hlb_sigma: number, sigma (width) or HLB
+        hlb_p: number, shape of gaussian for HLB (higher = flatter)
+    """
+
+    # Make sure nblobs is an int.
+    nblobs = int(nblobs)
+
+    # Build nucleus with input values.
+    sim = Sim(mask)
+    sim.add_background(val=nuc_bg_mean)
+    sim.add_background(inverse=True, val=nonnuc_bg_mean)
+    sim.add_hlb(hlb_intensity, hlb_sigma, hlb_p)
+    sim.add_nblobs(nblobs, blob_intensity_mean, blob_intensity_std, 
+        sigma_base=blob_sigma_base, sigma_k=blob_sigma_k, 
+        sigma_theta=blob_sigma_theta)
+    sim.add_noise(sigma=noise_sigma)
+    save_pickle(sim.im, filename)
+
+#-----------------------------------------------------------------------
+def sim_rpb1_rand_batch(
     maskfile, 
     outfolder,
     nsims,
     nreps,
+    nprocesses,
     nuc_bg_mean_rng, 
     nonnuc_bg_mean_rng, 
     noise_sigma_rng, 
     nblobs_rng, 
     blob_intensity_mean_rng, 
     blob_intensity_std_rng,
+    blob_sigma_base_rng,
     blob_sigma_k_rng, 
     blob_sigma_theta_rng, 
     hlb_intensity_rng,
     hlb_sigma_rng, 
     hlb_p_rng):
+    """Perform parallelized simulations of rpb1 nuclei by randomly drawing
+    parameters from supplied ranges.
 
+    Args:
+        maskfile: path, pickled file containing list of masks as ndarrays
+        outfolder: path, folder to which to write simulations
+        nsims: int, the number of parameter sets to simulate
+        nreps: int, the number of simulations to perform for each param set
+        nprocesses: int, the number of processes to launch with 
+            multiprocessing Pool
+        Iterables of form (lower_limit, upper_limit) are required to supply
+            the ranges from which parameters are drawn. For a constant, 
+            supply the same number twice:
+
+            nuc_bg_mean_rng
+            nonnuc_bg_mean_rng
+            noise_sigma_rng 
+            nblobs_rng 
+            blob_intensity_mean_rng 
+            blob_intensity_std_rng
+            blob_sigma_base_rng
+            blob_sigma_k_rng
+            blob_sigma_theta_rng
+            hlb_intensity_rng
+            hlb_sigma_rng 
+            hlb_p_rng
+    
+    Outputs:
+        A unique 8-character identifier is associated with the entire 
+        batch. This ID is appended to the folder name. A log file is 
+        saved in the folder containing all supplied paramaters. In 
+        addition, each parameter batch gets a 3-letter random ID to 
+        avoid collisions (unlikely). Parameters for each simulation 
+        are saved in the filename, separated by underscores.
+
+    Note: "Replicates" use identical parameters but different masks. For
+    each replicate, a mask is drawn at random from the supplied list and 
+    also rotated randomly (0-360 uniform).
+    """
+    # Set folder name with unique identifier and create it.
     folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
     folder = outfolder + folder_id
     os.mkdir(folder)
 
+    # Load masks.
     masks = load_pickle(maskfile)
 
-    args = (maskfile, outfolder, nsims, nreps, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
-        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_k_rng, 
+    # Set list of args to use for calling and logging.
+    args = (maskfile, outfolder, nsims, nreps, nprocesses, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
+        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_base_rng, blob_sigma_k_rng, 
         blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
-
+    
+    # For each sim, built a local set of args that will be sent to sim_rpb1,
+    # add each set of parameters to arglist.
     arglist = []
     for _ in range(nsims):
+        # Build up args for rpb1 using random draws from supplied ranges 
+        # (uniform prob).
         args_this_sim = []
-        for arg in args[4:]:
+        for arg in args[5:]:
             choice = randomize_ab(arg)
             args_this_sim.append(choice)
-        filepath = ''
-        for x in args_this_sim:
-            #filepath = filepath + str(round(x,1))
-            pass
-            #print(x)
-            #round(x,1)
-        #print(args_this_sim)
+
+        # Create a unique 3-letter id for this batch.
+        file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
+        # Add the parameters to arglist once for every replicate, with the only
+        # changes being 1) the rep number in the filename 2) Selection and 
+        # rotation of a random mask.
         for n in range(1, nreps+1):
             # Select mask and rotate.
             rs = np.random.RandomState()
             mask = masks[rs.randint(0, len(masks))]
             mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
-            filepath = os.path.join(folder, '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + '.pkl')
-            filepath = filepath + '_rep' + str(n) + '.pkl'
+            # Create filename, build final args, add to list.
+            filepath = os.path.join(folder, file_id + '_' + '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + str(n) + '.pkl')
             args_this_rep = [mask, filepath] + args_this_sim
             arglist.append(args_this_rep)
-        
 
-
-    #folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/simstemp'
-    pool = mp.Pool(processes=8)
+    # Launch simulations in parallel using pool method.   
+    pool = mp.Pool(processes=nprocesses)
     results = [pool.apply_async(sim_rpb1, args=(x)) for x in arglist]
     [p.get() for p in results]
 
     # Write logfile.
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
-    varnames = test.__code__.co_varnames
+    varnames = sim_rpb1_rand_batch.__code__.co_varnames
     with open(logfilepath, 'w') as logfile:
         for i in range(len(args)):
             logfile.write(varnames[i] + ': ')

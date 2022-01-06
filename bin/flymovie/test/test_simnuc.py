@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from flymovie.simnuc import Sim
+from flymovie.simnuc import *
 
 #---------------------------------------------------------------------------
 class TestInit(unittest.TestCase):
@@ -85,6 +85,20 @@ class TestAddBackground(unittest.TestCase):
         bg_val = np.unique(sim.im[~sim.mask])[0]
         self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
         self.assertEqual(bg_val, 500., 'Background should just be 500.')
+
+#---------------------------------------------------------------------------
+class TestSmoothEdges(unittest.TestCase):
+    def test_smooth_edges(self):
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
+            nuc_rad=50, z_ij_ratio=4.5)
+        sim = Sim(mask)
+        sim.add_background(val=10_000)
+        self.assertEqual(len(np.unique(sim.im)), 2, 'Should just be 2 values.')
+        sim.smooth_edges(sigma=2)
+        self.assertGreater(len(np.unique(sim.im)), 2, 'Should be >2 values.')
+        self.assertEqual(sim.im[0,0,0], 0, 'Corner pixel should be 0.')
+        self.assertEqual(sim.im[10,50,50], 10_000., 
+            'Center pixel should be bg val.')
 
 #---------------------------------------------------------------------------
 class TestAddNoise(unittest.TestCase):
@@ -220,3 +234,16 @@ class TestAddNBlobsZScheduleExponential(unittest.TestCase):
         mean_bottom = np.mean(sim.im[:10])
         mean_top = np.mean(sim.im[10:])
         self.assertGreater(mean_bottom, mean_top, 'Bottom should be stronger than top.')
+
+#---------------------------------------------------------------------------
+    class TestRandomizeAB(unittest.TestCase):
+
+        def test_randomize_ab(self):
+            r = randomize_ab(0,1)
+            self.assertTrue((r >= 0) and (r <= 1), 'Should be between 0 and 1')
+            r = randomize_ab(0,10_000)
+            self.assertTrue((r >= 0) and (r <= 10_000), 'Should be between 0 and 10_000')
+            r = randomize_ab(500,600)
+            self.assertTrue((r >= 500) and (r <= 600), 'Should be between 500 and 600')
+            self.assertRaises(randomize_ab(10,0))
+            self.assertEqual(randomize_ab(5,5), 5, 'Should be 5.')
