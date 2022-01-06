@@ -540,7 +540,7 @@ class Sim():
 ##### End of Sim class. #####
 #-----------------------------------------------------------------------
 
-def sim_rpb1(folder, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
+def sim_rpb1(filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
     noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
     blob_intensity_std=2_000,
     blob_sigma_k=0.5, blob_sigma_theta=0.5, hlb_intensity=19_000,
@@ -554,13 +554,90 @@ def sim_rpb1(folder, nuc_bg_mean=10_000, nonnuc_bg_mean=500,
         sigma_base=0.5, sigma_k=blob_sigma_k, 
         sigma_theta=blob_sigma_theta)
     sim.add_noise(sigma=noise_sigma)
-    filename = os.path.join(folder, ''.join(random.choice(string.ascii_lowercase) for i in range(8)) + '.pkl')
     save_pickle(sim.im, filename)
 
+def randomize_ab(ab):
+    """Find random float number between a and b, given b > a.
+    
+    Args:
+        ab: iterable
+            Two numbers in an iterable, b > a.
+    
+    Returns:
+        random float between a and b
+    """
+    a, b = ab
+    if (b < a):
+        raise ValueError('b must be greater than a')
+    if (b == a):
+        return a
+    return (np.random.random() * (b - a)) + a
 
+def test(outfolder,
+    nsims,
+    nuc_bg_mean_rng, 
+    nonnuc_bg_mean_rng, 
+    noise_sigma_rng, 
+    nblobs_rng, 
+    blob_intensity_mean_rng, 
+    blob_intensity_std_rng,
+    blob_sigma_k_rng, 
+    blob_sigma_theta_rng, 
+    hlb_intensity_rng,
+    hlb_sigma_rng, 
+    hlb_p_rng):
 
-def test():
-    folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/simstemp'
+    folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
+    folder = outfolder + folder_id
+    os.mkdir(folder)
+
+    args = (outfolder, nsims, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
+        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_k_rng, 
+        blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
+
+    rs = np.random.RandomState()
+    arglist = []
+    for _ in range(nsims):
+        args_this_sim = []
+        for arg in args[2:]:
+            choice = randomize_ab(arg)
+            args_this_sim.append(choice)
+        filepath = os.path.join(folder, '_'.join([str(round(x,1)) for x in args_this_sim]) + '.pkl')
+        args_this_sim = [filepath] + args_this_sim
+        # Integerize relavant arguments.
+        for n in [1,2,3,4,5,6,9]:
+            args_this_sim[n] = int(args_this_sim[n])
+
+        arglist.append(args_this_sim)
+    print(arglist[0])
+    """
+    nuc_bg_mean = randomize_ab(nuc_bg_mean_rng) 
+    nonnuc_bg_mean = randomize_ab(nonnuc_bg_mean_rng)
+    noise_sigma = randomize_ab(noise_sigma_rng) 
+    nblobs = randomize_ab(nblobs_rng) 
+    blob_intensity_mean = randomize_ab(blob_intensity_mean_rng) 
+    blob_intensity_std = randomize_ab(blob_intensity_std_rng)
+    blob_sigma_k = randomize_ab(blob_sigma_k_rng)
+    blob_sigma_theta = randomize_ab(blob_sigma_theta_rng) 
+    hlb_intensity = randomize_ab(hlb_intensity_rng)
+    hlb_sigma = randomize_ab(hlb_sigma_rng) 
+    hlb_p = randomize_ab(hlb_p_rng)
+    """
+
+    #folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/simstemp'
     pool = mp.Pool(processes=8)
-    results = [pool.apply_async(sim_rpb1, args=(folder,)) for x in range(1,1000)]
+    results = [pool.apply_async(sim_rpb1, args=(x)) for x in arglist]
     [p.get() for p in results]
+
+    # Write logfile.
+    logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
+    varnames = test.__code__.co_varnames
+    args = (outfolder, nsims, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
+        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_k_rng, 
+        blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
+    with open(logfilepath, 'w') as logfile:
+        for i in range(len(args)):
+            logfile.write(varnames[i] + ': ')
+            logfile.write(str(args[i]))
+            logfile.write('\n')
+
