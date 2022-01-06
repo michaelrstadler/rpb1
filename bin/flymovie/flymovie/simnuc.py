@@ -17,7 +17,7 @@ __version__ = '1.0.0'
 __author__ = 'Michael Stadler'
 
 from flymovie.general_functions import mesh_like
-from flymovie.load_save import save_pickle
+from flymovie.load_save import save_pickle, load_pickle
 import scipy
 import random
 import numpy as np
@@ -108,6 +108,7 @@ class Sim():
             # Extract image segment constituting a bounding box for nucleus 
             # and resize.
             cutout = Sim.extract_resize_maskobject(lmask, target_size, n=n)
+            cutout = cutout.astype('float64')
             masks.append(cutout)
 
         return masks
@@ -129,9 +130,9 @@ class Sim():
                 to target size
         """
         coords = np.where(stack == n)
-        cutout = stack[np.min(coords[0]):np.max(coords[0]),
-                np.min(coords[1]):np.max(coords[1]),
-                np.min(coords[2]):np.max(coords[2])
+        cutout = stack[np.min(coords[0]):(np.max(coords[0]+1)),
+                np.min(coords[1]):(np.max(coords[1]+1)),
+                np.min(coords[2]):(np.max(coords[2]+1))
                 ]
         cutout_mask = np.where(cutout == n, 1, 0)
         # Resize to fit target size.
@@ -211,6 +212,12 @@ class Sim():
   
         else:
             raise ValueError('Only poisson+gaussian and uniform models currently supported.')
+
+    #-----------------------------------------------------------------------
+    def smooth_edges(self, sigma=1.5):
+        """
+        """
+        self.im = ndi.gaussian_filter(self.im, sigma=(0.1,sigma,sigma))
 
     #-----------------------------------------------------------------------
     def add_noise(self, model='poisson+gaussian',  **kwargs):
@@ -540,12 +547,15 @@ class Sim():
 ##### End of Sim class. #####
 #-----------------------------------------------------------------------
 
-def sim_rpb1(filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
+def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
     noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
-    blob_intensity_std=2_000,
-    blob_sigma_k=0.5, blob_sigma_theta=0.5, hlb_intensity=19_000,
-    hlb_sigma=5, hlb_p=2):
-    mask = Sim.make_dummy_mask()
+    blob_intensity_std=2_000, blob_sigma_k=0.5, blob_sigma_theta=0.5, 
+    hlb_intensity=19_000, hlb_sigma=5, hlb_p=2):
+
+    # Make sure ints are ints.
+    nblobs = int(nblobs)
+
+    #mask = Sim.make_dummy_mask()
     sim = Sim(mask)
     sim.add_background(val=nuc_bg_mean)
     sim.add_background(inverse=True, val=nonnuc_bg_mean)
@@ -571,10 +581,14 @@ def randomize_ab(ab):
         raise ValueError('b must be greater than a')
     if (b == a):
         return a
-    return (np.random.random() * (b - a)) + a
+    rs = np.random.RandomState()
+    return (rs.random() * (b - a)) + a
 
-def test(outfolder,
+def test(
+    maskfile, 
+    outfolder,
     nsims,
+    nreps,
     nuc_bg_mean_rng, 
     nonnuc_bg_mean_rng, 
     noise_sigma_rng, 
@@ -591,38 +605,36 @@ def test(outfolder,
     folder = outfolder + folder_id
     os.mkdir(folder)
 
-    args = (outfolder, nsims, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
+    masks = load_pickle(maskfile)
+
+    args = (maskfile, outfolder, nsims, nreps, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
         nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_k_rng, 
         blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
 
-    rs = np.random.RandomState()
     arglist = []
     for _ in range(nsims):
         args_this_sim = []
-        for arg in args[2:]:
+        for arg in args[4:]:
             choice = randomize_ab(arg)
             args_this_sim.append(choice)
-        filepath = os.path.join(folder, '_'.join([str(round(x,1)) for x in args_this_sim]) + '.pkl')
-        args_this_sim = [filepath] + args_this_sim
-        # Integerize relavant arguments.
-        for n in [1,2,3,4,5,6,9]:
-            args_this_sim[n] = int(args_this_sim[n])
+        filepath = ''
+        for x in args_this_sim:
+            #filepath = filepath + str(round(x,1))
+            pass
+            #print(x)
+            #round(x,1)
+        #print(args_this_sim)
+        for n in range(1, nreps+1):
+            # Select mask and rotate.
+            rs = np.random.RandomState()
+            mask = masks[rs.randint(0, len(masks))]
+            mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
+            filepath = os.path.join(folder, '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + '.pkl')
+            filepath = filepath + '_rep' + str(n) + '.pkl'
+            args_this_rep = [mask, filepath] + args_this_sim
+            arglist.append(args_this_rep)
+        
 
-        arglist.append(args_this_sim)
-    print(arglist[0])
-    """
-    nuc_bg_mean = randomize_ab(nuc_bg_mean_rng) 
-    nonnuc_bg_mean = randomize_ab(nonnuc_bg_mean_rng)
-    noise_sigma = randomize_ab(noise_sigma_rng) 
-    nblobs = randomize_ab(nblobs_rng) 
-    blob_intensity_mean = randomize_ab(blob_intensity_mean_rng) 
-    blob_intensity_std = randomize_ab(blob_intensity_std_rng)
-    blob_sigma_k = randomize_ab(blob_sigma_k_rng)
-    blob_sigma_theta = randomize_ab(blob_sigma_theta_rng) 
-    hlb_intensity = randomize_ab(hlb_intensity_rng)
-    hlb_sigma = randomize_ab(hlb_sigma_rng) 
-    hlb_p = randomize_ab(hlb_p_rng)
-    """
 
     #folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/simstemp'
     pool = mp.Pool(processes=8)
@@ -632,9 +644,6 @@ def test(outfolder,
     # Write logfile.
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
     varnames = test.__code__.co_varnames
-    args = (outfolder, nsims, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
-        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_k_rng, 
-        blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
     with open(logfilepath, 'w') as logfile:
         for i in range(len(args)):
             logfile.write(varnames[i] + ': ')
