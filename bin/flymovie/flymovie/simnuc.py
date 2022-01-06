@@ -608,6 +608,8 @@ def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500,
 
     # Make sure nblobs is an int.
     nblobs = int(nblobs)
+    rs = np.random.RandomState()
+    mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
 
     # Build nucleus with input values.
     sim = Sim(mask)
@@ -711,12 +713,12 @@ def sim_rpb1_rand_batch(
             # Select mask and rotate.
             rs = np.random.RandomState()
             mask = masks[rs.randint(0, len(masks))]
-            mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
+            #mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
             # Create filename, build final args, add to list.
             filepath = os.path.join(folder, file_id + '_' + '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + str(n) + '.pkl')
             args_this_rep = [mask, filepath] + args_this_sim
             arglist.append(args_this_rep)
-
+    print('arglist done')
     # Launch simulations in parallel using pool method.   
     pool = mp.Pool(processes=nprocesses)
     results = [pool.apply_async(sim_rpb1, args=(x)) for x in arglist]
