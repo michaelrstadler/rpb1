@@ -17,10 +17,16 @@ __version__ = '1.0.0'
 __author__ = 'Michael Stadler'
 
 from flymovie.general_functions import mesh_like
+from flymovie.load_save import save_pickle
 import scipy
 import random
 import numpy as np
 import scipy.ndimage as ndi
+import multiprocessing as mp
+
+import os
+import random
+import string
 
 class Sim():
     """A class to simulate fluorescent signal in nuclei."""
@@ -527,3 +533,34 @@ class Sim():
             z_probs=probs, sigma_k=0.5, sigma_theta=0.5)
         if return_probs:
             return probs
+
+    #-----------------------------------------------------------------------
+
+#-----------------------------------------------------------------------
+##### End of Sim class. #####
+#-----------------------------------------------------------------------
+
+def sim_rpb1(folder, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
+    noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
+    blob_intensity_std=2_000,
+    blob_sigma_k=0.5, blob_sigma_theta=0.5, hlb_intensity=19_000,
+    hlb_sigma=5, hlb_p=2):
+    mask = Sim.make_dummy_mask()
+    sim = Sim(mask)
+    sim.add_background(val=nuc_bg_mean)
+    sim.add_background(inverse=True, val=nonnuc_bg_mean)
+    sim.add_hlb(hlb_intensity, hlb_sigma, hlb_p)
+    sim.add_nblobs(nblobs, blob_intensity_mean, blob_intensity_std, 
+        sigma_base=0.5, sigma_k=blob_sigma_k, 
+        sigma_theta=blob_sigma_theta)
+    sim.add_noise(sigma=noise_sigma)
+    filename = os.path.join(folder, ''.join(random.choice(string.ascii_lowercase) for i in range(8)) + '.pkl')
+    save_pickle(sim.im, filename)
+
+
+
+def test():
+    folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/simstemp'
+    pool = mp.Pool(processes=8)
+    results = [pool.apply_async(sim_rpb1, args=(folder,)) for x in range(1,1000)]
+    [p.get() for p in results]
