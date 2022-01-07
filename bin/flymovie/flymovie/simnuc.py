@@ -615,6 +615,7 @@ def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500,
     sim = Sim(mask)
     sim.add_background(val=nuc_bg_mean)
     sim.add_background(inverse=True, val=nonnuc_bg_mean)
+    sim.smooth_edges(1)
     sim.add_hlb(hlb_intensity, hlb_sigma, hlb_p)
     sim.add_nblobs(nblobs, blob_intensity_mean, blob_intensity_std, 
         sigma_base=blob_sigma_base, sigma_k=blob_sigma_k, 
