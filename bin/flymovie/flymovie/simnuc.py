@@ -695,6 +695,7 @@ def sim_rpb1_rand_batch(
     
     # For each sim, built a local set of args that will be sent to sim_rpb1,
     # add each set of parameters to arglist.
+    rs = np.random.RandomState()
     arglist = []
     for _ in range(nsims):
         # Build up args for rpb1 using random draws from supplied ranges 
@@ -711,7 +712,6 @@ def sim_rpb1_rand_batch(
         # rotation of a random mask.
         for n in range(1, nreps+1):
             # Select mask and rotate.
-            rs = np.random.RandomState()
             mask = masks[rs.randint(0, len(masks))]
             #mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
             # Create filename, build final args, add to list.
