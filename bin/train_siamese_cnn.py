@@ -1,3 +1,11 @@
+"""
+
+
+To run on savio: 
+module unload python/3.7
+module load ml/tensorflow/2.5.0-py37
+"""
+
 import cnn_models.siamese_cnn as cn
 import numpy as np
 import tensorflow as tf
@@ -6,10 +14,12 @@ import sys
 import os
 from optparse import OptionParser
 
+
+
 def parse_options():
     parser = OptionParser()
     parser.add_option("-f", "--training_data_folder", dest="training_data_folder",
-                      help="Folder containing training data.", 
+                      help="Folder containing training data in folders labeled left and right.", 
                       metavar="FOLDER")
     parser.add_option("-e", "--num_epochs", dest="num_epochs",
                       help="Number of epochs to train for", 

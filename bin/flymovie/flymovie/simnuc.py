@@ -621,6 +621,8 @@ def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500,
         sigma_base=blob_sigma_base, sigma_k=blob_sigma_k, 
         sigma_theta=blob_sigma_theta)
     sim.add_noise(sigma=noise_sigma)
+    sim.im[sim.im < 0] = 0
+    sim.im[sim.im > 65_536] = 65_536
     save_pickle(sim.im, filename)
 
 #-----------------------------------------------------------------------

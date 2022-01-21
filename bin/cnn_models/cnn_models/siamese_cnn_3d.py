@@ -12,8 +12,6 @@ from tensorflow.keras import metrics
 from tensorflow.keras import Model
 from tensorflow.keras.applications import resnet
 
-#from flymovie.load_save import load_pickle
-
 ############################################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block, 
 		channels_axis=1):
@@ -49,20 +47,20 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv2D(filters1, (1, 1),
+    x = layers.Conv3D(filters1, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv2D(filters2, kernel_size,
+    x = layers.Conv3D(filters2, kernel_size,
                       padding='same',
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2b')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv2D(filters3, (1, 1),
+    x = layers.Conv3D(filters3, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2c')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
@@ -110,24 +108,24 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv2D(filters1, (1, 1), strides=strides,
+    x = layers.Conv3D(filters1, (1, 1), strides=strides,
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv2D(filters2, kernel_size, padding='same',
+    x = layers.Conv3D(filters2, kernel_size, padding='same',
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2b')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv2D(filters3, (1, 1),
+    x = layers.Conv3D(filters3, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2c')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
 
-    shortcut = layers.Conv2D(filters3, (1, 1), strides=strides,
+    shortcut = layers.Conv3D(filters3, (1, 1), strides=strides,
                              kernel_initializer='he_normal',
                              name=conv_name_base + '1')(input_tensor)
     shortcut = layers.BatchNormalization(
@@ -153,18 +151,19 @@ def make_base_cnn(image_shape=(100,100), channels_axis=1, name='base_cnn'):
         Keras model
     """
     img_input = layers.Input(shape=(1,) + image_shape)
-    x = layers.ZeroPadding2D(padding=(3, 3), name='conv1_pad')(img_input)
-    x = layers.Conv2D(64, (7,7),
-                        strides=(2, 2),
+    x = layers.ZeroPadding3D(padding=(0, 3, 3), name='conv1_pad')(img_input)
+    x = layers.Conv3D(64, (1, 7, 7),
+                        strides=(1, 2, 2),
                         padding='valid',
                         kernel_initializer='he_normal',
                         name='conv1')(x)
+    
     x = layers.BatchNormalization( name='bn_conv1')(x)
     x = layers.Activation('relu')(x)
-    x = layers.ZeroPadding2D(padding=(1, 1), name='pool1_pad')(x)
-    x = layers.MaxPooling2D((3, 3), strides=(2, 2))(x)
-
-
+    x = layers.ZeroPadding3D(padding=(0, 1, 1), name='pool1_pad')(x)
+    x = layers.MaxPooling3D((1, 3, 3), strides=(1, 2, 2))(x)
+    """
+    
     x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1))
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='b')
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='c')
@@ -177,6 +176,7 @@ def make_base_cnn(image_shape=(100,100), channels_axis=1, name='base_cnn'):
     x = conv_block(x, 3, [512, 512, 2048], stage=4, block='a', strides=(2,2))
     x = identity_block(x, 3, [512, 512, 2048], stage=4, block='b')
     x = identity_block(x, 3, [512, 512, 2048], stage=4, block='c')
+    """
 
     return Model(img_input, x, name=name)
 
@@ -332,16 +332,14 @@ def make_triplet_inputs(folder):
     
     def preprocess_image(image):
         """
-        Load the specified pkl file, make max intensity projection, normalize.
+        Load the specified pkl file, normalize.
         """
-        mip = image.max(axis=0)
-        mip = mip.astype('float32')
-        mip = np.expand_dims(mip, axis=0)
-        #mip = np.vstack([mip, mip, mip])
-        #mip = np.swapaxes(mip, 0, 2)
+        im = image.copy()
+        im = im.astype('float32')
+        im = np.expand_dims(im, axis=0)
         # Normalize 0-1.
-        mip = (mip - np.min(mip)) / np.max(mip) 
-        return mip
+        im = (im - np.min(im)) / (np.max(im) - np.min(im))
+        return im
 
     ## Make lists of anchor, positive, and negative datasets.
 
@@ -373,10 +371,15 @@ def make_triplet_inputs(folder):
     positive_images = list(map(preprocess_image_fromfile, positive_image_files))
     negative_images = list(map(preprocess_image_fromfile, negative_image_files))
 
-    # Convert lists to tf datasets, shuffle the negatives again for good measure.
+    # Convert lists to tf datasets.
     anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_images)
     positive_dataset = tf.data.Dataset.from_tensor_slices(positive_images)
     negative_dataset = tf.data.Dataset.from_tensor_slices(negative_images)
+    # Note: the following syntax means that the dataset is itself a shuffle,
+    # meaning that every time batch is pulled, the negatives are re-shuffled.
+    # The dataset isn't static. If you repeatedly draw from (iterate over
+    # the datest, the anchor and positive images will repeat, but the negatives
+    # will continually change).
     negative_dataset = negative_dataset.shuffle(buffer_size=4096)
 
     # Zip three datasets together to make final dataset, where each entry is a triplet of anchor, positive, and negative images.
