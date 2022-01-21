@@ -40,19 +40,17 @@ target_shape = (100, 100)
 #tf.debugging.set_log_device_placement(True)
 gpus = tf.config.list_logical_devices('GPU')
 #strategy = tf.distribute.MirroredStrategy(gpus)
-strategy = tf.distribute.MirroredStrategy(
-    devices=gpus,
-    cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
+#strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
 
 print('Loading training data...', end='')
 train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir)
 print('finished.')
-with strategy.scope():
-    base_cnn = cn.make_base_cnn(image_shape=(100,100))
-    embedding = cn.make_embedding(base_cnn)
-    siamese_network = cn.make_siamese_network(embedding)
-    siamese_model = cn.SiameseModel(siamese_network)
-    siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
+#with strategy.scope():
+base_cnn = cn.make_base_cnn(image_shape=(100,100))
+embedding = cn.make_embedding(base_cnn)
+siamese_network = cn.make_siamese_network(embedding)
+siamese_model = cn.SiameseModel(siamese_network)
+siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 
 history = siamese_model.fit(train_dataset, epochs=num_epochs, validation_data=val_dataset, verbose=True)
 
