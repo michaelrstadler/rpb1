@@ -40,10 +40,9 @@ target_shape = (100, 100)
 #tf.debugging.set_log_device_placement(True)
 gpus = tf.config.list_logical_devices('GPU')
 #strategy = tf.distribute.MirroredStrategy(gpus)
-communication_options = tf.distribute.experimental.CommunicationOptions(
-    implementation=tf.distribute.experimental.CommunicationImplementation.RING)
-strategy = tf.distribute.MultiWorkerMirroredStrategy(gpus,
-    communication_options=communication_options)
+strategy = tf.distribute.MirroredStrategy(
+    devices=gpus,
+    cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
 
 print('Loading training data...', end='')
 train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir)
