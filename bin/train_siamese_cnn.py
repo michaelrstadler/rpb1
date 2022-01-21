@@ -2,6 +2,7 @@
 
 
 To run on savio: 
+export PYTHONPATH="$PWD" # Put path to cnn_models here...I don't know how to manage this with savio module system yet (facepalm).
 module unload python/3.7
 module load ml/tensorflow/2.5.0-py37
 """

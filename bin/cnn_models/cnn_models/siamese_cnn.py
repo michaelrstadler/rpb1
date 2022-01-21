@@ -16,7 +16,7 @@ from tensorflow.keras.applications import resnet
 
 ############################################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block, 
-		channels_axis=1):
+		channels_axis=-1):
     """A block of layers that has no convolution at the shortcut.
 
 	Architecture:
@@ -40,7 +40,8 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
         block: string
 			'a','b'..., current block label, used for generating layer names
 		channels_axis: int
-			Axis containing channel (default=1)
+			Axis containing channel--used for batch normalization. Default 
+            is -1 for channels last format. For channels first, should be 1.
 
 	Returns
         Output tensor for the block.
@@ -72,8 +73,8 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
 ############################################################################
 def conv_block(input_tensor, kernel_size, filters, stage, block,
-    	strides=(2, 2), channels_axis=1):
-    """A block of layers that has no convolution at the shortcut.
+    	strides=(2, 2), channels_axis=-1):
+    """A block of layers that has convolution at the shortcut.
 
 	Architecture:
 		- 1x1 convolution + batch norm + relu
@@ -101,7 +102,8 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 			Strides for the two non-1x1 conv layers in the block (middle and
 			shortcut)
 		channels_axis: int
-			Axis containing channel (default=1)
+			Axis containing channel. Default is -1 for channels last format.
+            For channels first, should be 1.
 
 	Returns
         Output tensor for the block.
@@ -138,21 +140,19 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     return x
 
 ############################################################################
-def make_base_cnn(image_shape=(100,100), channels_axis=1, name='base_cnn'):
+def make_base_cnn(image_shape=(100,100), name='base_cnn'):
     """Make a CNN network for a single image.
 
     Args:
         image_shape: tuple of ints
             Shape of input images in pixels
-        channels_axis: int
-            Axis containing channels
         name: string
             Name for model
 
     Returns:
         Keras model
     """
-    img_input = layers.Input(shape=image_shape + (1,))
+    img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
     x = layers.ZeroPadding2D(padding=(3, 3), name='conv1_pad')(img_input)
     x = layers.Conv2D(64, (7,7),
                         strides=(2, 2),
@@ -181,14 +181,12 @@ def make_base_cnn(image_shape=(100,100), channels_axis=1, name='base_cnn'):
     return Model(img_input, x, name=name)
 
 ############################################################################
-def make_embedding(input_model, channels_axis=1, name='base_cnn'):
+def make_embedding(input_model, name='base_cnn'):
     """Make a CNN (from base_cnn) that creates an embedding for a 
       single image.
 
     Args:
         input_model: keras model (typicall base_cnn)
-        channels_axis: int
-            Axis containing channels
         name: string
             Name for model
 
@@ -336,11 +334,11 @@ def make_triplet_inputs(folder):
         """
         mip = image.max(axis=0)
         mip = mip.astype('float32')
-        mip = np.expand_dims(mip, axis=0)
+        mip = np.expand_dims(mip, axis=-1)
         
         # Normalize 0-1.
         # Alternate: normalize to 65_536
-        mip = (mip - np.min(mip)) / np.max(mip) 
+        mip = (mip - np.min(mip)) / (np.max(mip) - np.min(mip))
         return mip
 
     ## Make lists of anchor, positive, and negative datasets.
