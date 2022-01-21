@@ -41,7 +41,7 @@ target_shape = (100, 100)
 gpus = tf.config.list_logical_devices('GPU')
 #strategy = tf.distribute.MirroredStrategy(gpus)
 communication_options = tf.distribute.experimental.CommunicationOptions(
-    implementation=tf.distribute.experimental.CommunicationImplementation.AUTO)
+    implementation=tf.distribute.experimental.CommunicationImplementation.RING)
 strategy = tf.distribute.MultiWorkerMirroredStrategy(gpus,
     communication_options=communication_options)
 
