@@ -386,7 +386,7 @@ def make_triplet_inputs(folder):
 
     # Divide training and validation datasets into batches of size 32, prefetch them 
     # (which I still don't totally understand but seems to pre-activate them in some
-    # meaningrul way).
+    # meaningful way).
     train_dataset = train_dataset.batch(32, drop_remainder=False)
     train_dataset = train_dataset.prefetch(8)
 

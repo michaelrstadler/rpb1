@@ -45,7 +45,16 @@ gpus = tf.config.list_logical_devices('GPU')
 print('Loading training data...', end='')
 train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir)
 print('finished.')
-#with strategy.scope():
+train_dataset_folder = os.path.join(train_data_folder, 'training_dataset')
+val_dataset_folder = os.path.join(train_data_folder, 'val_dataset')
+if not os.path.isdir(train_dataset_folder):
+    os.mkdir(train_dataset_folder)
+if not os.path.isdir(val_dataset_folder):
+    os.mkdir(val_dataset_folder)
+
+tf.data.experimental.save(train_dataset, train_dataset_folder, compression='GZIP')
+tf.data.experimental.save(val_dataset, val_dataset_folder, compression='GZIP')
+
 base_cnn = cn.make_base_cnn(image_shape=(100,100))
 embedding = cn.make_embedding(base_cnn)
 siamese_network = cn.make_siamese_network(embedding)
