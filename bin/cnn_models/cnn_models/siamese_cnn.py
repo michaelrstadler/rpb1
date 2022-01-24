@@ -328,11 +328,10 @@ def make_triplet_inputs(folder):
             image = pickle.load(file)
         return preprocess_image(image)
     
-    def preprocess_image(image):
+    def preprocess_image(mip):
         """
         Load the specified pkl file, make max intensity projection, normalize.
         """
-        mip = image.max(axis=0)
         mip = mip.astype('float32')
         mip = np.expand_dims(mip, axis=-1)
         
