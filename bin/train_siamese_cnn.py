@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 import os
 from optparse import OptionParser
+from time import time
 
 
 
@@ -42,9 +43,14 @@ gpus = tf.config.list_logical_devices('GPU')
 #strategy = tf.distribute.MirroredStrategy(gpus)
 #strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
 
-print('Loading training data...', end='')
+sys.stdout.write('Loading training data...\n')
+sys.stdout.flush()
+t1 = time()
 train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir)
-print('finished.')
+t2 = time()
+sys.stdout.write('finished.\n')
+sys.stdout.write('time: ' + str(t2 - t1) + '\n')
+sys.stdout.flush()
 train_dataset_folder = os.path.join(train_data_folder, 'training_dataset')
 val_dataset_folder = os.path.join(train_data_folder, 'val_dataset')
 if not os.path.isdir(train_dataset_folder):
@@ -64,4 +70,7 @@ siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 history = siamese_model.fit(train_dataset, epochs=num_epochs, validation_data=val_dataset, verbose=True)
 
 tf.keras.models.save_model(embedding, model_save_file)
+t3 = time()
+sys.stdout.write('training time: ' + str(t3 - t2) + '\n')
+sys.stdout.flush()
 #tf.saved_model.save(siamese_model, model_save_file)
