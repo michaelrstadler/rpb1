@@ -34,5 +34,5 @@ for f in files:
     
     outfilepath = os.path.join(options.outfolder, f)
     with open(outfilepath, 'wb') as file:
-        pickle.dump(mip, file, pickle.HIGHEST_PROTOCOL)
+        pickle.dump(mip, file)
 
