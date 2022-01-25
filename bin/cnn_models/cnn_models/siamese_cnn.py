@@ -2,6 +2,7 @@ import numpy as np
 import os
 import random
 import pickle
+import scipy.ndimage as ndimage
 import tensorflow as tf
 from pathlib import Path
 from tensorflow.keras import applications
@@ -321,17 +322,18 @@ class SiameseModel(Model):
         return [self.loss_tracker]
 
 ############################################################################
-def make_triplet_inputs(folder):
+def make_triplet_inputs(folder, repeats=1):
 
     def preprocess_image_fromfile(filename):
         with open(filename, 'rb') as file:
             image = pickle.load(file)
         return preprocess_image(image)
     
-    def preprocess_image(mip):
+    def preprocess_image(image):
         """
         Load the specified pkl file, make max intensity projection, normalize.
         """
+        mip = image.max(axis=0)
         mip = mip.astype('float32')
         mip = np.expand_dims(mip, axis=-1)
         
@@ -339,6 +341,16 @@ def make_triplet_inputs(folder):
         # Alternate: normalize to 65_536
         mip = (mip - np.min(mip)) / (np.max(mip) - np.min(mip))
         return mip
+
+    def tf_random_rotate_image(image):
+        """Apply random rotation -30 to 30 degrees to image."""
+        def random_rotate_image(image):
+            image = ndimage.rotate(image, np.random.RandomState().uniform(-30, 30), reshape=False)
+            return image
+        im_shape = image.shape
+        [image,] = tf.py_function(random_rotate_image, [image], [tf.float32])
+        image.set_shape(im_shape)
+        return image
 
     ## Make lists of anchor, positive, and negative datasets.
 
@@ -370,18 +382,30 @@ def make_triplet_inputs(folder):
     positive_images = list(map(preprocess_image_fromfile, positive_image_files))
     negative_images = list(map(preprocess_image_fromfile, negative_image_files))
 
-    # Convert lists to tf datasets, shuffle the negatives again for good measure.
-    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_images)
-    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_images)
-    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_images)
-    negative_dataset = negative_dataset.shuffle(buffer_size=4096)
+    # Convert lists of numpy arrays to tf datasets (unrotated).
+    anchor_dataset_unrot = tf.data.Dataset.from_tensor_slices(anchor_images)
+    positive_dataset_unrot = tf.data.Dataset.from_tensor_slices(positive_images)
+    negative_dataset_unrot = tf.data.Dataset.from_tensor_slices(negative_images)
+
+    # Apply random rotations to images, concatenate repeats.
+    anchor_dataset = anchor_dataset_unrot.map(tf_random_rotate_image)
+    positive_dataset = positive_dataset_unrot.map(tf_random_rotate_image)
+    negative_dataset = negative_dataset_unrot.map(tf_random_rotate_image)
+
+    for n in range(1, repeats):
+        anchor_dataset = anchor_dataset.concatenate(anchor_dataset_unrot.map(tf_random_rotate_image))
+        positive_dataset = positive_dataset.concatenate(positive_dataset_unrot.map(tf_random_rotate_image))
+        negative_dataset = negative_dataset.concatenate(negative_dataset_unrot.map(tf_random_rotate_image))
+        
+    # Shuffle negative dataset. By setting reshuffle_each_iteration to true,
+    # the negative images will be shuffled with each iteration.
+    negative_dataset = negative_dataset.shuffle(buffer_size=4096, reshuffle_each_iteration=True)
 
     # Zip three datasets together to make final dataset, where each entry is a triplet of anchor, positive, and negative images.
     dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
-
     # Split dataset into training and validation sets.
-    train_dataset = dataset.take(round(image_count * 0.8))
-    val_dataset = dataset.skip(round(image_count * 0.8))
+    train_dataset = dataset.take(round((image_count * repeats) * 0.8))
+    val_dataset = dataset.skip(round((image_count * repeats) * 0.8))
 
     # Divide training and validation datasets into batches of size 32, prefetch them 
     # (which I still don't totally understand but seems to pre-activate them in some

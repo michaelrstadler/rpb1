@@ -38,15 +38,10 @@ model_save_file = os.path.join(train_data_folder, 'model')
 cache_dir = Path(train_data_folder)
 target_shape = (100, 100)
 
-#tf.debugging.set_log_device_placement(True)
-gpus = tf.config.list_logical_devices('GPU')
-#strategy = tf.distribute.MirroredStrategy(gpus)
-#strategy = tf.distribute.MirroredStrategy(devices=gpus, cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
-
 sys.stdout.write('Loading training data...\n')
 sys.stdout.flush()
 t1 = time()
-train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir)
+train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir, )
 t2 = time()
 sys.stdout.write('finished.\n')
 sys.stdout.write('time: ' + str(t2 - t1) + '\n')
@@ -57,9 +52,6 @@ if not os.path.isdir(train_dataset_folder):
     os.mkdir(train_dataset_folder)
 if not os.path.isdir(val_dataset_folder):
     os.mkdir(val_dataset_folder)
-
-tf.data.experimental.save(train_dataset, train_dataset_folder, compression='GZIP')
-tf.data.experimental.save(val_dataset, val_dataset_folder, compression='GZIP')
 
 base_cnn = cn.make_base_cnn(image_shape=(100,100))
 embedding = cn.make_embedding(base_cnn)
