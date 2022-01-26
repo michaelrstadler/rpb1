@@ -626,7 +626,7 @@ def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500,
     save_pickle(sim.im, filename)
 
 #-----------------------------------------------------------------------
-def sim_rpb1_rand_batch(
+def sim_rpb1_rand_batch( 
     maskfile, 
     outfolder,
     nsims,
@@ -683,11 +683,12 @@ def sim_rpb1_rand_batch(
     each replicate, a mask is drawn at random from the supplied list and 
     also rotated randomly (0-360 uniform).
     """
+    mp.set_start_method('fork', force=True) # Important for macOS.
     # Set folder name with unique identifier and create it.
     folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
     folder = outfolder + folder_id
     os.mkdir(folder)
-
+    
     # Load masks.
     masks = load_pickle(maskfile)
 

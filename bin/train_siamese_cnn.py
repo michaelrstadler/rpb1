@@ -26,12 +26,16 @@ def parse_options():
     parser.add_option("-e", "--num_epochs", dest="num_epochs",
                       help="Number of epochs to train for", 
                       metavar="NUMEPOCHS")
+    parser.add_option("-r", "--num_repeats", dest="num_repeats", default=1,
+                      help="Number of repeats of the dataset to use. Repeats will have shuffled negative images and be rotated.", 
+                      metavar="NUMREPEATS")
     (options, args) = parser.parse_args()
     return options
 
 options = parse_options()
 train_data_folder = options.training_data_folder
 num_epochs = int(options.num_epochs)
+num_repeats = int(options.num_repeats)
 
 model_save_file = os.path.join(train_data_folder, 'model')
 
@@ -41,7 +45,7 @@ target_shape = (100, 100)
 sys.stdout.write('Loading training data...\n')
 sys.stdout.flush()
 t1 = time()
-train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir, )
+train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir, num_repeats)
 t2 = time()
 sys.stdout.write('finished.\n')
 sys.stdout.write('time: ' + str(t2 - t1) + '\n')

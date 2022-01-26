@@ -1,61 +1,27 @@
 import flymovie as fm
-import numpy as np
-import flymovie
 from time import time, process_time
-import sys
-import os
-import random
-import string
-import re
-import subprocess
 
-outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/simulations/sims-test'
-num_sims = 100
-num_replicates=2
-bg_mean_range = [9_000, 11_000]
-bg_var_range = [500, 1000]
-blob_intensity_mean_range = [10_000, 15_000]
-blob_intensity_var_range = [5, 10]
-blob_radius_mean_range = [0.5, 1]
-blob_radius_var_range = [0.5, 1]
-blob_number_range = [20, 200]
-z_ij_ratio=2
-zdim=20
-idim=100
-jdim=100
-nuc_spacing=1000
-nuc_rad=50
+t_start = time()
 
-# Get unique string to identify files and log.
-characters = string.ascii_letters + string.digits
-unique_id = ''.join(random.choice(characters) for i in range(10))
-outfolder = outfolder + '_' + unique_id
+fm.simnuc.sim_rpb1_rand_batch(
+    maskfile = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/real_nuclear_masks_nc13.pkl',
+    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/test_sims_realnuc_',
+    nsims=10,
+    nreps=2,
+    nprocesses=20,
+    nuc_bg_mean_rng=[8_000, 10_000], 
+    nonnuc_bg_mean_rng=[800,1200], 
+    noise_sigma_rng=[200,400], 
+    nblobs_rng=[0,100], 
+    blob_intensity_mean_rng=[8_000, 12_000], 
+    blob_intensity_std_rng=[1_000, 3_000],
+    blob_sigma_base_rng=[0.5,0.5],
+    blob_sigma_k_rng=[0.5,0.5], 
+    blob_sigma_theta_rng=[0.5,0.5], 
+    hlb_intensity_rng=[15_000, 25_000],
+    hlb_sigma_rng=[4,6], 
+    hlb_p_rng=[1.7,2.3]
+)
 
-if not os.path.isdir(outfolder):
-    os.mkdir(outfolder)
-
-fm.make_simulations_from_sampled_params(outfolder=outfolder, bg_mean_range= bg_mean_range, bg_var_range = bg_var_range, blob_intensity_mean_range=blob_intensity_mean_range, 
-    blob_intensity_var_range=blob_intensity_var_range, blob_radius_mean_range=blob_radius_mean_range, blob_radius_var_range=blob_radius_var_range, 
-    blob_number_range=blob_number_range, num_sims=num_sims, num_replicates=num_replicates, z_ij_ratio=z_ij_ratio, zdim=zdim, idim=idim, jdim=jdim, 
-    nuc_spacing=nuc_spacing, nuc_rad=nuc_rad)
-
-# Log parameters in logfile.
-logfile = os.path.join(outfolder, unique_id + '_log.txt')
-
-param_names_cat = 'num_sims, num_replicates, bg_mean_range, bg_var_range, blob_intensity_mean_range, blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, blob_number_range, z_ij_ratio, zdim, idim, jdim, nuc_spacing, nuc_rad'
-param_names = re.split(',\s*', param_names_cat)
-params = [num_sims, num_replicates, bg_mean_range, bg_var_range, blob_intensity_mean_range, blob_intensity_var_range, blob_radius_mean_range, blob_radius_var_range, blob_number_range, z_ij_ratio, zdim, idim, jdim, nuc_spacing, nuc_rad]
-
-with open(logfile, 'w') as log:
-    for i in range(0, len(params)):
-        log.write(param_names[i] + ': ' + str(params[i]) + '\n')
-
-# Split files into left and right.
-left_folder = os.path.join(outfolder, 'left')
-right_folder = os.path.join(outfolder, 'right')
-os.mkdir(left_folder)
-os.mkdir(right_folder)
-subprocess.run('mv ' + os.path.join(outfolder, '*_0.pkl') + ' ' + str(left_folder) , shell=True)
-subprocess.run('mv ' + os.path.join(outfolder, '*_1.pkl') + ' ' + str(right_folder) , shell=True)
-
-sys.exit()
+t_end = time()
+print (t_end - t_start)

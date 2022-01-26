@@ -2,7 +2,6 @@ import numpy as np
 import os
 import random
 import pickle
-import scipy.ndimage as ndimage
 import tensorflow as tf
 from pathlib import Path
 from tensorflow.keras import applications
@@ -13,11 +12,9 @@ from tensorflow.keras import metrics
 from tensorflow.keras import Model
 from tensorflow.keras.applications import resnet
 
-#from flymovie.load_save import load_pickle
-
 ############################################################################
 def identity_block(input_tensor, kernel_size, filters, stage, block, 
-		channels_axis=-1):
+		channels_axis=1):
     """A block of layers that has no convolution at the shortcut.
 
 	Architecture:
@@ -41,17 +38,16 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
         block: string
 			'a','b'..., current block label, used for generating layer names
 		channels_axis: int
-			Axis containing channel--used for batch normalization. Default 
-            is -1 for channels last format. For channels first, should be 1.
+			Axis containing channel (default=1)
 
-	Returns
+	Returns 
         Output tensor for the block.
     """
     filters1, filters2, filters3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv3D(filters1, (1, 1, 1),
+    x = layers.Conv3D(filters1, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
@@ -64,7 +60,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv3D(filters3, (1, 1, 1),
+    x = layers.Conv3D(filters3, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2c')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
@@ -74,8 +70,8 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
 ############################################################################
 def conv_block(input_tensor, kernel_size, filters, stage, block,
-    	strides=(2, 2, 2), channels_axis=-1):
-    """A block of layers that has convolution at the shortcut.
+    	strides=(2, 2), channels_axis=1):
+    """A block of layers that has no convolution at the shortcut.
 
 	Architecture:
 		- 1x1 convolution + batch norm + relu
@@ -103,17 +99,16 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 			Strides for the two non-1x1 conv layers in the block (middle and
 			shortcut)
 		channels_axis: int
-			Axis containing channel. Default is -1 for channels last format.
-            For channels first, should be 1.
+			Axis containing channel (default=1)
 
 	Returns
-        Output tensor for the block. 
+        Output tensor for the block.
     """
     filters1, filters2, filters3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv3D(filters1, (1, 1, 1), strides=strides,
+    x = layers.Conv3D(filters1, (1, 1), strides=strides,
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
@@ -125,12 +120,12 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv3D(filters3, (1, 1, 1),
+    x = layers.Conv3D(filters3, (1, 1),
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2c')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
 
-    shortcut = layers.Conv3D(filters3, (1, 1, 1), strides=strides,
+    shortcut = layers.Conv3D(filters3, (1, 1), strides=strides,
                              kernel_initializer='he_normal',
                              name=conv_name_base + '1')(input_tensor)
     shortcut = layers.BatchNormalization(
@@ -141,56 +136,59 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     return x
 
 ############################################################################
-def make_base_cnn(image_shape=(20, 100,100), name='base_cnn'):
+def make_base_cnn(image_shape=(100,100), channels_axis=1, name='base_cnn'):
     """Make a CNN network for a single image.
 
     Args:
         image_shape: tuple of ints
             Shape of input images in pixels
+        channels_axis: int
+            Axis containing channels
         name: string
             Name for model
 
     Returns:
         Keras model
     """
-    img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
-    x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
-    
-    x = layers.Conv3D(64, (3,7,7),
-                        strides=(2, 2, 2),
+    img_input = layers.Input(shape=(1,) + image_shape)
+    x = layers.ZeroPadding3D(padding=(0, 3, 3), name='conv1_pad')(img_input)
+    x = layers.Conv3D(64, (1, 7, 7),
+                        strides=(1, 2, 2),
                         padding='valid',
                         kernel_initializer='he_normal',
                         name='conv1')(x)
     
     x = layers.BatchNormalization( name='bn_conv1')(x)
     x = layers.Activation('relu')(x)
-    x = layers.ZeroPadding3D(padding=(1, 1, 1), name='pool1_pad')(x)
-    x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
-
+    x = layers.ZeroPadding3D(padding=(0, 1, 1), name='pool1_pad')(x)
+    x = layers.MaxPooling3D((1, 3, 3), strides=(1, 2, 2))(x)
+    """
     
-    x = conv_block(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(2,1,1))
-    x = identity_block(x, (3,3,3), [64, 64, 256], stage=2, block='b')
-    
+    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1))
+    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b')
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='c')
 
-    x = conv_block(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(2,2,2))
-    x = identity_block(x, (3,3,3), [128, 128, 512], stage=3, block='b')
-    x = identity_block(x, (3,3,3), [128, 128, 512], stage=3, block='c')
-    x = identity_block(x, (3,3,3), [128, 128, 512], stage=3, block='d')
+    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', strides=(2,2))
+    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b')
+    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c')
+    x = identity_block(x, 3, [128, 128, 512], stage=3, block='d')
 
-    x = conv_block(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(2,2,2))
-    x = identity_block(x, (3,3,3), [512, 512, 2048], stage=4, block='b')
-    x = identity_block(x, (3,3,3), [512, 512, 2048], stage=4, block='c')
-    
+    x = conv_block(x, 3, [512, 512, 2048], stage=4, block='a', strides=(2,2))
+    x = identity_block(x, 3, [512, 512, 2048], stage=4, block='b')
+    x = identity_block(x, 3, [512, 512, 2048], stage=4, block='c')
+    """
+
     return Model(img_input, x, name=name)
 
 ############################################################################
-def make_embedding(input_model, name='base_cnn'):
+def make_embedding(input_model, channels_axis=1, name='base_cnn'):
     """Make a CNN (from base_cnn) that creates an embedding for a 
       single image.
 
     Args:
         input_model: keras model (typicall base_cnn)
+        channels_axis: int
+            Axis containing channels
         name: string
             Name for model
 
@@ -325,7 +323,7 @@ class SiameseModel(Model):
         return [self.loss_tracker]
 
 ############################################################################
-def make_triplet_inputs(folder, repeats=1):
+def make_triplet_inputs(folder):
 
     def preprocess_image_fromfile(filename):
         with open(filename, 'rb') as file:
@@ -336,25 +334,12 @@ def make_triplet_inputs(folder, repeats=1):
         """
         Load the specified pkl file, normalize.
         """
-        im = image.astype('float32')
-        im = np.expand_dims(im, axis=-1)
-        
+        im = image.copy()
+        im = im.astype('float32')
+        im = np.expand_dims(im, axis=0)
         # Normalize 0-1.
-        # Alternate: normalize to 65_536
         im = (im - np.min(im)) / (np.max(im) - np.min(im))
         return im
-
-    def tf_random_rotate_image(image):
-        """Apply random rotation -30 to 30 degrees to image."""
-        def random_rotate_image(image):
-            # From simnuc: rotated = ndi.rotate(padded, degree, axes=(1,2), order=0, reshape=False)
-            image = ndimage.rotate(image, np.random.RandomState().uniform(-30, 30), axes=(1,2), reshape=False)
-            return image
-
-        im_shape = image.shape
-        [image,] = tf.py_function(random_rotate_image, [image], [tf.float32])
-        image.set_shape(im_shape)
-        return image
 
     ## Make lists of anchor, positive, and negative datasets.
 
@@ -386,41 +371,27 @@ def make_triplet_inputs(folder, repeats=1):
     positive_images = list(map(preprocess_image_fromfile, positive_image_files))
     negative_images = list(map(preprocess_image_fromfile, negative_image_files))
 
-    # Convert lists of numpy arrays to tf datasets (unrotated).
-    anchor_dataset_unrot = tf.data.Dataset.from_tensor_slices(anchor_images)
-    positive_dataset_unrot = tf.data.Dataset.from_tensor_slices(positive_images)
-    negative_dataset_unrot = tf.data.Dataset.from_tensor_slices(negative_images)
-
-
-    # Apply random rotations to images, concatenate repeats.
-    
-    anchor_dataset = anchor_dataset_unrot.map(tf_random_rotate_image)
-    positive_dataset = positive_dataset_unrot.map(tf_random_rotate_image)
-    negative_dataset = negative_dataset_unrot.map(tf_random_rotate_image)
-
-    anchor_dataset = anchor_dataset.repeat(repeats)
-    positive_dataset = positive_dataset.repeat(repeats)
-    negative_dataset = negative_dataset.repeat(repeats)
-    
-    for n in range(1, repeats):
-        pass
-        #anchor_dataset = anchor_dataset.concatenate(anchor_dataset_unrot.map(tf_random_rotate_image))
-        #positive_dataset = positive_dataset.concatenate(positive_dataset_unrot.map(tf_random_rotate_image))
-        #negative_dataset = negative_dataset.concatenate(negative_dataset_unrot.map(tf_random_rotate_image))
-
-    # Shuffle negative dataset. By setting reshuffle_each_iteration to true,
-    # the negative images will be shuffled with each iteration.
-    negative_dataset = negative_dataset.shuffle(buffer_size=4096, reshuffle_each_iteration=True)
+    # Convert lists to tf datasets.
+    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_images)
+    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_images)
+    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_images)
+    # Note: the following syntax means that the dataset is itself a shuffle,
+    # meaning that every time batch is pulled, the negatives are re-shuffled.
+    # The dataset isn't static. If you repeatedly draw from (iterate over
+    # the datest, the anchor and positive images will repeat, but the negatives
+    # will continually change).
+    negative_dataset = negative_dataset.shuffle(buffer_size=4096)
 
     # Zip three datasets together to make final dataset, where each entry is a triplet of anchor, positive, and negative images.
     dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
+
     # Split dataset into training and validation sets.
-    train_dataset = dataset.take(round((image_count * repeats) * 0.8))
-    val_dataset = dataset.skip(round((image_count * repeats) * 0.8))
+    train_dataset = dataset.take(round(image_count * 0.8))
+    val_dataset = dataset.skip(round(image_count * 0.8))
 
     # Divide training and validation datasets into batches of size 32, prefetch them 
     # (which I still don't totally understand but seems to pre-activate them in some
-    # meaningful way).
+    # meaningrul way).
     train_dataset = train_dataset.batch(32, drop_remainder=False)
     train_dataset = train_dataset.prefetch(8)
 
