@@ -325,7 +325,7 @@ class SiameseModel(Model):
         return [self.loss_tracker]
 
 ############################################################################
-def make_triplet_inputs(folder, repeats=1):
+def make_triplet_inputs(folder, repeats=1, mip=False):
 
     def preprocess_image_fromfile(filename):
         with open(filename, 'rb') as file:
