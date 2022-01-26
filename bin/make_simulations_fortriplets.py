@@ -6,7 +6,7 @@ t_start = time()
 fm.simnuc.sim_rpb1_rand_batch(
     maskfile = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/real_nuclear_masks_nc13.pkl',
     outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/test_sims_realnuc_',
-    nsims=10,
+    nsims=1000,
     nreps=2,
     nprocesses=20,
     nuc_bg_mean_rng=[8_000, 10_000], 

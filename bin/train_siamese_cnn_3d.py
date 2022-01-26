@@ -7,7 +7,7 @@ module unload python/3.7
 module load ml/tensorflow/2.5.0-py37
 """
 
-import cnn_models.siamese_cnn as cn
+import cnn_models.siamese_cnn_3d as cn
 import numpy as np
 import tensorflow as tf
 from pathlib import Path
@@ -15,6 +15,8 @@ import sys
 import os
 from optparse import OptionParser
 from time import time
+
+
 
 def parse_options():
     parser = OptionParser()
@@ -38,7 +40,7 @@ num_repeats = int(options.num_repeats)
 model_save_file = os.path.join(train_data_folder, 'model')
 
 cache_dir = Path(train_data_folder)
-target_shape = (100, 100)
+target_shape = (20, 100, 100)
 
 sys.stdout.write('Loading training data...\n')
 sys.stdout.flush()
