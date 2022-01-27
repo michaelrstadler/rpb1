@@ -24,6 +24,9 @@ def parse_options():
     parser.add_option("-e", "--num_epochs", dest="num_epochs",
                       help="Number of epochs to train for", 
                       metavar="NUMEPOCHS")
+    parser.add_option("-n", "--model_name", dest="model_name",
+                      help="Name for model -- is appended to folder.", 
+                      metavar="MODELNAME")
     parser.add_option("-r", "--num_repeats", dest="num_repeats", default=1,
                       help="Number of repeats of the dataset to use. Repeats will have shuffled negative images and be rotated.", 
                       metavar="NUMREPEATS")
@@ -43,8 +46,9 @@ train_data_folder = options.training_data_folder
 num_epochs = int(options.num_epochs)
 num_repeats = int(options.num_repeats)
 mip = options.mip
+model_name = options.model_name
 
-model_save_file = os.path.join(train_data_folder, 'model')
+model_save_path = os.path.join(train_data_folder, 'model_' + model_name)
 
 cache_dir = Path(train_data_folder)
 
@@ -60,7 +64,6 @@ sys.stdout.write('time: ' + str(t2 - t1) + '\n')
 sys.stdout.flush()
 
 target_shape = get_target_shape(val_dataset)
-print(target_shape)
 
 if mip:
     base_cnn = cn.make_base_cnn(image_shape=target_shape)
@@ -75,8 +78,7 @@ siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 
 history = siamese_model.fit(train_dataset, epochs=num_epochs, validation_data=val_dataset, verbose=True)
 
-tf.keras.models.save_model(embedding, model_save_file)
+tf.keras.models.save_model(embedding, model_save_path)
 t3 = time()
 sys.stdout.write('training time: ' + str(t3 - t2) + '\n')
 sys.stdout.flush()
-#tf.saved_model.save(siamese_model, model_save_file)
