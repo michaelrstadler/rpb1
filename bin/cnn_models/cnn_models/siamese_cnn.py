@@ -341,17 +341,16 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
     x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
 
     
-    x = conv_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(2,1,1))
+    x = conv_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(3,1,1))
     x = identity_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='b')
-    
     x = identity_block_3d(x, 3, [64, 64, 256], stage=2, block='c')
 
-    x = conv_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(2,2,2))
+    x = conv_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(3,2,2))
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='b')
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='c')
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='d')
 
-    x = conv_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(2,2,2))
+    x = conv_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(3,2,2))
     x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='b')
     x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='c')
     

@@ -77,9 +77,17 @@ siamese_network = cn.make_siamese_network(embedding)
 siamese_model = cn.SiameseModel(siamese_network)
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 
-history = siamese_model.fit(train_dataset, epochs=num_epochs, validation_data=val_dataset, verbose=True)
+checkpoint_path = os.path.join(train_data_folder, 'checkpoint_' + model_name)
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                 save_weights_only=True,
+                                                 verbose=1)
 
-tf.keras.models.save_model(embedding, model_save_path)
+history = siamese_model.fit(train_dataset, epochs=num_epochs, validation_data=val_dataset, 
+    verbose=True)
+
+embedding.save_weights(checkpoint_path)
+#tf.keras.models.save_model(embedding, model_save_path)
+#embedding.save(model_save_path)
 t3 = time()
 sys.stdout.write('training time: ' + str(t3 - t2) + '\n')
 sys.stdout.flush()
