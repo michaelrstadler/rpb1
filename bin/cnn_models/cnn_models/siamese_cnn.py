@@ -326,9 +326,10 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
     Returns:
         Keras model
     """
+
     img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
     x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
-    
+
     x = layers.Conv3D(64, (3,7,7),
                         strides=(2, 2, 2),
                         padding='valid',
@@ -341,19 +342,19 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
     x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
 
     
-    x = conv_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(3,1,1))
+    x = conv_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(2,1,1))
     x = identity_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='b')
     x = identity_block_3d(x, 3, [64, 64, 256], stage=2, block='c')
-
-    x = conv_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(3,2,2))
+    
+    x = conv_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(2,2,2))
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='b')
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='c')
     x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='d')
-
-    x = conv_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(3,2,2))
+    
+    x = conv_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(4,4,4))
     x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='b')
     x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='c')
-    
+
     return Model(img_input, x, name=name)
 
 ############################################################################
@@ -568,6 +569,16 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
             tf_random_rotate_image(negative, mip=False)
         )
 
+    def batch_fetch_interleave(ds):
+        """Optimize dataset for fast parallel retrieval."""
+        ds = ds.batch(32, drop_remainder=False)
+        ds = ds.prefetch(tf.data.AUTOTUNE)
+        ds = tf.data.Dataset.range(1).interleave(
+            lambda _: ds,
+            num_parallel_calls=tf.data.AUTOTUNE
+        )
+        return ds
+        
     # Set up input directories.
     cache_dir=folder
     anchor_images_path = cache_dir / "left"
@@ -610,23 +621,21 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
 
     # Apply preprocessing and rotation via special mappable functions.
     if mip:
-        dataset = dataset.map(preprocess_triplets_mip)
-        dataset = dataset.map(random_rotate_triplets_mip)
+        dataset = dataset.map(preprocess_triplets_mip, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(random_rotate_triplets_mip, num_parallel_calls=tf.data.AUTOTUNE)
 
     if not mip:
-        dataset = dataset.map(preprocess_triplets_3d)
-        dataset = dataset.map(random_rotate_triplets_3d)
+        dataset = dataset.map(preprocess_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(random_rotate_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
     
     dataset = dataset.repeat(n_repeats)
+
     # Divide into training and evaluation, batch and prefetch.
     train_dataset = dataset.take(round(image_count * n_repeats * 0.8))
     val_dataset = dataset.skip(round(image_count * n_repeats * 0.8))
-    #train_dataset = train_dataset.repeat(n_repeats)
 
-    train_dataset = train_dataset.batch(32, drop_remainder=False)
-    train_dataset = train_dataset.prefetch(8)
+    train_dataset = batch_fetch_interleave(train_dataset)
+    val_dataset = batch_fetch_interleave(val_dataset)
 
-    val_dataset = val_dataset.batch(32, drop_remainder=False)
-    val_dataset = val_dataset.prefetch(8)
 
     return train_dataset, val_dataset
