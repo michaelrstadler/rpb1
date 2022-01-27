@@ -220,11 +220,12 @@ def identity_block_3d(input_tensor, kernel_size, filters, stage, block,
 	Returns
         Output tensor for the block.
     """
-    filters1, filters2, filters3 = filters
+    filters1, filters2 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv3D(filters1, (1, 1, 1),
+    x = layers.Conv3D(filters1, kernel_size,
+                      padding='same',
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
@@ -237,10 +238,6 @@ def identity_block_3d(input_tensor, kernel_size, filters, stage, block,
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv3D(filters3, (1, 1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2c')(x)
-    x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
     x = layers.add([x, input_tensor])
     x = layers.Activation('relu')(x)
     return x
@@ -282,12 +279,12 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
 	Returns
         Output tensor for the block. 
     """
-    filters1, filters2, filters3 = filters
+    filters1, filters2 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv3D(filters1, (1, 1, 1), strides=strides,
-                      kernel_initializer='he_normal',
+    x = layers.Conv3D(filters1, kernel_size, strides=strides,
+                      padding='same', kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2a')(x)
     x = layers.Activation('relu')(x)
@@ -298,12 +295,7 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
     x = layers.Activation('relu')(x)
 
-    x = layers.Conv3D(filters3, (1, 1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2c')(x)
-    x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2c')(x)
-
-    shortcut = layers.Conv3D(filters3, (1, 1, 1), strides=strides,
+    shortcut = layers.Conv3D(filters2, (1, 1, 1), strides=strides,
                              kernel_initializer='he_normal',
                              name=conv_name_base + '1')(input_tensor)
     shortcut = layers.BatchNormalization(
@@ -314,7 +306,7 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
     return x
 
 ############################################################################
-def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
+def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     """Make a CNN network for a single image.
 
     Args:
@@ -326,12 +318,13 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
     Returns:
         Keras model
     """
-
+    if nlayers not in [18, 34]:
+        raise ValueError('nlayers must be 18 or 34.')
     img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
     x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
 
     x = layers.Conv3D(64, (3,7,7),
-                        strides=(2, 2, 2),
+                        strides=(2, 1, 1),
                         padding='valid',
                         kernel_initializer='he_normal',
                         name='conv1')(x)
@@ -339,21 +332,44 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn'):
     x = layers.BatchNormalization( name='bn_conv1')(x)
     x = layers.Activation('relu')(x)
     x = layers.ZeroPadding3D(padding=(1, 1, 1), name='pool1_pad')(x)
-    x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
+    x = layers.MaxPooling3D((3, 3, 3), strides=(1, 1, 1))(x)
+
+    if nlayers == 18:
+    
+        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='b')
+
+        x = conv_block_3d(x, (3,3,3), [128, 128], stage=3, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=3, block='b')
+
+        x = conv_block_3d(x, (3,3,3), [256, 256], stage=4, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='b')
+
+        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='b')
 
     
-    x = conv_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='a', strides=(2,1,1))
-    x = identity_block_3d(x, (3,3,3), [64, 64, 256], stage=2, block='b')
-    x = identity_block_3d(x, 3, [64, 64, 256], stage=2, block='c')
+    if nlayers == 34:
     
-    x = conv_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='a', strides=(2,2,2))
-    x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='b')
-    x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='c')
-    x = identity_block_3d(x, (3,3,3), [128, 128, 512], stage=3, block='d')
-    
-    x = conv_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='a', strides=(4,4,4))
-    x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='b')
-    x = identity_block_3d(x, (3,3,3), [512, 512, 2048], stage=4, block='c')
+        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='b')
+        x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='c')
+
+        x = conv_block_3d(x, (3,3,3), [128, 128], stage=3, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=3, block='b')
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=3, block='c')
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=3, block='d')
+
+        x = conv_block_3d(x, (3,3,3), [256, 256], stage=4, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='b')
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='c')
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='d')
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='e')
+        x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='f')
+
+        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='b')
+        x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='c')
 
     return Model(img_input, x, name=name)
 
@@ -578,7 +594,7 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
             num_parallel_calls=tf.data.AUTOTUNE
         )
         return ds
-        
+
     # Set up input directories.
     cache_dir=folder
     anchor_images_path = cache_dir / "left"
