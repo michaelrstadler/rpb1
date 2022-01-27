@@ -142,7 +142,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 
 ############################################################################
 def make_base_cnn(image_shape=(100,100), name='base_cnn'):
-    """Make a CNN network for a single image.
+    """Make a CNN network for a single image. Based on Resnet 50
 
     Args:
         image_shape: tuple of ints
@@ -175,9 +175,16 @@ def make_base_cnn(image_shape=(100,100), name='base_cnn'):
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='c')
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='d')
 
-    x = conv_block(x, 3, [512, 512, 2048], stage=4, block='a', strides=(2,2))
-    x = identity_block(x, 3, [512, 512, 2048], stage=4, block='b')
-    x = identity_block(x, 3, [512, 512, 2048], stage=4, block='c')
+    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', strides=(2,2))
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='b')
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='c')
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='d')
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='e')
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='f')
+
+    x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', strides=(2,2))
+    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b')
+    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c')
 
     return Model(img_input, x, name=name)
 
