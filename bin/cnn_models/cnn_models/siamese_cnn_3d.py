@@ -327,20 +327,27 @@ class SiameseModel(Model):
 ############################################################################
 def make_triplet_inputs(folder, repeats=1, mip=False):
 
-    def preprocess_image_fromfile(filename):
-        with open(filename, 'rb') as file:
-            image = pickle.load(file)
-        return preprocess_image(image)
+    def preprocess_triplets(anchor, positive, negative):
+        """
+        Given the filenames corresponding to the three images, load and
+        preprocess them.
+        """
+        return (
+            preprocess_image(anchor),
+            preprocess_image(positive),
+            preprocess_image(negative),
+        )
     
-    def preprocess_image(image):
-        """
-        Load the specified pkl file, normalize.
-        """
+    def preprocess_image(filename):
+        print(filename)
+        return 1
+        print(type(filename))
+        with open(filename, 'rb') as file:
+            im = pickle.load(file)
+
         im = image.astype('float32')
         im = np.expand_dims(im, axis=-1)
-        
         # Normalize 0-1.
-        # Alternate: normalize to 65_536
         im = (im - np.min(im)) / (np.max(im) - np.min(im))
         return im
 
@@ -372,25 +379,47 @@ def make_triplet_inputs(folder, repeats=1, mip=False):
         [str(positive_images_path / f) for f in os.listdir(positive_images_path)]
     )
 
+    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_image_files )
+    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_image_files )
+
     image_count = len(anchor_image_files)
 
     # To generate the list of negative images, randomize the list of
     # available images and concatenate them together.
     negative_image_files = anchor_image_files + positive_image_files
     np.random.RandomState(seed=32).shuffle(negative_image_files)
-    np.random.RandomState(seed=16).shuffle(negative_image_files)
-    np.random.RandomState(seed=8).shuffle(negative_image_files)
+    
+    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_image_files)
+    negative_dataset = negative_dataset.shuffle(buffer_size=4096)
 
+    dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
+    dataset = dataset.shuffle(buffer_size=1024)
+    dataset = dataset.map(preprocess_triplets)
+
+    # Let's now split our dataset in train and validation.
+    train_dataset = dataset.take(round(image_count * 0.8))
+    val_dataset = dataset.skip(round(image_count * 0.8))
+
+    train_dataset = train_dataset.batch(32, drop_remainder=False)
+    train_dataset = train_dataset.prefetch(8)
+
+    val_dataset = val_dataset.batch(32, drop_remainder=False)
+    val_dataset = val_dataset.prefetch(8)
+
+    return train_dataset, val_dataset
+
+    """
     # Apply preprocessing to all input images, return as lists.
     anchor_images = list(map(preprocess_image_fromfile, anchor_image_files))
     positive_images = list(map(preprocess_image_fromfile, positive_image_files))
     negative_images = list(map(preprocess_image_fromfile, negative_image_files))
-
+    
     # Convert lists of numpy arrays to tf datasets (unrotated).
     anchor_dataset_unrot = tf.data.Dataset.from_tensor_slices(anchor_images)
     positive_dataset_unrot = tf.data.Dataset.from_tensor_slices(positive_images)
     negative_dataset_unrot = tf.data.Dataset.from_tensor_slices(negative_images)
-
+    
+    
 
     # Apply random rotations to images, concatenate repeats.
     
@@ -401,29 +430,5 @@ def make_triplet_inputs(folder, repeats=1, mip=False):
     anchor_dataset = anchor_dataset.repeat(repeats)
     positive_dataset = positive_dataset.repeat(repeats)
     negative_dataset = negative_dataset.repeat(repeats)
+    """
     
-    for n in range(1, repeats):
-        pass
-        #anchor_dataset = anchor_dataset.concatenate(anchor_dataset_unrot.map(tf_random_rotate_image))
-        #positive_dataset = positive_dataset.concatenate(positive_dataset_unrot.map(tf_random_rotate_image))
-        #negative_dataset = negative_dataset.concatenate(negative_dataset_unrot.map(tf_random_rotate_image))
-
-    # Shuffle negative dataset. By setting reshuffle_each_iteration to true,
-    # the negative images will be shuffled with each iteration.
-    negative_dataset = negative_dataset.shuffle(buffer_size=4096, reshuffle_each_iteration=True)
-
-    # Zip three datasets together to make final dataset, where each entry is a triplet of anchor, positive, and negative images.
-    dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
-    # Split dataset into training and validation sets.
-    train_dataset = dataset.take(round((image_count * repeats) * 0.8))
-    val_dataset = dataset.skip(round((image_count * repeats) * 0.8))
-
-    # Divide training and validation datasets into batches of size 32, prefetch them 
-    # (which I still don't totally understand but seems to pre-activate them in some
-    # meaningful way).
-    train_dataset = train_dataset.batch(32, drop_remainder=False)
-    train_dataset = train_dataset.prefetch(8)
-
-    val_dataset = val_dataset.batch(32, drop_remainder=False)
-    val_dataset = val_dataset.prefetch(8)
-    return train_dataset, val_dataset
