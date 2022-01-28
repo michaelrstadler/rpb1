@@ -372,7 +372,7 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
         x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='c')
 
     return Model(img_input, x, name=name)
-
+    
 ############################################################################
 def make_embedding(input_model, name='base_cnn'):
     """Make a CNN (from base_cnn) that creates an embedding for a 
@@ -585,14 +585,10 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
             tf_random_rotate_image(negative, mip=False)
         )
 
-    def batch_fetch_interleave(ds):
+    def batch_fetch(ds):
         """Optimize dataset for fast parallel retrieval."""
         ds = ds.batch(32, drop_remainder=False)
         ds = ds.prefetch(tf.data.AUTOTUNE)
-        ds = tf.data.Dataset.range(1).interleave(
-            lambda _: ds,
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
         return ds
 
     # Set up input directories.
@@ -618,11 +614,11 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
 
     # To generate the list of negative images, randomize the list of
     # available images and concatenate them together.
-    rng = np.random.RandomState(seed=42)
+    rng = np.random.RandomState()
     rng.shuffle(anchor_images)
     rng.shuffle(positive_images)
     negative_images = anchor_images + positive_images
-    np.random.RandomState(seed=32).shuffle(negative_images)
+    np.random.RandomState().shuffle(negative_images)
 
     # Make negative dataset, apply shuffle so these will be shuffled 
     # when iterated over.
@@ -650,8 +646,7 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
     train_dataset = dataset.take(round(image_count * n_repeats * 0.8))
     val_dataset = dataset.skip(round(image_count * n_repeats * 0.8))
 
-    train_dataset = batch_fetch_interleave(train_dataset)
-    val_dataset = batch_fetch_interleave(val_dataset)
-
+    train_dataset = batch_fetch(train_dataset)
+    val_dataset = batch_fetch(val_dataset)
 
     return train_dataset, val_dataset
