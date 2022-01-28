@@ -182,7 +182,7 @@ def make_base_cnn(image_shape=(100,100), name='base_cnn'):
     x = identity_block(x, 3, [256, 256, 1024], stage=4, block='e')
     x = identity_block(x, 3, [256, 256, 1024], stage=4, block='f')
 
-    x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', strides=(2,2))
+    x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', strides=(1,1))
     x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b')
     x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c')
 
@@ -324,7 +324,7 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
 
     x = layers.Conv3D(64, (3,7,7),
-                        strides=(2, 1, 1),
+                        strides=(2, 2, 2),
                         padding='valid',
                         kernel_initializer='he_normal',
                         name='conv1')(x)
@@ -332,11 +332,11 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     x = layers.BatchNormalization( name='bn_conv1')(x)
     x = layers.Activation('relu')(x)
     x = layers.ZeroPadding3D(padding=(1, 1, 1), name='pool1_pad')(x)
-    x = layers.MaxPooling3D((3, 3, 3), strides=(1, 1, 1))(x)
+    x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
 
     if nlayers == 18:
     
-        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,2,2))
+        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,1,1))
         x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='b')
 
         x = conv_block_3d(x, (3,3,3), [128, 128], stage=3, block='a', strides=(2,2,2))
@@ -345,13 +345,13 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
         x = conv_block_3d(x, (3,3,3), [256, 256], stage=4, block='a', strides=(2,2,2))
         x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='b')
 
-        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(2,2,2))
+        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(1,1,1))
         x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='b')
 
     
     if nlayers == 34:
     
-        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,2,2))
+        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,1,1))
         x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='b')
         x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='c')
 
@@ -367,7 +367,7 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
         x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='e')
         x = identity_block_3d(x, (3,3,3), [256, 256], stage=4, block='f')
 
-        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(2,2,2))
+        x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(1,1,1))
         x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='b')
         x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='c')
 
