@@ -66,15 +66,19 @@ sys.stdout.flush()
 
 target_shape = get_target_shape(val_dataset)
 
-if mip:
-    base_cnn = cn.make_base_cnn(image_shape=target_shape)
+mirrored_strategy = tf.distribute.MirroredStrategy()
 
-if not mip:
-    base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=18)
+with mirrored_strategy.scope():
+    if mip:
+        base_cnn = cn.make_base_cnn(image_shape=target_shape)
 
-embedding = cn.make_embedding(base_cnn)
-siamese_network = cn.make_siamese_network(embedding)
-siamese_model = cn.SiameseModel(siamese_network)
+    if not mip:
+        base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=18)
+
+    embedding = cn.make_embedding(base_cnn)
+    siamese_network = cn.make_siamese_network(embedding)
+    siamese_model = cn.SiameseModel(siamese_network)
+
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 
 checkpoint_path = os.path.join(train_data_folder, 'checkpoint_' + model_name)
