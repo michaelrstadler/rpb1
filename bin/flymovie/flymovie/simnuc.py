@@ -717,7 +717,7 @@ def sim_rpb1_rand_batch(
         for n in range(1, nreps+1):
             # Select mask and rotate.
             mask = masks[rs.randint(0, len(masks))]
-            #mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
+            mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
             # Create filename, build final args, add to list.
             filepath = os.path.join(folder, file_id + '_' + '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + str(n) + '.pkl')
             args_this_rep = [mask, filepath] + args_this_sim

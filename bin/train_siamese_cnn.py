@@ -31,6 +31,11 @@ def parse_options():
     parser.add_option("-r", "--num_repeats", dest="num_repeats", default=1,
                       help="Number of repeats of the dataset to use. Repeats will have shuffled negative images and be rotated.", 
                       metavar="NUMREPEATS")
+    parser.add_option("-l", "--num_layers", dest="nlayers", default=18,
+                      help="Number of layers in resnet 3D CNN (18 or 34)", 
+                      metavar="NUMLAYERS")
+    parser.add_option("-d", action="store_true", dest="distributed",
+                      help="Flag: Use distributed (multiple) GPUs.")
     parser.add_option("-m", action="store_true", dest="mip",
                       help="Flag: write maximum intensity projection (mip).")
     (options, args) = parser.parse_args()
@@ -47,6 +52,8 @@ train_data_folder = options.training_data_folder
 num_epochs = int(options.num_epochs)
 num_repeats = int(options.num_repeats)
 mip = options.mip
+distributed = options.distributed
+nlayers = int(options.nlayers)
 model_name = options.model_name
 
 model_save_path = os.path.join(train_data_folder, 'model_' + model_name)
@@ -66,18 +73,26 @@ sys.stdout.flush()
 
 target_shape = get_target_shape(val_dataset)
 
-mirrored_strategy = tf.distribute.MirroredStrategy()
 
-with mirrored_strategy.scope():
+def build_siamese_model(mip):
     if mip:
         base_cnn = cn.make_base_cnn(image_shape=target_shape)
 
     if not mip:
-        base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=18)
+        base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=nlayers)
 
     embedding = cn.make_embedding(base_cnn)
     siamese_network = cn.make_siamese_network(embedding)
     siamese_model = cn.SiameseModel(siamese_network)
+    return embedding, siamese_model
+
+if distributed:
+    mirrored_strategy = tf.distribute.MirroredStrategy()
+    with mirrored_strategy.scope():
+        embedding, siamese_model = build_siamese_model(mip)
+
+else:
+    embedding, siamese_model = build_siamese_model(mip)
 
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(0.0001))
 
