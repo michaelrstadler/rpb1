@@ -727,7 +727,6 @@ def sim_rpb1_rand_batch(
     for i in range(0, len(arglist), 1000):
         end = i + 1000
         arglist_sub = arglist[i:end]   
-        print(len(arglist_sub))
         pool = mp.Pool(processes=nprocesses)
         results = [pool.apply_async(sim_rpb1, args=(x)) for x in arglist_sub]
         [p.get() for p in results]
