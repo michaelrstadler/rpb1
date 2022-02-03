@@ -264,5 +264,21 @@ class TestZstackNormalizeMean(unittest.TestCase):
 
 #---------------------------------------------------------------------------
 
+class TestExtractBox(unittest.TestCase):
+
+	def test_extract_box(self):
+		stack = np.ones((5,11,11))
+		ex = extract_box(stack, (2,5,5), (7,13,13), pad=True)
+		self.assertEqual(ex[0,0,0], 0, "Should be equal")
+		self.assertEqual(ex[6,5,5], 0, "Should be equal")
+		self.assertEqual(ex[5,5,5], 1, "Should be equal")
+		self.assertEqual(np.unique(ex[0,:,:]), [0], "Should be equal")
+		self.assertEqual(np.unique(ex[1:6,1:12,1:12]), [1], "Should be equal")
+		ex = extract_box(stack, (2,5,5), (7,13,13), pad=False)
+		self.assertTrue(np.array_equal(stack.shape, ex.shape), "Should be equal")
+		self.assertEqual(np.unique(ex), [1], "Should be equal")
+
+#---------------------------------------------------------------------------
+
 if __name__ == '__main__':
 	unittest.main()

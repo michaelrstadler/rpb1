@@ -37,7 +37,7 @@ class Sim():
 
     def __init__(self, mask, z_ij_ratio=4.5):
         self.mask = mask.astype('bool')
-        self.im = mask.copy()
+        self.im = np.zeros_like(mask)
         self.fg_coords = np.where(self.mask)
         self.bg_coords = np.where(~self.mask)
         self.z_ij_ratio = z_ij_ratio
@@ -392,8 +392,7 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
-    def add_nblobs(self, numblobs, intensity_mean, intensity_std, sigma_base,
-            sigma_k=0.5, sigma_theta=0.5):
+    def add_n_objects(self, n_objects, intensity):
         """Add gaussian blobs at random positions inside nucleus, with
         intensities and widths drawn from random distributions.
         
@@ -416,19 +415,15 @@ class Sim():
         rs = np.random.RandomState()
         # Use erosion to generate candidate positions that avoid the edge
         # of the nucleus.
-        erosion_size = sigma_base * 3
+        erosion_size = 1
         eroded_coords = self.get_eroded_coordinates(erosion_size)
         num_pixels = len(eroded_coords[0])
-        for _ in range(numblobs):
-            # Get randomly-generated intensity and sigma for gaussian.
-            sigma = sigma_base + rs.gamma(sigma_k, sigma_theta)
-            intensity = rs.normal(intensity_mean, intensity_std)
-            intensity = np.max([0, intensity])
+        for _ in range(n_objects):
             # Get random coordinates 
             px = rs.randint(0, num_pixels - 1)
             random_coords = (eroded_coords[0][px], eroded_coords[1][px], 
                 eroded_coords[2][px])
-            self.add_gaussian_blob(random_coords, intensity, sigma)
+            self.im[random_coords] += intensity
 
     #-----------------------------------------------------------------------
     def add_hlb(self, intensity, sigma, p=2):

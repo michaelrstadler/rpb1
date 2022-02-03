@@ -694,3 +694,62 @@ def make_tables_from_arivis(trackfile, nucfile, spotfile):
             data_final.append(DataCont(nuc, spot, nuc_selected, spot_selected))
             
     return data_final
+
+############################################################################
+def extract_box(stack, coords, box_dims, pad=True):
+    """Extract a box (subwindow) from an image stack.
+
+    Args:
+        stack: ndarray, image stack (n-dimensional)
+        coords: iterable of ints, coordinates for box center
+        box_dims: iterable of odd ints, dimensions of box to extract
+        pad: bool, pad with zeros if box falls outsize stack borders
+
+    Returns:
+        box: ndarray, sub-window of image stack
+    """
+    def get_dim_slice(stack, coords, len_, dim):
+        """Get slices for image stack and box, adjusted for edge
+        crossing if necessary."""
+        halflen = int(len_ / 2)
+        stack_start = coords[dim] - halflen
+        stack_end = coords[dim] + halflen + 1
+        box_start = 0
+        box_end = box.shape[dim]
+        max_pos = stack.shape[dim]
+
+        if stack_start < 0:
+            box_start = -1 * stack_start
+            stack_start = 0
+        
+        if stack_end > max_pos:
+            box_end = box_end - (stack_end - max_pos)
+            stack_end = max_pos 
+
+        stack_slice = slice(stack_start, stack_end)
+        box_slice = slice(box_start, box_end)
+        return stack_slice, box_slice
+
+    # Check that all box dimensions are odd.
+    for d in box_dims:
+        if (d % 2 == 0):
+            raise ValueError('Box dimensions must be odd.')
+    if len(box_dims) != stack.ndim:
+        raise ValueError('Box and stack dimensions do not match.')
+
+    # Initialize an empty box and slice tuples for each.
+    box = np.zeros(box_dims)
+    stack_slice_all = ()
+    box_slice_all = ()
+    # Build slice objects for each dimension.
+    for d in range(stack.ndim):
+        stack_slice_dim, box_slice_dim = get_dim_slice(stack, coords, box_dims[d], d)
+        stack_slice_all = stack_slice_all + tuple([stack_slice_dim])
+        box_slice_all = box_slice_all + tuple([box_slice_dim])
+
+    if pad:
+        box[box_slice_all] = stack[stack_slice_all]
+        return box
+    
+    else:
+        return stack[stack_slice_all]
