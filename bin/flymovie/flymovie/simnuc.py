@@ -41,14 +41,12 @@ class Sim():
         self.res_z = res_z
         self.res_ij = res_ij
         self.z_ij_ratio = self.res_z / self.res_ij
+        self.kernel = None
 
     #-----------------------------------------------------------------------
     @staticmethod
-    def make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_rad=50):
-        """Make a label mask of spherical dummy nuclei.
-        
-        Nuclei are equally spaced spheres. The can be squashed by playing
-        with z_ij_ratio, if desired.
+    def make_spherical_mask(zdim=20, idim=100, jdim=100, nuc_rad=50):
+        """Make a mask of a spherical nucleus.
 
         Args:
             zdim: int
@@ -58,7 +56,7 @@ class Sim():
             jdim: int
                 Size of mask in j dimension
             nuc_rad: int
-                Radius of nuclei
+                Radius of nucleus
 
         Returns:
             mask: ndarray
@@ -172,15 +170,19 @@ class Sim():
     def add_noise(self, model='poisson',  **kwargs):
         """Add noise to image according to a model.
 
-        poisson+gaussian: Pixels drawn from poisson distribution, then 
-        gaussian noise added
+        Supported models are 'poisson' and 'gaussian'.
+
+        Usage: Add poisson noise to true image (before convolution) to
+            simulate shot noise from photon emission. Add gaussian noise
+            to the final convolved image to simulate detector (microscope) 
+            noise.
         
         Args:
             model: string
-                Currently only 'poisson+gaussian' is supported
+                Currently 'poisson' and 'guassian' are supported
             kwargs:
-                poisson+gaussian:
-                sigma: standard deviation for gaussian noise      
+                gaussian:
+                    sigma: standard deviation for gaussian noise      
         """
         rs = np.random.RandomState()
         if model == 'gaussian':
@@ -195,7 +197,8 @@ class Sim():
             self.im = rs.poisson(self.im)
         
         else:
-            raise ValueError("Only 'poisson' and 'gaussian' model currently supported.")
+            raise ValueError(
+                "Only 'poisson' and 'gaussian' model currently supported.")
 
     #-----------------------------------------------------------------------
     def get_eroded_coordinates(self, erosion_size):
@@ -216,31 +219,46 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
-    def add_object(self, center_coords, intensity, num_objects, radius, mesh=None):
-        if mesh is None:
-            mesh = mesh_like(self.im, 3)
+    def add_object(self, coords, intensity, num_fluors, length):
+        """Add a fluorescent object at specified coordinates. Objects can be
+        of different sizes and consist of multiple fluors. All objects are 
+        cubes of equal length on all sides.
 
-        z, i, j = mesh
+        Intensity is distributed evenly such that the intensity of each
+        pixel in the object is equal to:
+            intensity * num_fluors / num_pixels
 
-        pix_coords = np.where((((z - center_coords[0]) ** 2) + ((i - center_coords[1]) ** 2) + 
-            ((j - center_coords[2]) ** 2)) < (radius ** 2))
-        
-        num_pixels = len(pix_coords[0])
-        print(num_pixels)
-        intensity_per_pixel = intensity * num_objects / num_pixels
-        self.im[pix_coords] = intensity_per_pixel
+        Args:
+            coords: iterable of ints, location lowest-index coordinate (
+                bottom in z, top-left in xy)
+            intensity: int, intensity of fluors making up object
+            num_fluors: int, number of fluors in object
+            length: int: side length of object (cube)
+        """
+        num_pixels = length ** 3
+        intensity_per_pixel = intensity * num_fluors / num_pixels
+        # Make tuple of slice objects to specify object location
+        obj_coords = ()
+        for d in range(len(coords)):
+            obj_coords = obj_coords + tuple([slice(
+                coords[d], 
+                coords[d] + length)])
+        self.im[obj_coords] += intensity_per_pixel
 
-    def add_n_objects(self, n_objects, intensity, mode='nuc'):
-        """Add gaussian blobs at random positions inside nucleus, with
-        intensities and widths drawn from random distributions.
+    #-----------------------------------------------------------------------
+    def add_n_objects(self, n_objects, intensity, fluors_per_object, length, 
+        erosion_size=None, mode='nuc'):
+        """Add a defined number of objects objects at random positions.
         
         """
         rs = np.random.RandomState()
         # Use erosion to generate candidate positions that avoid the edge
         # of the nucleus.
         if mode == 'nuc':
-            erosion_size = 2
-            coords = self.get_eroded_coordinates(erosion_size)
+            if erosion_size is not None:
+                coords = self.get_eroded_coordinates(erosion_size)
+            else:
+                coords = np.where(self.mask == 1)
         elif mode == 'nonnuc':
             coords = np.where(self.mask == 0)
         elif mode == 'all':
@@ -254,42 +272,40 @@ class Sim():
             px = rs.randint(0, num_pixels - 1)
             random_coords = (coords[0][px], coords[1][px], 
                 coords[2][px])
-            self.im[random_coords] += intensity
+            self.add_object(random_coords, intensity, fluors_per_object, length)
 
     #-----------------------------------------------------------------------
-    def add_hlb(self, intensity, sigma, p=2):
-        """Add histone locus bodies to nucleus. HLBs simulated as gaussian
-        blobs.
-
-        Note: HLBs are poorly modeled by standard gaussians. They more 
-        resemble flat-topped gaussians. This can be achieved by increasing
-        p term in generalized gaussian.
-
-        Args:
-            intensity: number, intensity of gaussian representing HLB
-            sigma: number, width of 3D gaussian representing HLB
-            p: float, shape parameter for general gaussian. Higher gives
-                flatter top.
-        """
-        min_dist = sigma
-        # Pick location 1, constrained to no to too close to edge.
-        erosion_size = sigma * 3
-        eroded_mask_coords = self.get_eroded_coordinates(erosion_size)
-        rs = np.random.RandomState()
-        num_pixels = len(eroded_mask_coords[0])
-        px = rs.randint(0, num_pixels - 1)
-        coords_hlb1 = eroded_mask_coords[0][px], eroded_mask_coords[1][px], eroded_mask_coords[2][px]
-
-        # Pick location 2, constrained by proximity to 1 and edge.
-        good_coords = False
-        while not good_coords:
-            px = rs.randint(0, num_pixels - 1)
-            coords_hlb2 = eroded_mask_coords[0][px], eroded_mask_coords[1][px], eroded_mask_coords[2][px]
-            dist_hlb_1_2 = scipy.spatial.distance.euclidean(coords_hlb2, coords_hlb1)
-            if dist_hlb_1_2 > min_dist:
-                good_coords = True
-        self.add_gaussian_blob(coords_hlb1, intensity, sigma, p=p)
-        self.add_gaussian_blob(coords_hlb2, intensity, sigma, p=p)
+    def add_kernel(self, kernel, res_z, res_ij):
+        if kernel.ndim != self.im.ndim:
+            raise ValueError('Dimensions of kernel do not match image.')
+        #kernel = ndi.zoom(kernel, [res_z / self.res_z, res_ij / self.res_ij, res_ij / self.res_ij])
+        self.kernel = kernel
+        self.kernel_res_z = res_z
+        self.kernel_res_ij = res_ij
+    
+    def convolve(self):
+        if self.kernel is None:
+            raise ValueError('Must add kernel to convolve.')
+        kernel = self.kernel.copy()
+        if (self.res_ij != self.kernel_res_ij) or (self.res_z != self.kernel_res_z):
+            kernel = ndi.zoom(self.kernel, [
+                self.kernel_res_z / self.res_z, 
+                self.kernel_res_ij  / self.res_ij, 
+                self.kernel_res_ij  / self.res_ij
+                ])
+        self.im = ndi.convolve(self.im, kernel)
+    
+    def resize(self, dims):
+        # Resize image.
+        zoom_factors = (
+                self.res_z / dims[0],
+                self.res_ij / dims[1],
+                self.res_ij / dims[2]
+            )
+        im_rs = ndi.zoom(self.im, zoom_factors)
+        # Rescale to match input.
+        im_rs = im_rs * (self.im.sum() / im_rs.sum())
+        self.im = im_rs
 
     #-----------------------------------------------------------------------
     def add_nblobs_zschedule(self, numblobs, intensity_mean, intensity_std, 

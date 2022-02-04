@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import scipy.ndimage as ndi
 from flymovie.simnuc import *
 
 #---------------------------------------------------------------------------
@@ -11,26 +12,29 @@ class TestInit(unittest.TestCase):
         Sim(mask)
 
 #---------------------------------------------------------------------------
-class TestMakeDummyMask(unittest.TestCase):
+class TestMakeSphericalMask(unittest.TestCase):
 
-    def test_make_dummy_mask(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        self.assertEqual(np.count_nonzero(mask), 114388, "Wrong number of mask True pixels.")
+    def test_make_spherical_mask(self):
+        mask = Sim.make_spherical_mask(zdim=100, idim=100, jdim=100, 
+        nuc_rad=40)
+        self.assertEqual(np.count_nonzero(mask), 267731, 
+            "Wrong number of mask True pixels.")
 
 #---------------------------------------------------------------------------
 class TestExtractNuclearMasks(unittest.TestCase):
 
     def test_extract_nuclear_masks(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=20, 
-            nuc_rad=10, z_ij_ratio=3)
-        mask = mask[:,1:,1:] # The circle math in make_dummy_mask leaves row/column 0 empty.
-        mask = mask.astype(int)
+        mask1 = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, nuc_rad=8)
+        mask2 = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, nuc_rad=10)
+        mask = np.hstack([mask1, mask2, mask1, mask1, mask1[:,:10,:]])
+        lmask, _ = ndi.label(mask)
+        lmask = lmask.astype(int)
         target_size=[10,50,50]
-        masks = Sim.extract_nuclear_masks(mask, target_size=target_size)
-        self.assertEqual(len(masks), 9, "Should be 9 masks.")
+        masks = Sim.extract_nuclear_masks(lmask, target_size=target_size)
+        self.assertEqual(len(masks), 3, "Should be 3 masks.")
         for m in masks:
-            self.assertTrue(np.array_equal(m.shape, target_size), 'Masks should match target size.')
+            self.assertTrue(np.array_equal(m.shape, target_size), 
+                'Masks should match target size.')
 
 #---------------------------------------------------------------------------
 class TestExtractResizeMaskobject(unittest.TestCase):
@@ -57,118 +61,91 @@ class TestRotateBinaryMask(unittest.TestCase):
         self.assertEqual(rot45[1,82,80], 1, 'Should be 1.')
 
 #---------------------------------------------------------------------------
-class TestAddBackground(unittest.TestCase):
-
-    def test_add_background(self):
-        # poisson + gaussian.
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        sim.add_background(model='poisson+gaussian', inverse=False, lam=1_000,sigma=100)
-        fg_mean = np.mean(sim.im[sim.mask])
-        bg_mean = np.mean(sim.im[~sim.mask])
-        self.assertGreater(fg_mean, bg_mean, "Foreground should be greater than background.")
-        sim.add_background(model='poisson+gaussian', inverse=True, lam=10_000,sigma=100)
-        fg_mean = np.mean(sim.im[sim.mask])
-        bg_mean = np.mean(sim.im[~sim.mask])
-        self.assertGreater(bg_mean, fg_mean, "Background should be greater than foreground.")
-
-        # uniform.
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        sim.add_background(inverse=False, val = 1_000)
-        nuc_val = np.unique(sim.im[sim.mask])[0]
-        self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
-        sim.add_background(inverse=True, val = 500)
-        nuc_val = np.unique(sim.im[sim.mask])[0]
-        bg_val = np.unique(sim.im[~sim.mask])[0]
-        self.assertEqual(nuc_val, 1_000., 'Nucleus should just be 1,000.')
-        self.assertEqual(bg_val, 500., 'Background should just be 500.')
-
-#---------------------------------------------------------------------------
-class TestSmoothEdges(unittest.TestCase):
-    def test_smooth_edges(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-            nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        sim.add_background(val=10_000)
-        self.assertEqual(len(np.unique(sim.im)), 2, 'Should just be 2 values.')
-        sim.smooth_edges(sigma=2)
-        self.assertGreater(len(np.unique(sim.im)), 2, 'Should be >2 values.')
-        self.assertEqual(sim.im[0,0,0], 0, 'Corner pixel should be 0.')
-        self.assertEqual(sim.im[10,50,50], 10_000., 
-            'Center pixel should be bg val.')
-
-#---------------------------------------------------------------------------
 class TestAddNoise(unittest.TestCase):
 
     def test_add_noise(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, nuc_rad=5)
         sim = Sim(mask)
-        sim.add_background(inverse=False, val=10_000)
+        # Fill nucleus with uniform value.
+        sim.im[sim.mask] = 10
         std_before = np.std(sim.im[sim.mask])
         self.assertEqual(std_before, 0, 'Std before should be 0.')
-        sim.add_noise(model="poisson+gaussian", sigma=100)
+        sim.add_noise(model="poisson")
+        std_after = np.std(sim.im[sim.mask])
+        self.assertGreater(std_after, std_before, 
+            'Std should increase with added noise.')
+        std_before = std_after
+        sim.add_noise(model="gaussian", sigma=100)
         std_after = np.std(sim.im[sim.mask])
         self.assertGreater(std_after, std_before, 
             'Std should increase with added noise.')
 
 #---------------------------------------------------------------------------
-class TestAddGaussianBlob(unittest.TestCase):
-
-    def test_add_gaussian_blob(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        sim.add_gaussian_blob((10,50,50),intensity=2_000,sigma=10)
-        self.assertAlmostEqual(sim.im[10,50,50], 2001.0, 3,'Should be equal')
-        self.assertAlmostEqual(sim.im[9,53,53], 1545.032005, 3, 'Should be equal')
-
-#---------------------------------------------------------------------------
 class TestGetErodedCoordinates(unittest.TestCase):
 
     def test_get_eroded_coordinates(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
+        mask = Sim.make_spherical_mask(zdim=20, idim=100, jdim=100, 
+        nuc_rad=50)
         sim = Sim(mask)
         eroded_coords = sim.get_eroded_coordinates(5)
         self.assertGreater(np.count_nonzero(sim.mask), len(eroded_coords[0]), 
             '1s in mask should have shrunk.')
 
 #---------------------------------------------------------------------------
-class TestAddNBlobs(unittest.TestCase):
+class TestAddObject(unittest.TestCase):
 
-    def test_add_nblobs(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
+    def test_add_object(self):
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
         sim = Sim(mask)
-        mean1 = np.mean(sim.im[sim.mask])
-        var1 = np.std(sim.im[sim.mask])
-        sim.add_nblobs(100, 10_000, 1, 1)
-        mean2 = np.mean(sim.im[sim.mask])
-        var2 = np.std(sim.im[sim.mask])
-
-        self.assertGreater(mean2, mean1, 'Mean should have increased')
-        self.assertGreater(var2, var1, 'Variance should have increased')
+        self.assertEqual(sim.im.sum(), 0, 'Should be a blank image.')
+        sim.add_object((10,10,10), 10, 1, 1)
+        self.assertEqual(sim.im.sum(), 10, 'Should just be 10.')
+        sim.add_object((14,14,14), 10, 4, 2)
+        self.assertEqual(sim.im.sum(), 50, 'Should be 50.')
+        self.assertEqual(np.count_nonzero(sim.im.flatten()), 9, 'Should be 9.')
+        sim.add_object((0,0,0), 10, 100, 3)
+        self.assertEqual(sim.im.sum(), 1050, 'Should be 1050.')
+        self.assertEqual(np.count_nonzero(sim.im.flatten()), 36, 'Should be 36.')
 
 #---------------------------------------------------------------------------
-class TestAddHLB(unittest.TestCase):
+class TestAddNObjects(unittest.TestCase):
 
-    def test_add_hlb(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        mean1 = np.mean(sim.im[sim.mask])
-        var1 = np.std(sim.im[sim.mask])
-        sim.add_hlb(10_000, 5)
-        mean2 = np.mean(sim.im[sim.mask])
-        var2 = np.std(sim.im[sim.mask])
+    def test_add_n_objects(self):
+        # Test nuc and nonnuc modes.
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=200, res_ij=200)
+        self.assertEqual(np.sum(sim.im[sim.mask]), 0, 'Should be a blank image.')
+        self.assertEqual(np.sum(sim.im[~sim.mask]), 0, 'Should be a blank image.')
+        sim.add_n_objects(100, 10, 1, 1, mode='nuc')
+        self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should be 100')
+        self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
+        sim.add_n_objects(100, 10, 1, 1, mode='nonnuc')
+        self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should have increased')
+        self.assertEqual(np.sum(sim.im[~sim.mask]), 1000, 'should have increased')
 
-        self.assertGreater(mean2, mean1, 'Mean should have increased')
-        self.assertGreater(var2, var1, 'Variance should have increased')
+        # Test all mode.
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=200, res_ij=200)
+        self.assertEqual(np.mean(sim.im[sim.mask]), 0, 'Should be a blank image.')
+        self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
+        sim.add_n_objects(100, 10, 1, 1, mode='all')
+        self.assertGreater(np.sum(sim.im[sim.mask]), 0, 'should have increased')
+        self.assertGreater(np.sum(sim.im[~sim.mask]), 0, 'should have increased')
+    
 
+        # Test erosion.
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=200, res_ij=200)
+        sim.add_n_objects(100, 10, 1, 1, mode='nuc', erosion_size=2)
+        mask = ndi.morphology.binary_erosion(sim.mask, np.ones([2,2,2]))
+        mask = mask.astype('bool')
+        self.assertEqual(np.sum(sim.im[~mask]), 0, 'Should be 0 outside eroded zone.')
+        self.assertEqual(np.sum(sim.im[mask]), 1000, 'Should be 0 outside eroded zone.')
+"""    
 #---------------------------------------------------------------------------
 class TestAddNBlobsZSchedule(unittest.TestCase):
 
@@ -232,3 +209,8 @@ class TestAddNBlobsZScheduleExponential(unittest.TestCase):
             self.assertTrue((r >= 500) and (r <= 600), 'Should be between 500 and 600')
             self.assertRaises(randomize_ab(10,0))
             self.assertEqual(randomize_ab(5,5), 5, 'Should be 5.')
+
+"""
+
+if __name__ == '__main__':
+	unittest.main()
