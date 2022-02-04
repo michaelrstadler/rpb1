@@ -38,8 +38,6 @@ class Sim():
     def __init__(self, mask, z_ij_ratio=4.5):
         self.mask = mask.astype('bool')
         self.im = np.zeros_like(mask)
-        self.fg_coords = np.where(self.mask)
-        self.bg_coords = np.where(~self.mask)
         self.z_ij_ratio = z_ij_ratio
 
     #-----------------------------------------------------------------------
@@ -172,66 +170,7 @@ class Sim():
         return extracted
 
     #-----------------------------------------------------------------------
-    def add_background(self, model='uniform', inverse=False, 
-            **kwargs):
-        """Replace foreground or background pixels with pixel values from
-        a background model.
-
-        poisson+gaussian: Pixels drawn from poisson distribution, then 
-            gaussian noise added
-        uniform: Pixels are a uniform value (noise added later).
-
-        Args:
-            model: string
-                Currently only 'poisson+gaussian' is supported
-            inverse: bool
-                If true, replace foreground, if false, background
-            kwargs:
-                poisson+gaussian:
-                    lam: lambda value for poisson distribution (mean and variance)
-                    sigma: standard deviation for gaussian noise   
-                uniform:
-                    val: numeric, uniform value         
-        """
-        coords = self.fg_coords
-        if inverse:
-            coords = self.bg_coords
-        if model == 'poisson+gaussian':
-            if not all(arg in kwargs for arg in ['lam', 'sigma']):
-                raise ValueError('poisson+gaussian mode requires kwargs lam, sigma.')
-            lam, sigma = kwargs['lam'], kwargs['sigma']
-            num_pixels = len(coords[0])
-            rs = np.random.RandomState()
-            # Start with poisson distributed background pixels.
-            pixels = rs.poisson(lam=lam, size=num_pixels)
-            # Add gaussian noise.
-            noise = rs.normal(scale=sigma, size=num_pixels)
-            pixels = pixels + noise
-            pixels[pixels < 0] = 0
-            self.im[coords] = pixels
-        
-        elif model == 'uniform':
-            if not all(arg in kwargs for arg in ['val']):
-                raise ValueError('uniform mode requires kwarg val.')
-            val = kwargs['val']
-            self.im[coords] = val
-  
-        else:
-            raise ValueError('Only poisson+gaussian and uniform models currently supported.')
-
-    #-----------------------------------------------------------------------
-    def smooth_edges(self, sigma=1.5):
-        """Apply a gaussian filter to image, with intended use to create
-        blurred edges of nuclei, applied after adding backgrounds and before
-        adding other features (or noise).
-
-        Args:
-            sigma: float, sigma for gaussian kernel.
-        """
-        self.im = ndi.gaussian_filter(self.im, sigma=(0.1,sigma,sigma))
-
-    #-----------------------------------------------------------------------
-    def add_noise(self, model='poisson+gaussian',  **kwargs):
+    def add_noise(self, model='poisson',  **kwargs):
         """Add noise to image according to a model.
 
         poisson+gaussian: Pixels drawn from poisson distribution, then 
@@ -244,135 +183,21 @@ class Sim():
                 poisson+gaussian:
                 sigma: standard deviation for gaussian noise      
         """
-        if model == 'poisson+gaussian':
+        rs = np.random.RandomState()
+        if model == 'gaussian':
             if 'sigma' not in kwargs:
-                raise ValueError('poisson+gaussian mode requires kwarg sigma.')
+                raise ValueError('gaussian mode requires kwarg sigma.')
             sigma = kwargs['sigma']
-            rs = np.random.RandomState()
-            poisson = rs.poisson(self.im)
             gaussian = rs.normal(scale = (sigma * np.ones_like(self.im)))
-            self.im = poisson + gaussian
+            self.im = self.im + gaussian
             self.im[self.im < 0] = 0
-
+        
+        elif model == 'poisson':
+            self.im = rs.poisson(self.im)
+        
         else:
-            raise ValueError('Only poisson+gaussian model currently supported.')
+            raise ValueError("Only 'poisson' and 'gaussian' model currently supported.")
             
-    #-----------------------------------------------------------------------
-    def make_3d_gaussian_inabox(self, intensity, sigma, 
-            z_windowlen, ij_windowlen, p=1):
-        """Make a 3D gaussian signal within a box of defined size.
-        
-        Implementation is of a generalize or super gaussian:
-        1 / (sigma * sqrt(2 pi)) * exp(-1 * (d^2 / (2 * sigma^2))^p)
-
-        When p = 1, it's a normal gaussian. For higher powers, the function
-        becomes more 'flat-topped'.
-
-        The distances are scaled to account for anisotropic z vs. ij 
-        dimensions.
-
-        Args:
-            intensity: numeric, intensity of gaussian (height in 1d)
-            sigma: numeric, sigma of gaussian
-            z_windowlen: int, length in z dimension
-            ij_windowlen: int, length in ij dimension
-            p: float, shape parameter for generalize (super-) gaussian
-        """
-        mesh = mesh_like(np.ones((z_windowlen, ij_windowlen, ij_windowlen)), n=3)
-        # Adjust z coordinates to account for non-isotropy.
-        mesh[0] = mesh[0] * self.z_ij_ratio
-        midpoint_z = int(z_windowlen / 2 * self.z_ij_ratio)
-        midpoint_ij = int(ij_windowlen / 2)
-        # Calculate squares distance of each point.
-        d2 = ((mesh[0] - midpoint_z) ** 2) + ((mesh[1] - midpoint_ij) ** 2) + ((mesh[2] - midpoint_ij) ** 2)
-        # Calculate gaussian as PDF.
-        gauss = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-1. * ((d2) / (2 * (sigma ** 2))) ** p))
-        # Scale gaussian to have max of 1, multiply by intensity.
-        gauss = gauss * (1 / np.max(gauss)) * intensity
-        return gauss 
-
-    #-----------------------------------------------------------------------
-    @staticmethod
-    def add_box_to_stack(stack, box, coords):
-        """Add pixel values from a supplied "box" to a stack at a position 
-        centered at supplied coordinates.
-        
-        Args:
-            stack: ndarray, image stack
-            box: ndarray, the box to add to the image stack
-            coords: iterable of ints, coordinates marking center of position
-                in stack to which to add box
-        """
-        # Initialize arrays to store the start and end coordinates for the 
-        # stack and the box in each dimension. They are arrays because they
-        # will store the start/end position in each of the three dimensions.
-        box_starts = [] # Start positions relative to box [z, i, j] 
-        box_ends = []
-        stack_starts = []
-        stack_ends = []
-        # For each dimension, find the start and stop positions for the box and 
-        # the stack to be centered at coords; handle the cases where the supplied 
-        # coordinates and box size will result in trying to assign positions 
-        # outside the stack.
-        for dim in range(0, 3):
-            # Initialize start and stop locations for case where box is entirely
-            # within stack dimensions.
-            start = coords[dim] - int(box.shape[dim] / 2)
-            end = coords[dim] + int(box.shape[dim] / 2) + 1
-            stack_start = start
-            stack_end = end
-            box_start = 0
-            box_end = box.shape[dim]
-            # Adjust for cases where box falls out of bounds of stack.
-            if start < 0:
-                stack_start = 0
-                box_start = -start
-            if end > stack.shape[dim]:
-                stack_end = stack.shape[dim]
-                box_end = box.shape[dim] - (end - stack.shape[dim])
-            # Append corrected starts and stops for this dimension.
-            stack_starts.append(stack_start)
-            stack_ends.append(stack_end)
-            box_starts.append(box_start)
-            box_ends.append(box_end)
-        # Ensure that the shapes of the subsection of the stack to add to
-        # and the box to add are the same. If so, add box values to stack.
-        substack_shape = stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]].shape
-        box_to_add = box[box_starts[0]:box_ends[0], box_starts[1]:box_ends[1], box_starts[2]:box_ends[2]]
-        if substack_shape == box_to_add.shape:
-            stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
-        else:
-            warnings.warn('Dimensions of box to add and stack to replace do not match.')
-
-    #-----------------------------------------------------------------------
-    def add_gaussian_blob(self, coords, intensity, sigma, p=1):
-        """Add a gaussian blob to image.
-        
-        Args:
-            coords: tuple of three ints
-                Coordinates of the center of gaussian
-            intensity: numeric
-                "Height" of gaussian
-            sigma: numeric
-                Standard deviation of gaussian
-            p: float 
-                Shape parameter for general gaussian (default of 1
-                is for standard gaussian)
-        """
-        def make_odd(n):
-            """Ensure box dimension is an odd integer to make math work."""
-            n = int(n)
-            if (n % 2) == 0:
-                return n + 1
-            else:
-                return n
-
-        ij_windowlen = make_odd(sigma * 10.5)
-        z_windowlen = make_odd(ij_windowlen / self.z_ij_ratio)
-        box = self.make_3d_gaussian_inabox(intensity, sigma, 
-            z_windowlen, ij_windowlen, p=p)
-        self.add_box_to_stack(self.im, box, coords)
-    
     #-----------------------------------------------------------------------
     def get_eroded_coordinates(self, erosion_size):
         """Get the coordinates (pixels >0) of a mask after applying binary
@@ -392,37 +217,30 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
-    def add_n_objects(self, n_objects, intensity):
+    def add_n_objects(self, n_objects, intensity, mode='nuc'):
         """Add gaussian blobs at random positions inside nucleus, with
         intensities and widths drawn from random distributions.
         
-        Intensities are drawn from gaussian distribution, widths (sigma of
-        gaussian) use a gamma distribution (gamma is non-negative): 
-            sigma = sigma_base + gamma(k, theta)
-
-        Args:
-            numblobs: int, number of blobs to add
-            intensity_mean: numeric, mean of the distribution from which 
-                blob intensities are drawn.
-            intensity_std: numeric, std. deviation of the distribution from
-                which blob intensities are drawn.
-            sigma_base: numeric, minimum value of gaussian width (sigma)
-            sigma_k: numeric, shape parameter of gamma distribution added to 
-                sigma_base to determine gaussian width
-            sigma_theta: numeric, scale parameter of gamma distribution added 
-                to sigma_base to determine gaussian width
         """
         rs = np.random.RandomState()
         # Use erosion to generate candidate positions that avoid the edge
         # of the nucleus.
-        erosion_size = 1
-        eroded_coords = self.get_eroded_coordinates(erosion_size)
-        num_pixels = len(eroded_coords[0])
+        if mode == 'nuc':
+            erosion_size = 2
+            coords = self.get_eroded_coordinates(erosion_size)
+        elif mode == 'nonnuc':
+            coords = np.where(self.mask == 0)
+        elif mode == 'all':
+            coords = np.where(np.ones_like(self.mask))
+        else:
+            raise ValueError("Mode must be 'nuc', 'nonnuc', or 'all'.")
+        
+        num_pixels = len(coords[0])
         for _ in range(n_objects):
             # Get random coordinates 
             px = rs.randint(0, num_pixels - 1)
-            random_coords = (eroded_coords[0][px], eroded_coords[1][px], 
-                eroded_coords[2][px])
+            random_coords = (coords[0][px], coords[1][px], 
+                coords[2][px])
             self.im[random_coords] += intensity
 
     #-----------------------------------------------------------------------

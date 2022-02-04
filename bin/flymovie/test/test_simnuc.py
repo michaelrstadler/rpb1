@@ -115,21 +115,6 @@ class TestAddNoise(unittest.TestCase):
         self.assertGreater(std_after, std_before, 
             'Std should increase with added noise.')
 
-
-#---------------------------------------------------------------------------
-class TestMake3dGaussianInABox(unittest.TestCase):
-
-    def test_make_3d_gaussian_inabox(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        box = sim.make_3d_gaussian_inabox(intensity=100, sigma=10, 
-            z_windowlen=20, ij_windowlen=100)
-        self.assertGreater(box[10,50,50], box[0,0,0], 
-            'Should be brighter at center')
-        self.assertEqual(box.shape[0], 20, 'Box z dimension is wrong.')
-        self.assertEqual(box.shape[1], 100, 'Box ij dimension is wrong.')
-
 #---------------------------------------------------------------------------
 class TestAddGaussianBlob(unittest.TestCase):
 

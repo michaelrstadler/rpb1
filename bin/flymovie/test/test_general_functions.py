@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 
 from flymovie.general_functions import *
+from flymovie.simnuc import Sim
 
 class TestConcatenate5dstacks(unittest.TestCase):
 	
@@ -277,6 +278,20 @@ class TestExtractBox(unittest.TestCase):
 		ex = extract_box(stack, (2,5,5), (7,13,13), pad=False)
 		self.assertTrue(np.array_equal(stack.shape, ex.shape), "Should be equal")
 		self.assertEqual(np.unique(ex), [1], "Should be equal")
+
+#---------------------------------------------------------------------------
+class TestMake3dGaussianInABox(unittest.TestCase):
+
+    def test_make_3d_gaussian_inabox(self):
+        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
+        nuc_rad=50, z_ij_ratio=4.5)
+        sim = Sim(mask)
+        box = make_3d_gaussian_inabox(intensity=100, sigma=10, 
+            z_windowlen=20, ij_windowlen=100)
+        self.assertGreater(box[10,50,50], box[0,0,0], 
+            'Should be brighter at center')
+        self.assertEqual(box.shape[0], 20, 'Box z dimension is wrong.')
+        self.assertEqual(box.shape[1], 100, 'Box ij dimension is wrong.')
 
 #---------------------------------------------------------------------------
 

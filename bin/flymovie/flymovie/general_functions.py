@@ -703,7 +703,9 @@ def extract_box(stack, coords, box_dims, pad=True):
         stack: ndarray, image stack (n-dimensional)
         coords: iterable of ints, coordinates for box center
         box_dims: iterable of odd ints, dimensions of box to extract
-        pad: bool, pad with zeros if box falls outsize stack borders
+        pad: bool, pad with zeros if box falls outsize stack borders.
+            If false, boxes that fall outside edge will return boxes
+            that are smaller than box_dims
 
     Returns:
         box: ndarray, sub-window of image stack
@@ -753,3 +755,38 @@ def extract_box(stack, coords, box_dims, pad=True):
     
     else:
         return stack[stack_slice_all]
+
+############################################################################
+def make_3d_gaussian_inabox(intensity, sigma, 
+        z_windowlen, ij_windowlen, z_ij_ratio=2.94, p=1):
+    """Make a 3D gaussian signal within a box of defined size.
+    
+    Implementation is of a generalized or super gaussian:
+    1 / (sigma * sqrt(2 pi)) * exp(-1 * (d^2 / (2 * sigma^2))^p)
+
+    When p = 1, it's a normal gaussian. For higher powers, the function
+    becomes more 'flat-topped'.
+
+    The distances are scaled to account for anisotropic z vs. ij 
+    dimensions.
+
+    Args:
+        intensity: numeric, intensity of gaussian (height in 1d)
+        sigma: numeric, sigma of gaussian
+        z_windowlen: int, length in z dimension
+        ij_windowlen: int, length in ij dimension
+        z_ij_ratio: float, ratio of voxel size in z to ij dimension
+        p: float, shape parameter for generalize (super-) gaussian
+    """
+    mesh = mesh_like(np.ones((z_windowlen, ij_windowlen, ij_windowlen)), n=3)
+    # Adjust z coordinates to account for non-isotropy.
+    mesh[0] = mesh[0] * z_ij_ratio
+    midpoint_z = int(z_windowlen / 2 * z_ij_ratio)
+    midpoint_ij = int(ij_windowlen / 2)
+    # Calculate squares distance of each point.
+    d2 = ((mesh[0] - midpoint_z) ** 2) + ((mesh[1] - midpoint_ij) ** 2) + ((mesh[2] - midpoint_ij) ** 2)
+    # Calculate gaussian as PDF.
+    gauss = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp((-1. * ((d2) / (2 * (sigma ** 2))) ** p))
+    # Scale gaussian to have max of 1, multiply by intensity.
+    gauss = gauss * (1 / np.max(gauss)) * intensity
+    return gauss 
