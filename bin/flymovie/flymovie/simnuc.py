@@ -35,15 +35,16 @@ import string
 class Sim():
     """A class to simulate fluorescent signal in nuclei."""
 
-    def __init__(self, mask, z_ij_ratio=4.5):
+    def __init__(self, mask, res_z=220, res_ij=85):
         self.mask = mask.astype('bool')
         self.im = np.zeros_like(mask)
-        self.z_ij_ratio = z_ij_ratio
+        self.res_z = res_z
+        self.res_ij = res_ij
+        self.z_ij_ratio = self.res_z / self.res_ij
 
     #-----------------------------------------------------------------------
     @staticmethod
-    def make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5):
+    def make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_rad=50):
         """Make a label mask of spherical dummy nuclei.
         
         Nuclei are equally spaced spheres. The can be squashed by playing
@@ -56,23 +57,21 @@ class Sim():
                 Size of mask in i dimension
             jdim: int
                 Size of mask in j dimension
-            nuc_spacing: int
-                Number of pixels separating nuclear centers in ij dimension
             nuc_rad: int
                 Radius of nuclei
-            z_ij_ratio: numeric
-                Ratio of voxel size in z to ij (axial to lateral)
+
+        Returns:
+            mask: ndarray
+                Mask
         """
         mask = np.zeros((zdim, idim, jdim))
         z, i, j = mesh_like(mask, 3)
-        z_midpoint = int(mask.shape[0] / 2)
-        nuc_id = 1
-        for i_center in range(nuc_rad, mask.shape[1], nuc_spacing):
-            for j_center in range(nuc_rad, mask.shape[2], nuc_spacing):
-                # Basic equation of circle.
-                mask[((((z - z_midpoint) ** 2) * (z_ij_ratio ** 2)) + ((i - i_center) ** 2) + 
-                    ((j - j_center) ** 2)) < (nuc_rad ** 2)] = nuc_id
-                nuc_id += 1
+        z_center = int(mask.shape[0] / 2)
+        i_center = int(mask.shape[1] / 2)
+        j_center = int(mask.shape[2] / 2)
+
+        mask[(((z - z_center) ** 2) + ((i - i_center) ** 2) + 
+            ((j - j_center) ** 2)) < (nuc_rad ** 2)] = 1
 
         return mask
     
@@ -197,7 +196,7 @@ class Sim():
         
         else:
             raise ValueError("Only 'poisson' and 'gaussian' model currently supported.")
-            
+
     #-----------------------------------------------------------------------
     def get_eroded_coordinates(self, erosion_size):
         """Get the coordinates (pixels >0) of a mask after applying binary
@@ -217,6 +216,20 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
+    def add_object(self, center_coords, intensity, num_objects, radius, mesh=None):
+        if mesh is None:
+            mesh = mesh_like(self.im, 3)
+
+        z, i, j = mesh
+
+        pix_coords = np.where((((z - center_coords[0]) ** 2) + ((i - center_coords[1]) ** 2) + 
+            ((j - center_coords[2]) ** 2)) < (radius ** 2))
+        
+        num_pixels = len(pix_coords[0])
+        print(num_pixels)
+        intensity_per_pixel = intensity * num_objects / num_pixels
+        self.im[pix_coords] = intensity_per_pixel
+
     def add_n_objects(self, n_objects, intensity, mode='nuc'):
         """Add gaussian blobs at random positions inside nucleus, with
         intensities and widths drawn from random distributions.
