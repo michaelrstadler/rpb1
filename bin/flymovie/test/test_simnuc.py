@@ -118,10 +118,10 @@ class TestAddNObjects(unittest.TestCase):
         sim = Sim(mask, res_z=200, res_ij=200)
         self.assertEqual(np.sum(sim.im[sim.mask]), 0, 'Should be a blank image.')
         self.assertEqual(np.sum(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, 1, 1, mode='nuc')
+        sim.add_n_objects(100, 10, [1], 1, mode='nuc')
         self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should be 100')
         self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, 1, 1, mode='nonnuc')
+        sim.add_n_objects(100, 10, [1], 1, mode='nonnuc')
         self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should have increased')
         self.assertEqual(np.sum(sim.im[~sim.mask]), 1000, 'should have increased')
 
@@ -131,7 +131,7 @@ class TestAddNObjects(unittest.TestCase):
         sim = Sim(mask, res_z=200, res_ij=200)
         self.assertEqual(np.mean(sim.im[sim.mask]), 0, 'Should be a blank image.')
         self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, 1, 1, mode='all')
+        sim.add_n_objects(100, 10, [1], 1, mode='all')
         self.assertGreater(np.sum(sim.im[sim.mask]), 0, 'should have increased')
         self.assertGreater(np.sum(sim.im[~sim.mask]), 0, 'should have increased')
     
@@ -140,11 +140,40 @@ class TestAddNObjects(unittest.TestCase):
         mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
             nuc_rad=8)
         sim = Sim(mask, res_z=200, res_ij=200)
-        sim.add_n_objects(100, 10, 1, 1, mode='nuc', erosion_size=2)
+        sim.add_n_objects(100, 10, [1,1], 1, mode='nuc', erosion_size=2, 
+            fluors_per_object_probs=[0.5,0.5])
         mask = ndi.morphology.binary_erosion(sim.mask, np.ones([2,2,2]))
         mask = mask.astype('bool')
         self.assertEqual(np.sum(sim.im[~mask]), 0, 'Should be 0 outside eroded zone.')
         self.assertEqual(np.sum(sim.im[mask]), 1000, 'Should be 0 outside eroded zone.')
+    
+#---------------------------------------------------------------------------
+class TestAddKernel(unittest.TestCase):
+
+    def test_add_kernel(self):
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=200, res_ij=200)
+        kernel = np.ones((3,3,3))
+        sim.add_kernel(kernel, res_z=50, res_ij=50)
+        self.assertEqual(sim.kernel_res_ij, 50, 'Should be 50.')
+        self.assertEqual(sim.kernel_res_z, 50, 'Should be 50.')
+        self.assertAlmostEqual(np.sum(sim.kernel), 1, 5, 'Should be 1.')
+
+#---------------------------------------------------------------------------
+class TestConvolve(unittest.TestCase):
+
+    def test_convolve(self):
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=50, res_ij=50)
+        kernel = np.ones((3,3,3))
+        #kernel = kernel / np.sum(kernel)
+        sim.add_kernel(kernel, res_z=50, res_ij=50)
+        sim.add_object([10,10,10], 10, 1, 1)
+        sim.convolve()
+        self.assertAlmostEqual(np.sum(sim.im), 10, 3, 'Should be 270')
+        self.assertAlmostEqual(np.count_nonzero(sim.im.flatten()), 27, 5, 'Should be 27.')
 """    
 #---------------------------------------------------------------------------
 class TestAddNBlobsZSchedule(unittest.TestCase):

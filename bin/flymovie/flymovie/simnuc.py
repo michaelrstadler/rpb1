@@ -12,8 +12,11 @@ separately initializing a numpy random state using
 rs = np.random.RandomState() within each function where random processes
 are needed. This must be used for parallel operations.
 
+v1.0: simulations done via adding gaussians.
+v2.0: simulations start with "real" image, convolve with experimentally-derived kernel, add noise
+
 """
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 __author__ = 'Michael Stadler'
 
 from flymovie.general_functions import mesh_like
@@ -23,6 +26,7 @@ import random
 import numpy as np
 import scipy.ndimage as ndi
 import multiprocessing as mp
+from datetime import datetime
 
 import os
 import random
@@ -246,14 +250,50 @@ class Sim():
         self.im[obj_coords] += intensity_per_pixel
 
     #-----------------------------------------------------------------------
-    def add_n_objects(self, n_objects, intensity, fluors_per_object, length, 
+    def add_n_objects(self, n_objects, intensity, fluors_per_object_vals,
+        size_vals, fluors_per_object_probs=None, size_probs=None, 
         erosion_size=None, mode='nuc'):
-        """Add a defined number of objects objects at random positions.
-        
+        """Add a defined number of objects at random positions.
+
+        Intensity of fluors is fixed, but the number of fluors per object
+        can be varied according to supplied probabilities. Objects can be
+        added to the nucleus, outside the nucleus, or uniformly across the
+        image.
+
+        Args:
+            n_objects: int, number of objects to add
+            intensity: int, intensity of fluors making up object
+            fluors_per_object_val: iterable of ints, list of possible values
+                for number of fluors per object
+            length: int, side length of objects. Objects are cubes equal on
+                all sides.
+            fluors_per_object_probs [optional]: iterable of floats, 
+                probabilities of each value in fluors_per_object_val. If 
+                omitted, probabilities are set to uniform.
+            erosion_size [optional]: int, size of erosion kernel used to 
+                restrict available nuclear coordinates. Has the effect of
+                shaving off the outter layer of the nucleus for selecting
+                object positions.
+            mode: string, one of:
+                'nuc': objects placed in nucleus (mask==1)
+                'nonnuc': objects placed outside nucleus (mask==0)
+                'all': objects placed in whole image
         """
+        def draw_vals(vals, probs, n_objects, rs):
+            # Create uniform probabilities if probs omitted.
+            if probs is None:
+                probs = np.ones(len(vals))/ len(vals)
+
+            # Randomly draw fluors_per_object based on probabilities, store in array.
+            vals_arr = rs.choice(
+                    vals,
+                    n_objects,
+                    p=probs
+                )
+            return vals_arr
+
         rs = np.random.RandomState()
-        # Use erosion to generate candidate positions that avoid the edge
-        # of the nucleus.
+        # Get coordinates based on mode.
         if mode == 'nuc':
             if erosion_size is not None:
                 coords = self.get_eroded_coordinates(erosion_size)
@@ -267,25 +307,46 @@ class Sim():
             raise ValueError("Mode must be 'nuc', 'nonnuc', or 'all'.")
         
         num_pixels = len(coords[0])
-        for _ in range(n_objects):
-            # Get random coordinates 
+
+        
+        
+        fluors_per_object_arr = draw_vals(fluors_per_object_vals, fluors_per_object_probs, n_objects, rs)
+        size_arr = draw_vals(size_vals, size_probs, n_objects, rs)
+
+        # For each iteration get random coordinates, add object.
+        for i in range(n_objects):
+            
             px = rs.randint(0, num_pixels - 1)
+            fluors_per_object = fluors_per_object_arr[i]
+            size = size_arr[i]
+            print(size)
             random_coords = (coords[0][px], coords[1][px], 
                 coords[2][px])
-            self.add_object(random_coords, intensity, fluors_per_object, length)
+            self.add_object(random_coords, intensity, fluors_per_object, size)
 
     #-----------------------------------------------------------------------
     def add_kernel(self, kernel, res_z, res_ij):
+        """Add kernel, normalize to probability (sum=1).
+
+        Args:
+            kernel: ndarray, convolution kernel, dimensions must be same as
+                image
+            res_z: float, resolution in Z of kernel (typical: nm)
+            res_ij: float, resolution in ij of kernel (typical: nm)
+        """
         if kernel.ndim != self.im.ndim:
             raise ValueError('Dimensions of kernel do not match image.')
-        #kernel = ndi.zoom(kernel, [res_z / self.res_z, res_ij / self.res_ij, res_ij / self.res_ij])
-        self.kernel = kernel
+        self.kernel = kernel / np.sum(kernel)
         self.kernel_res_z = res_z
         self.kernel_res_ij = res_ij
     
+    #-----------------------------------------------------------------------
     def convolve(self):
+        """"""
         if self.kernel is None:
             raise ValueError('Must add kernel to convolve.')
+        
+        # Resize (re-sample) kernel to match image resolution.
         kernel = self.kernel.copy()
         if (self.res_ij != self.kernel_res_ij) or (self.res_z != self.kernel_res_z):
             kernel = ndi.zoom(self.kernel, [
@@ -293,6 +354,7 @@ class Sim():
                 self.kernel_res_ij  / self.res_ij, 
                 self.kernel_res_ij  / self.res_ij
                 ])
+
         self.im = ndi.convolve(self.im, kernel)
     
     def resize(self, dims):
@@ -302,100 +364,9 @@ class Sim():
                 self.res_ij / dims[1],
                 self.res_ij / dims[2]
             )
+
         im_rs = ndi.zoom(self.im, zoom_factors)
-        # Rescale to match input.
-        im_rs = im_rs * (self.im.sum() / im_rs.sum())
         self.im = im_rs
-
-    #-----------------------------------------------------------------------
-    def add_nblobs_zschedule(self, numblobs, intensity_mean, intensity_std, 
-            sigma_base, z_probs, sigma_k=0.5, sigma_theta=0.5):
-        """Add gaussian blobs according with asymmetrical Z location 
-        probabilities determined by a supplied distribution.
-
-        Args:
-            numblobs: int, number of blobs to add
-            intensity_mean: numeric, mean of the distribution from which 
-                blob intensities are drawn.
-            intensity_std: numeric, std. deviation of the distribution from
-                which blob intensities are drawn.
-            sigma_base: numeric, minimum value of gaussian width (sigma)
-            z_probs: iterable, probabilities of blobs occurring in each z slice
-            sigma_k: numeric, shape parameter of gamma distribution added to 
-                sigma_base to determine gaussian width
-            sigma_theta: numeric, scale parameter of gamma distribution added 
-                to sigma_base to determine gaussian width
-        """
-        if len(z_probs) != self.im.shape[0]:
-            raise ValueError('Length of z_probs must equal number of z slices.')
-        if abs(np.sum(z_probs) - 1) > 0.01:
-            raise ValueError('z_probs must sum to 1.')
-        rs = np.random.RandomState()
-        num_pixels = len(self.fg_coords[0])
-        # Divide coords by Z slice.
-        eroded_coords = self.get_eroded_coordinates(sigma_base * 3)
-        coord_list = np.array(list(zip(eroded_coords[0], eroded_coords[1], eroded_coords[2])))
-        coords_byz = []
-        num_zslices = self.im.shape[0]
-        for z in range(num_zslices):
-            coords_byz.append(coord_list[eroded_coords[0] == z])
-        # Draw z slices from probability dist: end up with list of Z-slices.
-        z_slices = rs.choice(np.arange(0, num_zslices), p=z_probs, size=numblobs)
-        # Add spots in randomly selected Z slices.
-        for z in z_slices:
-            # Draw intensity and sigma.
-            sigma = sigma_base + rs.gamma(sigma_k, sigma_theta)
-            intensity = rs.normal(intensity_mean, intensity_std)
-            intensity = np.max([0, intensity])
-            # Draw random coordinate from the drawn Z-slice.
-            rand_idx = rs.randint(0, len(coords_byz[z]) - 1)
-            rand_coords = coords_byz[z][rand_idx]
-            self.add_gaussian_blob(rand_coords, intensity, sigma)
-
-    #-----------------------------------------------------------------------
-    def add_nblobs_zschedule_exponential(self, numblobs, intensity_mean, 
-            intensity_std, sigma_base, exp_shape=1, sigma_k=0.5, sigma_theta=0.5, 
-            return_probs=False):
-        """Add blobs with a Z distribution defined by an exponential 
-        function.
-        
-        Shape of exponential is determined by exp_shape according to:
-            y = exp(exp_shape * x) for 0 < x < 1
-            probs = y / sum(y)
-
-            0: Flat
-            More positive: steeper bias toward higher z slices
-            More negative: steeper bias toward lower z slices
-
-        Args:
-            numblobs: int, number of blobs to add
-            intensity_mean: numeric, mean of the distribution from which 
-                blob intensities are drawn.
-            intensity_std: numeric, std. deviation of the distribution from
-                which blob intensities are drawn.
-            sigma_base: numeric, minimum value of gaussian width (sigma)
-            exp_shape: numeric, shape parameter of exponential
-            sigma_k: numeric, shape parameter of gamma distribution added to 
-                sigma_base to determine gaussian width
-            sigma_theta: numeric, scale parameter of gamma distribution added 
-                to sigma_base to determine gaussian width
-            return_probs: bool, return z-slice probabilities
-        
-        Possible issue: the number of available pixels is different at different
-        Z slices. Even a uniform distribution, done the way it's done here, will
-        crowd spots at the poles. It's possible there's a different version needed
-        that weights Z-slices by pixels and uses the distribution as some kind
-        of bias.
-        """
-        x = np.arange(0, 1, 1/self.im.shape[0])
-        y = np.exp(exp_shape * x)
-        probs = y / np.sum(y)
-        self.add_nblobs_zschedule(numblobs, intensity_mean, intensity_std, sigma_base,
-            z_probs=probs, sigma_k=0.5, sigma_theta=0.5)
-        if return_probs:
-            return probs
-
-    #-----------------------------------------------------------------------
 
 #-----------------------------------------------------------------------
 ##### End of Sim class. #####
@@ -421,71 +392,47 @@ def randomize_ab(ab):
     return (rs.random() * (b - a)) + a
 
 #-----------------------------------------------------------------------
-def sim_rpb1(mask, filename, nuc_bg_mean=10_000, nonnuc_bg_mean=500, 
-    noise_sigma=300, nblobs=40, blob_intensity_mean=10_000, 
-    blob_intensity_std=2_000, blob_sigma_base=0.5, blob_sigma_k=0.5, 
-    blob_sigma_theta=0.5, hlb_intensity=19_000, hlb_sigma=5, hlb_p=2):
+def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_len_rng, 
+    hlb_nummols_rng, n_clusters_rng, cluster_diam_mean_rng, 
+    cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng):
     """Simulate an rpb1 nucleus, write to file.
+
+    Take ranges, do selection and simulation. Could abstract again but let's not.
+
+        fluor intensity: fixed
+        ranges:
+
+            number free: uniform sample
+            hlb length: uniform sample
+            hlb num molecules: uniform sample
+            cluster_number
+            cluster_size
+            cluster_size_variance
+            cluster_nummolecules
+            cluster_nummolecules variance
+
+            noise
 
     Args:
         mask: ndarray, input mask for building nucleus
-        filename: string or filehandle, file to write image to
-        nuc_bg_mean: number, value for nuclear background (uniform)
-        nonnuc_bg_mean: number, value for cytoplasm background (uniform)
-        noise_sigma: number, sigma value for gaussian component of 
-            add_noise function
-        nblobs: int, number of blobs to add
-        blob_intensity_mean: number, mean of distribution for blob
-            intensities
-        blob_intensity_std: number, std of distribution of blob 
-            intensities
-        blob_sigma_base: float, base value for blob size sigma
-        blob_sigma_k: float, k parameter for blob size distribution
-        blob_sigma_theta: float, theta parameter for blob size 
-            distribution
-        hlb_intensity: number, intensity for HLB
-        hlb_sigma: number, sigma (width) or HLB
-        hlb_p: number, shape of gaussian for HLB (higher = flatter)
+        
     """
-
-    # Make sure nblobs is an int.
-    nblobs = int(nblobs)
-    rs = np.random.RandomState()
-    mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
-
-    # Build nucleus with input values.
-    sim = Sim(mask)
-    sim.add_background(val=nuc_bg_mean)
-    sim.add_background(inverse=True, val=nonnuc_bg_mean)
-    sim.smooth_edges(1)
-    sim.add_hlb(hlb_intensity, hlb_sigma, hlb_p)
-    sim.add_nblobs(nblobs, blob_intensity_mean, blob_intensity_std, 
-        sigma_base=blob_sigma_base, sigma_k=blob_sigma_k, 
-        sigma_theta=blob_sigma_theta)
-    sim.add_noise(sigma=noise_sigma)
+    sim = Sim(mask, res_z=50, res_ij=50)
+    kernel = np.ones((3,3,3))
+    #kernel = kernel / np.sum(kernel)
+    sim.add_kernel(kernel, res_z=50, res_ij=50)
+    sim.add_object([10,10,10], 10, 1, 1)
+    
     sim.im[sim.im < 0] = 0
     sim.im[sim.im > 65_536] = 65_536
-    save_pickle(sim.im, filename)
+
+    file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
+    filepath = os.path.join(outfolder, file_id + '.pkl')
+    save_pickle(sim.im, filepath)
 
 #-----------------------------------------------------------------------
-def sim_rpb1_rand_batch( 
-    maskfile, 
-    outfolder,
-    nsims,
-    nreps,
-    nprocesses,
-    nuc_bg_mean_rng, 
-    nonnuc_bg_mean_rng, 
-    noise_sigma_rng, 
-    nblobs_rng, 
-    blob_intensity_mean_rng, 
-    blob_intensity_std_rng,
-    blob_sigma_base_rng,
-    blob_sigma_k_rng, 
-    blob_sigma_theta_rng, 
-    hlb_intensity_rng,
-    hlb_sigma_rng, 
-    hlb_p_rng):
+def sim_batch(outfolder, kernel, nsims, nreps, nprocesses, 
+    sim_func=sim_rpb1, z_dim=200, ij_dim=200, nuc_rad=90, **kwargs):
     """Perform parallelized simulations of rpb1 nuclei by randomly drawing
     parameters from supplied ranges.
 
@@ -496,22 +443,6 @@ def sim_rpb1_rand_batch(
         nreps: int, the number of simulations to perform for each param set
         nprocesses: int, the number of processes to launch with 
             multiprocessing Pool
-        Iterables of form (lower_limit, upper_limit) are required to supply
-            the ranges from which parameters are drawn. For a constant, 
-            supply the same number twice:
-
-            nuc_bg_mean_rng
-            nonnuc_bg_mean_rng
-            noise_sigma_rng 
-            nblobs_rng 
-            blob_intensity_mean_rng 
-            blob_intensity_std_rng
-            blob_sigma_base_rng
-            blob_sigma_k_rng
-            blob_sigma_theta_rng
-            hlb_intensity_rng
-            hlb_sigma_rng 
-            hlb_p_rng
     
     Outputs:
         A unique 8-character identifier is associated with the entire 
@@ -526,59 +457,41 @@ def sim_rpb1_rand_batch(
     also rotated randomly (0-360 uniform).
     """
     mp.set_start_method('fork', force=True) # Important for macOS.
+
     # Set folder name with unique identifier and create it.
     folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
     folder = outfolder + folder_id
     os.mkdir(folder)
     
-    # Load masks.
-    masks = load_pickle(maskfile)
-
-    # Set list of args to use for calling and logging.
-    args = (maskfile, outfolder, nsims, nreps, nprocesses, nuc_bg_mean_rng, nonnuc_bg_mean_rng, noise_sigma_rng, 
-        nblobs_rng, blob_intensity_mean_rng, blob_intensity_std_rng, blob_sigma_base_rng, blob_sigma_k_rng, 
-        blob_sigma_theta_rng, hlb_intensity_rng, hlb_sigma_rng, hlb_p_rng)
-    
+    mask = Sim.make_spherical_mask(z_dim, ij_dim, ij_dim, nuc_rad)
     # For each sim, built a local set of args that will be sent to sim_rpb1,
     # add each set of parameters to arglist.
-    rs = np.random.RandomState()
     arglist = []
-    for _ in range(nsims):
-        # Build up args for rpb1 using random draws from supplied ranges 
-        # (uniform prob).
-        args_this_sim = []
-        for arg in args[5:]:
-            choice = randomize_ab(arg)
-            args_this_sim.append(choice)
 
-        # Create a unique 3-letter id for this batch.
-        file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
-        # Add the parameters to arglist once for every replicate, with the only
-        # changes being 1) the rep number in the filename 2) Selection and 
-        # rotation of a random mask.
-        for n in range(1, nreps+1):
-            # Select mask and rotate.
-            mask = masks[rs.randint(0, len(masks))]
-            #mask = Sim.rotate_binary_mask(mask, rs.randint(0, 360)).astype('float64')
-            # Create filename, build final args, add to list.
-            filepath = os.path.join(folder, file_id + '_' + '_'.join([str(round(x,1)) for x in args_this_sim]) + '_rep' + str(n) + '.pkl')
-            args_this_rep = [mask, filepath] + args_this_sim
-            arglist.append(args_this_rep)
+    for _ in range(nsims):
+        kwargs_loc = kwargs.copy()
+        kwargs_loc['mask'] = mask
+        kwargs_loc['kernel'] = kernel
+        kwargs_loc['outfolder'] = folder
+        kwargs_loc['nreps'] = nreps
+        arglist.append(kwargs_loc)
     print('arglist done')
+
     # Launch simulations in parallel using pool method.
     for i in range(0, len(arglist), 1000):
         end = i + 1000
         arglist_sub = arglist[i:end]   
         pool = mp.Pool(processes=nprocesses)
-        results = [pool.apply_async(sim_rpb1, args=(x)) for x in arglist_sub]
+        results = [pool.apply_async(sim_func, (), x) for x in arglist_sub]
         [p.get() for p in results]
-
+    
     # Write logfile.
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
-    varnames = sim_rpb1_rand_batch.__code__.co_varnames
     with open(logfilepath, 'w') as logfile:
-        for i in range(len(args)):
-            logfile.write(varnames[i] + ': ')
-            logfile.write(str(args[i]))
+        logfile.write(datetime.now().ctime() + '\n')
+        logfile.write('nsims: ' + str(nsims) + '\n')
+        logfile.write('nreps: ' + str(nreps) + '\n')
+        for key in kwargs:
+            logfile.write(key + ': ' + str(kwargs[key]))
             logfile.write('\n')
 
