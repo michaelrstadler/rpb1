@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import scipy.ndimage as ndi
+import tempfile
 from flymovie.simnuc import *
 
 #---------------------------------------------------------------------------
@@ -118,10 +119,10 @@ class TestAddNObjects(unittest.TestCase):
         sim = Sim(mask, res_z=200, res_ij=200)
         self.assertEqual(np.sum(sim.im[sim.mask]), 0, 'Should be a blank image.')
         self.assertEqual(np.sum(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, [1], 1, mode='nuc')
+        sim.add_n_objects(100, 10, 1, 1, mode='nuc')
         self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should be 100')
         self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, [1], 1, mode='nonnuc')
+        sim.add_n_objects(100, 10, [1], [1], mode='nonnuc')
         self.assertEqual(np.sum(sim.im[sim.mask]), 1000, 'should have increased')
         self.assertEqual(np.sum(sim.im[~sim.mask]), 1000, 'should have increased')
 
@@ -131,7 +132,7 @@ class TestAddNObjects(unittest.TestCase):
         sim = Sim(mask, res_z=200, res_ij=200)
         self.assertEqual(np.mean(sim.im[sim.mask]), 0, 'Should be a blank image.')
         self.assertEqual(np.mean(sim.im[~sim.mask]), 0, 'Should be a blank image.')
-        sim.add_n_objects(100, 10, [1], 1, mode='all')
+        sim.add_n_objects(100, 10, [1], [1], mode='all')
         self.assertGreater(np.sum(sim.im[sim.mask]), 0, 'should have increased')
         self.assertGreater(np.sum(sim.im[~sim.mask]), 0, 'should have increased')
     
@@ -142,6 +143,18 @@ class TestAddNObjects(unittest.TestCase):
         sim = Sim(mask, res_z=200, res_ij=200)
         sim.add_n_objects(100, 10, [1,1], 1, mode='nuc', erosion_size=2, 
             fluors_per_object_probs=[0.5,0.5])
+        mask = ndi.morphology.binary_erosion(sim.mask, np.ones([2,2,2]))
+        mask = mask.astype('bool')
+        self.assertEqual(np.sum(sim.im[~mask]), 0, 'Should be 0 outside eroded zone.')
+        self.assertEqual(np.sum(sim.im[mask]), 1000, 'Should be 0 outside eroded zone.')
+
+        # Test probability modes.
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=200, res_ij=200)
+        sim.add_n_objects(100, 10, fluors_per_object=[1,2], 
+            size=[1,2], mode='nuc', erosion_size=2, 
+            fluors_per_object_probs=[1,0], size_probs=[1,0])
         mask = ndi.morphology.binary_erosion(sim.mask, np.ones([2,2,2]))
         mask = mask.astype('bool')
         self.assertEqual(np.sum(sim.im[~mask]), 0, 'Should be 0 outside eroded zone.')
@@ -168,78 +181,99 @@ class TestConvolve(unittest.TestCase):
             nuc_rad=8)
         sim = Sim(mask, res_z=50, res_ij=50)
         kernel = np.ones((3,3,3))
-        #kernel = kernel / np.sum(kernel)
         sim.add_kernel(kernel, res_z=50, res_ij=50)
         sim.add_object([10,10,10], 10, 1, 1)
         sim.convolve()
         self.assertAlmostEqual(np.sum(sim.im), 10, 3, 'Should be 270')
         self.assertAlmostEqual(np.count_nonzero(sim.im.flatten()), 27, 5, 'Should be 27.')
-"""    
-#---------------------------------------------------------------------------
-class TestAddNBlobsZSchedule(unittest.TestCase):
-
-    def test_add_nblobs_zschedule(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        probs = np.concatenate([np.repeat(0.075, 10), np.repeat(0.025, 10)])
-        sim.add_nblobs_zschedule(100, 1_000, 1, 1, probs)
-        mean_bottom = np.mean(sim.im[:10])
-        mean_top = np.mean(sim.im[10:])
-        self.assertGreater(mean_bottom, mean_top, 'Bottom should be stronger than top.')
-        probs = np.arange(20) / np.sum(np.arange(20))
-        sim.add_nblobs_zschedule(200, 10_000, 1, 1, probs)
-        mean_bottom = np.mean(sim.im[:10])
-        mean_top = np.mean(sim.im[10:])
-        self.assertGreater(mean_top, mean_bottom, 'Top should be stronger than bottom.')
-
 
 #---------------------------------------------------------------------------
-class TestAddNBlobsZScheduleExponential(unittest.TestCase):
+class TestResize(unittest.TestCase):
 
-    def test_add_nblobs_zschedule_exponential(self):
-        # Test flat.
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        probs = sim.add_nblobs_zschedule_exponential(100, 1_000, 1, 1, 0, 
-            return_probs=True)
-        self.assertTrue(np.array_equal(probs, np.repeat(0.05, 20)), 'Should be all 0.05')
-
-        # Test slant to upper.
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        probs = sim.add_nblobs_zschedule_exponential(100, 5_000, 1, 1, 5, 
-            return_probs=True)
-        mean_bottom = np.mean(sim.im[:10])
-        mean_top = np.mean(sim.im[10:])
-        self.assertGreater(mean_top, mean_bottom, 'Top should be stronger than bottom.')
+    def test_resize(self):
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask, res_z=50, res_ij=50)
+        sim.add_object((10,10,10), 1000, 1, 2)
+        self.assertEqual(np.max(sim.im), 125, 'Should be 125.')
+        self.assertEqual(np.mean(sim.im), 0.125, 'Should be 0.125.')
+        self.assertTrue(np.array_equal(sim.im.shape, (20,20,20)), 'Wrong size.')
+        self.assertEqual(sim.res_z, 50, 'Should be 50')
         
-        # Test slant to bottom.
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
-        probs = sim.add_nblobs_zschedule_exponential(100, 5_000, 1, 1, -5, 
-            return_probs=True)
-        mean_bottom = np.mean(sim.im[:10])
-        mean_top = np.mean(sim.im[10:])
-        self.assertGreater(mean_bottom, mean_top, 'Bottom should be stronger than top.')
+        sim.resize([100,100,100], 0)
+        self.assertEqual(np.max(sim.im), 125, 'Should be 125.')
+        self.assertEqual(np.mean(sim.im), 0.125, 'Should be 0.125.')
+        self.assertTrue(np.array_equal(sim.im.shape, (10,10,10)), 'Wrong size.')
+        self.assertEqual(sim.res_z, 100, 'Should be 100')
+
+        sim.resize([25,25,25], 0)
+        self.assertEqual(np.max(sim.im), 125, 'Should be 125.')
+        self.assertEqual(np.mean(sim.im), 0.125, 'Should be 0.125.')
+        self.assertTrue(np.array_equal(sim.im.shape, (40,40,40)), 'Wrong size.')
+        self.assertEqual(sim.res_z, 25, 'Should be 25')
+   
+#---------------------------------------------------------------------------
+class TestRandomizeAB(unittest.TestCase):
+
+    def test_randomize_ab(self):
+        r = randomize_ab([0,1])
+        self.assertTrue((r >= 0) and (r <= 1), 'Should be between 0 and 1')
+        r = randomize_ab([0,10_000])
+        self.assertTrue((r >= 0) and (r <= 10_000), 'Should be between 0 and 10_000')
+        r = randomize_ab([500,600])
+        self.assertTrue((r >= 500) and (r <= 600), 'Should be between 500 and 600')
+        with self.assertRaises(ValueError):
+            randomize_ab([10,0])
+        self.assertEqual(randomize_ab([5,5]), 5, 'Should be 5.')
 
 #---------------------------------------------------------------------------
-    class TestRandomizeAB(unittest.TestCase):
 
-        def test_randomize_ab(self):
-            r = randomize_ab(0,1)
-            self.assertTrue((r >= 0) and (r <= 1), 'Should be between 0 and 1')
-            r = randomize_ab(0,10_000)
-            self.assertTrue((r >= 0) and (r <= 10_000), 'Should be between 0 and 10_000')
-            r = randomize_ab(500,600)
-            self.assertTrue((r >= 500) and (r <= 600), 'Should be between 500 and 600')
-            self.assertRaises(randomize_ab(10,0))
-            self.assertEqual(randomize_ab(5,5), 5, 'Should be 5.')
+class TestSimRpb1(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_rpb1(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+                nuc_rad=8)
+            sim_rpb1(mask=mask, kernel=np.ones((2,2,2)), 
+                outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
+                hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
+                cluster_diam_mean_rng=[1,1], cluster_diam_var_rng=[1,1], 
+                cluster_nmols_mean_rng=[1,1], cluster_nmols_var_rng=[1,1], 
+                noise_sigma_rng=[1,1], hlb_coords=[(10,10,10),(11,11,11),(5,5,5),(17,17,17)])
 
+#---------------------------------------------------------------------------
+
+class TestSimRpb1Batch(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_rpb1_batch(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            sim_rpb1_batch(tdir, np.ones((3,3,3)), 2,2,2,(50,50,50), nuc_rad=20, 
+                nfree_rng=[10,20], hlb_diam_rng=[7,15], 
+                hlb_nmols_rng=[100,1000], n_clusters_rng=[0,30], 
+                cluster_diam_mean_rng=[1,3], cluster_diam_var_rng=[0.5, 2], 
+                cluster_nmols_mean_rng=[10,100], cluster_nmols_var_rng=[1,10], 
+                noise_sigma_rng=[1_000, 2_000])  
+
+#---------------------------------------------------------------------------
+
+class TestRunPooledProcesses(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_run_pooled_processes(self):
+        kwarglist = [{
+            'a': [1,2,3,4]
+        }]
+        run_pooled_processes(kwarglist, 2, np.sum)
+
+#---------------------------------------------------------------------------
+
+class TestWriteLogfile(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_write_logfile(self):
+        with tempfile.NamedTemporaryFile() as tfile:
+            logitems = {'a': 4}
+            write_logfile(tfile.name, logitems)
 """
+""" 
 
 if __name__ == '__main__':
 	unittest.main()

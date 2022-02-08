@@ -193,7 +193,8 @@ class Sim():
             if 'sigma' not in kwargs:
                 raise ValueError('gaussian mode requires kwarg sigma.')
             sigma = kwargs['sigma']
-            gaussian = rs.normal(scale = (sigma * np.ones_like(self.im)))
+            #gaussian = rs.normal(np.ones_like(self.im), scale=sigma)
+            gaussian = rs.normal(sigma * np.ones_like(self.im))
             self.im = self.im + gaussian
             self.im[self.im < 0] = 0
         
@@ -223,6 +224,9 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
+
+    def add_sphere(self, coords, intensity, num_fluors, rad):
+        
     def add_object(self, coords, intensity, num_fluors, length):
         """Add a fluorescent object at specified coordinates. Objects can be
         of different sizes and consist of multiple fluors. All objects are 
@@ -250,49 +254,56 @@ class Sim():
         self.im[obj_coords] += intensity_per_pixel
 
     #-----------------------------------------------------------------------
-    def add_n_objects(self, n_objects, intensity, fluors_per_object_vals,
-        size_vals, fluors_per_object_probs=None, size_probs=None, 
-        erosion_size=None, mode='nuc'):
+    def add_n_objects(self, n_objects, intensity, fluors_per_object,
+        size, mode='nuc', fluors_per_object_probs=None, size_probs=None, 
+        erosion_size=None):
         """Add a defined number of objects at random positions.
 
-        Intensity of fluors is fixed, but the number of fluors per object
-        can be varied according to supplied probabilities. Objects can be
-        added to the nucleus, outside the nucleus, or uniformly across the
-        image.
+        Intensity of fluors is fixed, but object size and the number of 
+        fluors per object can be randomized according to supplied possible
+        values and probabilities. Objects can be added to the nucleus, 
+        outside the nucleus, or uniformly across the image.
 
         Args:
             n_objects: int, number of objects to add
             intensity: int, intensity of fluors making up object
-            fluors_per_object_val: iterable of ints, list of possible values
-                for number of fluors per object
-            length: int, side length of objects. Objects are cubes equal on
-                all sides.
-            fluors_per_object_probs [optional]: iterable of floats, 
-                probabilities of each value in fluors_per_object_val. If 
-                omitted, probabilities are set to uniform.
-            erosion_size [optional]: int, size of erosion kernel used to 
-                restrict available nuclear coordinates. Has the effect of
-                shaving off the outter layer of the nucleus for selecting
-                object positions.
+            fluors_per_object: int or iterable of ints,  
+                possible values for number of fluors per object
+            size: int or iterable of ints, possible side lengths of 
+                objects. Objects are cubes equal of all sides.
             mode: string, one of:
                 'nuc': objects placed in nucleus (mask==1)
                 'nonnuc': objects placed outside nucleus (mask==0)
                 'all': objects placed in whole image
+            fluors_per_object_probs [optional]: iterable of floats, 
+                probabilities of each value in fluors_per_object_val. If 
+                omitted, probabilities are set to uniform.
+            size_probs [optional]: iterable of floats, 
+                probabilities of each value in size_vals. If omitted, 
+                probabilities are set to uniform.
+            erosion_size [optional]: int, size of erosion kernel used to 
+                restrict available nuclear coordinates. Has the effect of
+                shaving off the outter layer of the nucleus for selecting
+                object positions.
         """
         def draw_vals(vals, probs, n_objects, rs):
+            """Draw values for random variables."""
+            # If it is a non-iterable value, simply return.
+            try:
+                iter(vals)
+            except:
+                return np.repeat(vals, n_objects)
+
             # Create uniform probabilities if probs omitted.
             if probs is None:
                 probs = np.ones(len(vals))/ len(vals)
 
             # Randomly draw fluors_per_object based on probabilities, store in array.
-            vals_arr = rs.choice(
-                    vals,
-                    n_objects,
-                    p=probs
-                )
+            vals_arr = rs.choice(vals, n_objects, p=probs)
             return vals_arr
 
         rs = np.random.RandomState()
+        
         # Get coordinates based on mode.
         if mode == 'nuc':
             if erosion_size is not None:
@@ -305,23 +316,18 @@ class Sim():
             coords = np.where(np.ones_like(self.mask))
         else:
             raise ValueError("Mode must be 'nuc', 'nonnuc', or 'all'.")
-        
         num_pixels = len(coords[0])
 
-        
-        
-        fluors_per_object_arr = draw_vals(fluors_per_object_vals, fluors_per_object_probs, n_objects, rs)
-        size_arr = draw_vals(size_vals, size_probs, n_objects, rs)
+        # Get values for random variables.
+        fluors_per_object_arr = draw_vals(fluors_per_object, fluors_per_object_probs, n_objects, rs)
+        size_arr = draw_vals(size, size_probs, n_objects, rs)
 
         # For each iteration get random coordinates, add object.
         for i in range(n_objects):
-            
-            px = rs.randint(0, num_pixels - 1)
             fluors_per_object = fluors_per_object_arr[i]
             size = size_arr[i]
-            print(size)
-            random_coords = (coords[0][px], coords[1][px], 
-                coords[2][px])
+            px = rs.randint(0, num_pixels - 1)
+            random_coords = (coords[0][px], coords[1][px], coords[2][px])
             self.add_object(random_coords, intensity, fluors_per_object, size)
 
     #-----------------------------------------------------------------------
@@ -342,31 +348,46 @@ class Sim():
     
     #-----------------------------------------------------------------------
     def convolve(self):
-        """"""
+        """Convolve image with its associated kernel (PSF).
+
+        Args: None
+        """
         if self.kernel is None:
             raise ValueError('Must add kernel to convolve.')
         
         # Resize (re-sample) kernel to match image resolution.
         kernel = self.kernel.copy()
-        if (self.res_ij != self.kernel_res_ij) or (self.res_z != self.kernel_res_z):
+        # Resize kernel to match image dimensions.
+        if ((self.res_ij != self.kernel_res_ij) 
+            or (self.res_z != self.kernel_res_z)):
             kernel = ndi.zoom(self.kernel, [
                 self.kernel_res_z / self.res_z, 
                 self.kernel_res_ij  / self.res_ij, 
                 self.kernel_res_ij  / self.res_ij
                 ])
+            kernel = kernel / np.sum(kernel)
 
-        self.im = ndi.convolve(self.im, kernel)
-    
-    def resize(self, dims):
-        # Resize image.
+        conv = ndi.convolve(self.im, kernel)
+        self.im = conv
+
+    #-----------------------------------------------------------------------
+    def resize(self, dims, order=3):
+        """Resize image.
+
+        Args:
+            dims: iterable of ints, resolution in each dimension of new 
+                image (in nm)
+            order: int 0-5, order of the polynomial used for interpolation
+        """
         zoom_factors = (
                 self.res_z / dims[0],
                 self.res_ij / dims[1],
                 self.res_ij / dims[2]
             )
-
-        im_rs = ndi.zoom(self.im, zoom_factors)
+        im_rs = ndi.zoom(self.im, zoom_factors, order=order)
         self.im = im_rs
+        self.res_z = dims[0]
+        self.res_ij = dims[1]
 
 #-----------------------------------------------------------------------
 ##### End of Sim class. #####
@@ -392,57 +413,134 @@ def randomize_ab(ab):
     return (rs.random() * (b - a)) + a
 
 #-----------------------------------------------------------------------
-def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_len_rng, 
-    hlb_nummols_rng, n_clusters_rng, cluster_diam_mean_rng, 
-    cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng):
-    """Simulate an rpb1 nucleus, write to file.
+def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
+    hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
+    cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
+    noise_sigma_rng, hlb_coords, dims_init=(42.5, 42.5, 42.5), 
+    dims_kernel=(250,85,85), dims_final=(250,85,85)):
+    """Simulate an rpb1 nucleus from parameters drawn from ranges, 
+        write to file.
 
-    Take ranges, do selection and simulation. Could abstract again but let's not.
+    Parameters are supplied as ranges defining the upper and lower bounds
+    of the value. Parameter values are drawn from a uniform distribution
+    defined by these bounds. 
 
-        fluor intensity: fixed
-        ranges:
-
-            number free: uniform sample
-            hlb length: uniform sample
-            hlb num molecules: uniform sample
-            cluster_number
-            cluster_size
-            cluster_size_variance
-            cluster_nummolecules
-            cluster_nummolecules variance
-
-            noise
+    The parameters governing clusters are a mean and standard deviation
+    for the cluster diameter and number of molecules. These means and 
+    standard deviations are first drawn from uniform distribution
+    defined by supplied range, and they are then used to generate lists
+    of values and associated probabilities for a range +- 5 * sigma 
+    to feed to the function add_n_objects which performs random draws 
+    to generate clusters.
 
     Args:
-        mask: ndarray, input mask for building nucleus
-        
-    """
-    sim = Sim(mask, res_z=50, res_ij=50)
-    kernel = np.ones((3,3,3))
-    #kernel = kernel / np.sum(kernel)
-    sim.add_kernel(kernel, res_z=50, res_ij=50)
-    sim.add_object([10,10,10], 10, 1, 1)
-    
-    sim.im[sim.im < 0] = 0
-    sim.im[sim.im > 65_536] = 65_536
+        mask: ndarray; input mask for building nucleus
+        kernel: ndarray; kernel for convolution
+        outfolder: string; folder in which to write outputs
+        nreps: int; number of replicate simulations to make with each 
+            parameter set.
+        xxx_rng: iterable of 2 ints; upper/lower bounds for parameter xxx
+        hlb_coords: iterable of tuples; coordinates for hlb locations, will 
+            be drawn in order
+        dims_init: tuple; dimensions (in nm) of voxels in initial image
+        dims_kernel: tuple; dimensions (in nm) of kernel
+        dims_final: tuple; dimensions (in nm) of final image
 
+    Output:
+        Simulated images are saved as pickled ndarrays. Filenames contain 
+        a random 3-letter string followed by parameters separated by _ :
+
+            0: nfree
+            1: hlb_diam
+            2: hlb_nmols
+            3: n_clusters
+            4: cluster_diam_mean, 
+            5: cluster_diam_var
+            6: cluster_nmols_mean
+            7: cluster_nmols_var
+            8: noise_sigma
+    """
+    def make_vals_probs(mean, sigma):
+        """Get values (>= 1) and probabilities for random variables."""
+        # Get values in the range of +- 5 sigma.
+        vals = np.arange(np.max([1, mean - (5 * sigma)]), mean + (5 * sigma))
+        probs = scipy.stats.norm(loc=mean, scale=sigma).pdf(vals)
+        probs = probs / np.sum(probs) # Normalize to sum=1.
+        vals = [int(x) for x in vals]
+        return vals, probs
+
+    # Generate random file prefix.
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
-    filepath = os.path.join(outfolder, file_id + '.pkl')
-    save_pickle(sim.im, filepath)
+
+    gfp_intensity = 100
+
+    ### Randomly draw parameters from supplied ranges. ###
+    nfree = int(randomize_ab(nfree_rng))
+    hlb_diam = int(randomize_ab(hlb_diam_rng))
+    hlb_nmols = int(randomize_ab(hlb_nmols_rng))
+    n_clusters = int(randomize_ab(n_clusters_rng))
+    cluster_diam_mean = int(randomize_ab(cluster_diam_mean_rng))
+    cluster_diam_var = randomize_ab(cluster_diam_var_rng)
+    cluster_nmols_mean = int(randomize_ab(cluster_nmols_mean_rng))
+    cluster_nmols_var = randomize_ab(cluster_nmols_var_rng)
+    noise_sigma = int(randomize_ab(noise_sigma_rng))
+
+    cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
+    cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
+
+    ### Simulate an Rpb1 nucleus with selected parameters. ###
+    for nrep in range(nreps):
+        sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
+        sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+        # Add free population.
+        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1)
+        # Add HLB.
+        sim.add_object(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam)
+        sim.add_object(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam)
+        # Add clusters.
+        sim.add_n_objects(n_clusters, gfp_intensity, fluors_per_object=cluster_nmols_vals, 
+            size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
+            size_probs=cluster_diam_probs)
+        
+        # Add noise and convolve.
+        sim.add_noise('poisson')
+        sim.convolve()
+        sim.resize(dims_final, order=1)
+        sim.add_noise('gaussian', sigma=noise_sigma)
+        # Bound values.
+        sim.im[sim.im < 0] = 0
+        sim.im[sim.im > 65_536] = 65_536
+
+        paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
+                hlb_diam, hlb_nmols, n_clusters, cluster_diam_mean, 
+                cluster_diam_var, cluster_nmols_mean, cluster_nmols_var, 
+                noise_sigma]])
+        filepath = os.path.join(outfolder, file_id + '_' + paramstring 
+            + '_rep' + str(nrep) + '.pkl')
+        save_pickle(sim.im, filepath)
 
 #-----------------------------------------------------------------------
-def sim_batch(outfolder, kernel, nsims, nreps, nprocesses, 
-    sim_func=sim_rpb1, z_dim=200, ij_dim=200, nuc_rad=90, **kwargs):
-    """Perform parallelized simulations of rpb1 nuclei by randomly drawing
-    parameters from supplied ranges.
+def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
+    sim_func=sim_rpb1, nuc_rad=90, **kwargs):
+    """Perform parallelized simulations of Rpb1 nuclei in batch.
+
+    Note: I tried to make a batch function that would be general
+    purpose but I couldn't make it work because the erosion for 
+    getting HLB coordinates is quite slow and needs to not be repeated.
 
     Args:
-        maskfile: path, pickled file containing list of masks as ndarrays
-        outfolder: path, folder to which to write simulations
-        nsims: int, the number of parameter sets to simulate
-        nreps: int, the number of simulations to perform for each param set
+        outfolder: path, folder to which to write simulation outputs
+        kernel: ndarray, convolution kernel for images
+        nsims: int, number of simulations to perform
+        nreps: int, number of replicate simulations to make for each
+            parameter set
         nprocesses: int, the number of processes to launch with 
             multiprocessing Pool
+        mask_dims: iterable of ints, dimensions in pixels of mask
+        sim_func: function, function that recieved kwargs, performs
+            simulations, and writes to file
+        nuc_rad: number, radius in pixels of spherical nucleus in mask
+        kwargs: args supplied to sim_func
     
     Outputs:
         A unique 8-character identifier is associated with the entire 
@@ -452,46 +550,85 @@ def sim_batch(outfolder, kernel, nsims, nreps, nprocesses,
         avoid collisions (unlikely). Parameters for each simulation 
         are saved in the filename, separated by underscores.
 
-    Note: "Replicates" use identical parameters but different masks. For
-    each replicate, a mask is drawn at random from the supplied list and 
-    also rotated randomly (0-360 uniform).
+    Note: "Replicates" use identical parameters but different masks. 
     """
-    mp.set_start_method('fork', force=True) # Important for macOS.
-
     # Set folder name with unique identifier and create it.
     folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
     folder = outfolder + folder_id
     os.mkdir(folder)
     
-    mask = Sim.make_spherical_mask(z_dim, ij_dim, ij_dim, nuc_rad)
+    mask = Sim.make_spherical_mask(mask_dims[0], mask_dims[1], mask_dims[2], nuc_rad)
+
+    # Get a list of candidate HLB coordinates by performing erosion on nuclear mask.
+    # This ensures that the HLB won't be placed at the nuclear periphery and end up
+    # outside the nucleus.
+    hlb_coords_possible = Sim(mask).get_eroded_coordinates(10)
+    num_hlb_coords = len(hlb_coords_possible[0])
+    hlb_coords_possible = np.array(list(zip(hlb_coords_possible[0], hlb_coords_possible[1], hlb_coords_possible[2])))
+    
     # For each sim, built a local set of args that will be sent to sim_rpb1,
     # add each set of parameters to arglist.
     arglist = []
-
+    f_kwargs = kwargs.copy()
+    f_kwargs['mask'] = mask
+    f_kwargs['kernel'] = kernel
+    f_kwargs['outfolder'] = folder
+    f_kwargs['nreps'] = nreps
+    
     for _ in range(nsims):
-        kwargs_loc = kwargs.copy()
-        kwargs_loc['mask'] = mask
-        kwargs_loc['kernel'] = kernel
-        kwargs_loc['outfolder'] = folder
-        kwargs_loc['nreps'] = nreps
-        arglist.append(kwargs_loc)
+        f_kwargs_loc = f_kwargs.copy()
+        # Get random HLB coordinates.
+        hlb_coords_rand = hlb_coords_possible[np.random.RandomState().choice(num_hlb_coords, nreps * 2)]
+        f_kwargs_loc['hlb_coords'] = hlb_coords_rand
+        arglist.append(f_kwargs_loc)
     print('arglist done')
 
-    # Launch simulations in parallel using pool method.
-    for i in range(0, len(arglist), 1000):
-        end = i + 1000
-        arglist_sub = arglist[i:end]   
-        pool = mp.Pool(processes=nprocesses)
-        results = [pool.apply_async(sim_func, (), x) for x in arglist_sub]
-        [p.get() for p in results]
+    run_pooled_processes(arglist, nprocesses, sim_func)
     
     # Write logfile.
+    logitems = kwargs.copy()
+    logitems['nsims'] = nsims
+    logitems['nreps'] = nreps
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
-    with open(logfilepath, 'w') as logfile:
-        logfile.write(datetime.now().ctime() + '\n')
-        logfile.write('nsims: ' + str(nsims) + '\n')
-        logfile.write('nreps: ' + str(nreps) + '\n')
-        for key in kwargs:
-            logfile.write(key + ': ' + str(kwargs[key]))
-            logfile.write('\n')
+    write_logfile(logfilepath, logitems)
 
+#-----------------------------------------------------------------------
+def run_pooled_processes(arglist, nprocesses, func, batch_size=1000):
+    """Launch a parallel process using multiprocessing Pool function.
+    
+    I have had some odd problems when supplying large numbers of processes
+    to Pool, and I have found empirically that batching helps speed things
+    up. This seems to defeat the purpose of Pool, but it works and achieves
+    parallelization since batch sizes can still be quite large (1000 seems
+    to work just fine; 10,000 runs very slowly).
+
+    Args:
+        arglist: iterable; list of arguments to map to function
+        nprocesses: int; number of parallel processes to launch (typically,
+            number of available cores)
+        func: function to call in parallel (target of arglist)
+        batch_size: int; size of batches sent to Pool. I think this can be
+            left at 1000.
+    
+    """
+    mp.set_start_method('fork', force=True) # Important for macOS.
+    with mp.Pool(nprocesses) as pool:
+        for i in range(0, len(arglist), batch_size):
+            end = i + batch_size
+            arglist_sub = arglist[i:end]   
+            results = [pool.apply_async(func, (), x) for x in arglist_sub]
+            [p.get() for p in results]
+
+#-----------------------------------------------------------------------
+def write_logfile(filepath, logitems):
+    """Write a logfile with parameters.
+    
+    Args:
+        filepath: string; path for logfile
+        logitems: dict; dict containing items to log
+    """
+    with open(filepath, 'w') as logfile:
+        logfile.write(datetime.now().ctime() + '\n')
+        for key in logitems:
+            logfile.write(key + ': ' + str(logitems[key]))
+            logfile.write('\n')
