@@ -93,6 +93,27 @@ class TestGetErodedCoordinates(unittest.TestCase):
             '1s in mask should have shrunk.')
 
 #---------------------------------------------------------------------------
+class TestAddSphere(unittest.TestCase):
+
+    def test_add_sphere(self):
+        mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+            nuc_rad=8)
+        sim = Sim(mask)
+
+        self.assertEqual(sim.im.sum(), 0, 'Should be a blank image.')
+        sim.add_sphere((10,10,10), 10, 1, 5)
+        self.assertAlmostEqual(sim.im.sum(), 10, 3, 'Should just be 10.')
+        self.assertGreater(sim.im[10,10,14], 0, 'Should be nonzero.')
+        self.assertEqual(sim.im[14,14,14], 0, 'Should be 0.')
+
+        # Check that the corner position [14,14,14] is in fact non-zero
+        # for a cube-shaped object.
+        sim = Sim(mask)
+        self.assertEqual(sim.im.sum(), 0, 'Should be a blank image.')
+        sim.add_object((10,10,10), 10, 1, 10)
+        self.assertGreater(sim.im[14,14,14], 0, 'Should be nonzero.')
+
+#---------------------------------------------------------------------------
 class TestAddObject(unittest.TestCase):
 
     def test_add_object(self):

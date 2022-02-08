@@ -224,9 +224,30 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
+    def add_sphere(self, center_coords, intensity, num_fluors, rad):
+        """Add a spherical object at specified coordinates.
 
-    def add_sphere(self, coords, intensity, num_fluors, rad):
-        
+        Intensity is distributed evenly such that the intensity of each
+        pixel in the object is equal to:
+            intensity * num_fluors / num_pixels
+
+        Args:
+            coords: iterable of ints, location lowest-index coordinate (
+                bottom in z, top-left in xy)
+            intensity: int, intensity of fluors making up object
+            num_fluors: int, number of fluors in object
+            rad: float: radius of object
+        """
+        mesh = mesh_like(self.im, 3)
+        z, i, j = mesh
+
+        pix_coords = np.where((((z - center_coords[0]) ** 2) + ((i - center_coords[1]) ** 2) + 
+            ((j - center_coords[2]) ** 2)) < (rad ** 2))
+        num_pixels = len(pix_coords[0])
+        intensity_per_pixel = intensity * num_fluors / num_pixels
+        self.im[pix_coords] = intensity_per_pixel
+
+    #-----------------------------------------------------------------------
     def add_object(self, coords, intensity, num_fluors, length):
         """Add a fluorescent object at specified coordinates. Objects can be
         of different sizes and consist of multiple fluors. All objects are 
@@ -476,7 +497,7 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
 
     ### Randomly draw parameters from supplied ranges. ###
     nfree = int(randomize_ab(nfree_rng))
-    hlb_diam = int(randomize_ab(hlb_diam_rng))
+    hlb_diam = float(randomize_ab(hlb_diam_rng))
     hlb_nmols = int(randomize_ab(hlb_nmols_rng))
     n_clusters = int(randomize_ab(n_clusters_rng))
     cluster_diam_mean = int(randomize_ab(cluster_diam_mean_rng))
@@ -495,8 +516,8 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         # Add free population.
         sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1)
         # Add HLB.
-        sim.add_object(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam)
-        sim.add_object(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam)
+        sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
+        sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
         # Add clusters.
         sim.add_n_objects(n_clusters, gfp_intensity, fluors_per_object=cluster_nmols_vals, 
             size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
