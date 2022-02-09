@@ -19,7 +19,7 @@ v2.0: simulations start with "real" image, convolve with experimentally-derived 
 __version__ = '2.0.0'
 __author__ = 'Michael Stadler'
 
-from flymovie.general_functions import mesh_like
+from flymovie.general_functions import mesh_like, stack_normalize_minmax
 from flymovie.load_save import save_pickle, load_pickle
 import scipy
 import random
@@ -193,8 +193,7 @@ class Sim():
             if 'sigma' not in kwargs:
                 raise ValueError('gaussian mode requires kwarg sigma.')
             sigma = kwargs['sigma']
-            #gaussian = rs.normal(np.ones_like(self.im), scale=sigma)
-            gaussian = rs.normal(sigma * np.ones_like(self.im))
+            gaussian = rs.normal(np.zeros_like(self.im), scale=sigma)
             self.im = self.im + gaussian
             self.im[self.im < 0] = 0
         
@@ -437,7 +436,7 @@ def randomize_ab(ab):
 def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
-    noise_sigma_rng, hlb_coords, dims_init=(42.5, 42.5, 42.5), 
+    noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
     dims_kernel=(250,85,85), dims_final=(250,85,85)):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
         write to file.
@@ -504,7 +503,7 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     cluster_diam_var = randomize_ab(cluster_diam_var_rng)
     cluster_nmols_mean = int(randomize_ab(cluster_nmols_mean_rng))
     cluster_nmols_var = randomize_ab(cluster_nmols_var_rng)
-    noise_sigma = int(randomize_ab(noise_sigma_rng))
+    noise_sigma = float(randomize_ab(noise_sigma_rng))
 
     cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
     cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
@@ -514,7 +513,7 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
         # Add free population.
-        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1)
+        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
         # Add HLB.
         sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
         sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
@@ -527,6 +526,7 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         sim.add_noise('poisson')
         sim.convolve()
         sim.resize(dims_final, order=1)
+        sim.im = stack_normalize_minmax(sim.im) * 1000
         sim.add_noise('gaussian', sigma=noise_sigma)
         # Bound values.
         sim.im[sim.im < 0] = 0
@@ -539,6 +539,47 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         filepath = os.path.join(outfolder, file_id + '_' + paramstring 
             + '_rep' + str(nrep) + '.pkl')
         save_pickle(sim.im, filepath)
+
+#-----------------------------------------------------------------------
+def run_pooled_processes(arglist, nprocesses, func, batch_size=1000):
+    """Launch a parallel process using multiprocessing Pool function.
+    
+    I have had some odd problems when supplying large numbers of processes
+    to Pool, and I have found empirically that batching helps speed things
+    up. This seems to defeat the purpose of Pool, but it works and achieves
+    parallelization since batch sizes can still be quite large (1000 seems
+    to work just fine; 10,000 runs very slowly).
+
+    Args:
+        arglist: iterable; list of arguments to map to function
+        nprocesses: int; number of parallel processes to launch (typically,
+            number of available cores)
+        func: function to call in parallel (target of arglist)
+        batch_size: int; size of batches sent to Pool. I think this can be
+            left at 1000.
+    
+    """
+    mp.set_start_method('fork', force=True) # Important for macOS.
+    with mp.Pool(nprocesses) as pool:
+        for i in range(0, len(arglist), batch_size):
+            end = i + batch_size
+            arglist_sub = arglist[i:end]   
+            results = [pool.apply_async(func, (), x) for x in arglist_sub]
+            [p.get() for p in results]
+
+#-----------------------------------------------------------------------
+def write_logfile(filepath, logitems):
+    """Write a logfile with parameters.
+    
+    Args:
+        filepath: string; path for logfile
+        logitems: dict; dict containing items to log
+    """
+    with open(filepath, 'w') as logfile:
+        logfile.write(datetime.now().ctime() + '\n')
+        for key in logitems:
+            logfile.write(key + ': ' + str(logitems[key]))
+            logfile.write('\n')
 
 #-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
@@ -613,43 +654,3 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
     write_logfile(logfilepath, logitems)
 
-#-----------------------------------------------------------------------
-def run_pooled_processes(arglist, nprocesses, func, batch_size=1000):
-    """Launch a parallel process using multiprocessing Pool function.
-    
-    I have had some odd problems when supplying large numbers of processes
-    to Pool, and I have found empirically that batching helps speed things
-    up. This seems to defeat the purpose of Pool, but it works and achieves
-    parallelization since batch sizes can still be quite large (1000 seems
-    to work just fine; 10,000 runs very slowly).
-
-    Args:
-        arglist: iterable; list of arguments to map to function
-        nprocesses: int; number of parallel processes to launch (typically,
-            number of available cores)
-        func: function to call in parallel (target of arglist)
-        batch_size: int; size of batches sent to Pool. I think this can be
-            left at 1000.
-    
-    """
-    mp.set_start_method('fork', force=True) # Important for macOS.
-    with mp.Pool(nprocesses) as pool:
-        for i in range(0, len(arglist), batch_size):
-            end = i + batch_size
-            arglist_sub = arglist[i:end]   
-            results = [pool.apply_async(func, (), x) for x in arglist_sub]
-            [p.get() for p in results]
-
-#-----------------------------------------------------------------------
-def write_logfile(filepath, logitems):
-    """Write a logfile with parameters.
-    
-    Args:
-        filepath: string; path for logfile
-        logitems: dict; dict containing items to log
-    """
-    with open(filepath, 'w') as logfile:
-        logfile.write(datetime.now().ctime() + '\n')
-        for key in logitems:
-            logfile.write(key + ': ' + str(logitems[key]))
-            logfile.write('\n')

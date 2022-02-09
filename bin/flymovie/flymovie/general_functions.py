@@ -613,6 +613,21 @@ def log_filter(stack, sigma):
     return log
 
 ############################################################################
+def stack_normalize_minmax(instack):
+    """Normalize ndarray to have values between 0 and 1.
+
+    Args:
+        instack: ndarray
+            Image stack in order [z, x, y]
+
+    Returns:
+        stack: ndarray
+            Image stack of same shape as instack.
+    """
+    stack = np.copy(instack)    
+    return (stack - np.min(stack)) / (np.max(stack) - np.min(stack))
+
+############################################################################
 def zstack_normalize_mean(instack):
     """Normalize each Z-slice in a Z-stack to by dividing by its mean
 

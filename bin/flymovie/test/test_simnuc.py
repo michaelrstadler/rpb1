@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 import scipy.ndimage as ndi
 import tempfile
+from copy import deepcopy
 from flymovie.simnuc import *
 
 #---------------------------------------------------------------------------
@@ -66,20 +67,30 @@ class TestAddNoise(unittest.TestCase):
 
     def test_add_noise(self):
         mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, nuc_rad=5)
-        sim = Sim(mask)
-        # Fill nucleus with uniform value.
-        sim.im[sim.mask] = 10
-        std_before = np.std(sim.im[sim.mask])
-        self.assertEqual(std_before, 0, 'Std before should be 0.')
-        sim.add_noise(model="poisson")
-        std_after = np.std(sim.im[sim.mask])
-        self.assertGreater(std_after, std_before, 
-            'Std should increase with added noise.')
-        std_before = std_after
-        sim.add_noise(model="gaussian", sigma=100)
-        std_after = np.std(sim.im[sim.mask])
-        self.assertGreater(std_after, std_before, 
-            'Std should increase with added noise.')
+        # Repeat 10 times because one failure mode I encountered was the 
+        # gaussian mode ignoring sigma, which would give correct order 50%
+        # of the time.
+        for _ in range(10):
+            sim = Sim(mask)
+            # Fill nucleus with uniform value.
+            sim.im[sim.mask] = 10
+            std_init = np.std(sim.im[sim.mask])
+            self.assertEqual(std_init, 0, 'Std before should be 0.')
+            sim.add_noise('poisson')
+            std_poisson = np.std(sim.im)
+
+            sim = Sim(mask)
+            sim.im[sim.mask] = 10
+            sim.add_noise('gaussian', sigma=20)
+            std_gauss20 = np.std(sim.im)
+
+            sim = Sim(mask)
+            sim.im[sim.mask] = 10
+            sim.add_noise('gaussian', sigma=100)
+            std_gauss100 = np.std(sim.im)
+
+            self.assertTrue(std_gauss100 > std_gauss20 > std_poisson, 'Should be in this order')
+            
 
 #---------------------------------------------------------------------------
 class TestGetErodedCoordinates(unittest.TestCase):
@@ -264,19 +275,6 @@ class TestSimRpb1(unittest.TestCase):
 
 #---------------------------------------------------------------------------
 
-class TestSimRpb1Batch(unittest.TestCase):
-    # Just test to see if it runs.
-    def test_sim_rpb1_batch(self):
-        with tempfile.TemporaryDirectory() as tdir:
-            sim_rpb1_batch(tdir, np.ones((3,3,3)), 2,2,2,(50,50,50), nuc_rad=20, 
-                nfree_rng=[10,20], hlb_diam_rng=[7,15], 
-                hlb_nmols_rng=[100,1000], n_clusters_rng=[0,30], 
-                cluster_diam_mean_rng=[1,3], cluster_diam_var_rng=[0.5, 2], 
-                cluster_nmols_mean_rng=[10,100], cluster_nmols_var_rng=[1,10], 
-                noise_sigma_rng=[1_000, 2_000])  
-
-#---------------------------------------------------------------------------
-
 class TestRunPooledProcesses(unittest.TestCase):
     # Just test to see if it runs.
     def test_run_pooled_processes(self):
@@ -293,6 +291,20 @@ class TestWriteLogfile(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as tfile:
             logitems = {'a': 4}
             write_logfile(tfile.name, logitems)
+            
+#---------------------------------------------------------------------------
+
+class TestSimRpb1Batch(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_rpb1_batch(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            sim_rpb1_batch(tdir, np.ones((3,3,3)), 2,2,2,(50,50,50), nuc_rad=20, 
+                nfree_rng=[10,20], hlb_diam_rng=[7,15], 
+                hlb_nmols_rng=[100,1000], n_clusters_rng=[0,30], 
+                cluster_diam_mean_rng=[1,3], cluster_diam_var_rng=[0.5, 2], 
+                cluster_nmols_mean_rng=[10,100], cluster_nmols_var_rng=[1,10], 
+                noise_sigma_rng=[1_000, 2_000])  
+
 """
 """ 
 

@@ -254,6 +254,26 @@ class TestLogFilter(unittest.TestCase):
 
 #---------------------------------------------------------------------------
 
+class TestStackNormalizeMinMax(unittest.TestCase):
+
+	def test_stack_normalize_minmax(self):
+		arr = np.random.random((20,20))
+		arr_norm = stack_normalize_minmax(arr)
+		self.assertEqual(np.max(arr_norm), 1, "Should be 1.")
+		self.assertEqual(np.min(arr_norm), 0, "Should be 0.")
+
+		arr = np.random.random((20,20)) * 1000
+		arr_norm = stack_normalize_minmax(arr)
+		self.assertEqual(np.max(arr_norm), 1, "Should be 1.")
+		self.assertEqual(np.min(arr_norm), 0, "Should be 0.")
+
+		arr = np.random.random((20,20)) * -1
+		arr_norm = stack_normalize_minmax(arr)
+		self.assertEqual(np.max(arr_norm), 1, "Should be 1.")
+		self.assertEqual(np.min(arr_norm), 0, "Should be 0.")
+
+#---------------------------------------------------------------------------
+
 class TestZstackNormalizeMean(unittest.TestCase):
 
 	def test_zstack_normalize_mean(self):
@@ -283,9 +303,6 @@ class TestExtractBox(unittest.TestCase):
 class TestMake3dGaussianInABox(unittest.TestCase):
 
     def test_make_3d_gaussian_inabox(self):
-        mask = Sim.make_dummy_mask(zdim=20, idim=100, jdim=100, nuc_spacing=200, 
-        nuc_rad=50, z_ij_ratio=4.5)
-        sim = Sim(mask)
         box = make_3d_gaussian_inabox(intensity=100, sigma=10, 
             z_windowlen=20, ij_windowlen=100)
         self.assertGreater(box[10,50,50], box[0,0,0], 
