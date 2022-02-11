@@ -616,7 +616,7 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     """
     # Set folder name with unique identifier and create it.
     folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
-    folder = outfolder + folder_id
+    folder = outfolder + '_' + folder_id
     os.mkdir(folder)
     
     mask = Sim.make_spherical_mask(mask_dims[0], mask_dims[1], mask_dims[2], nuc_rad)
