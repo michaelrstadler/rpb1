@@ -495,13 +495,13 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     gfp_intensity = 100
 
     ### Randomly draw parameters from supplied ranges. ###
-    nfree = int(randomize_ab(nfree_rng))
+    nfree = round(randomize_ab(nfree_rng))
     hlb_diam = float(randomize_ab(hlb_diam_rng))
-    hlb_nmols = int(randomize_ab(hlb_nmols_rng))
-    n_clusters = int(randomize_ab(n_clusters_rng))
-    cluster_diam_mean = int(randomize_ab(cluster_diam_mean_rng))
+    hlb_nmols = round(randomize_ab(hlb_nmols_rng))
+    n_clusters = round(randomize_ab(n_clusters_rng))
+    cluster_diam_mean = round(randomize_ab(cluster_diam_mean_rng))
     cluster_diam_var = randomize_ab(cluster_diam_var_rng)
-    cluster_nmols_mean = int(randomize_ab(cluster_nmols_mean_rng))
+    cluster_nmols_mean = round(randomize_ab(cluster_nmols_mean_rng))
     cluster_nmols_var = randomize_ab(cluster_nmols_var_rng)
     noise_sigma = float(randomize_ab(noise_sigma_rng))
 

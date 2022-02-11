@@ -3,24 +3,27 @@ from time import time, process_time
 
 t_start = time()
 
-fm.simnuc.sim_rpb1_rand_batch(
-    maskfile = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/real_nuclear_masks_nc13.pkl',
-    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/test_sims_realnuc_',
-    nsims=10_000,
+fm.simnuc.sim_rpb1_batch(
+    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims',
+    kernel=fm.load_pickle('/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/psf_20220210.pkl'),
+    nsims=10,
     nreps=2,
     nprocesses=4,
-    nuc_bg_mean_rng=[8_000, 10_000], 
-    nonnuc_bg_mean_rng=[800,1200], 
-    noise_sigma_rng=[200,400], 
-    nblobs_rng=[0,100], 
-    blob_intensity_mean_rng=[8_000, 12_000], 
-    blob_intensity_std_rng=[1_000, 3_000],
-    blob_sigma_base_rng=[0.5,0.5],
-    blob_sigma_k_rng=[0.5,0.5], 
-    blob_sigma_theta_rng=[0.5,0.5], 
-    hlb_intensity_rng=[15_000, 25_000],
-    hlb_sigma_rng=[4,6], 
-    hlb_p_rng=[1.7,2.3]
+    mask_dims=(100,100,100),
+    sim_func=fm.sim_rpb1,
+    nuc_rad=40,
+    nfree_rng=[5_000, 40_000], 
+    hlb_diam_rng=[8,14], 
+    hlb_nmols_rng=[100,800], 
+    n_clusters_rng=[0,1_000], 
+    cluster_diam_mean_rng=[1,2], 
+    cluster_diam_var_rng=[0,1], 
+    cluster_nmols_mean_rng=[5,50], 
+    cluster_nmols_var_rng=[1,10],
+    noise_sigma_rng=[10,30], 
+    dims_init=(85, 85, 85), 
+    dims_kernel=(100,50,50), 
+    dims_final=(250,85,85)
 )
 
 t_end = time()
