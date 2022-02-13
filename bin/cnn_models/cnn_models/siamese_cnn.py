@@ -513,13 +513,14 @@ class SiameseModel(Model):
         # called automatically.
         return [self.loss_tracker]
 
-############################################################################
-def make_triplet_inputs(folder, n_repeats=1, mip=True):
-
-    def preprocess_image(filename, mip=True):
+def preprocess_image(filename, mip=True):
         """
-        Load the specified file as a JPEG image, preprocess it and
+        Load the specified file as an ndarray, preprocess it and
         resize it to the target shape.
+
+        ** Made this a standalone so it can be used by functions for 
+        testing and playing with outputs.
+
         """
         a = str(filename)
         _, filename, _ = a.split("'")
@@ -532,6 +533,9 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
         # Normalize 0-1.
         im = (im - np.min(im)) / (np.max(im) - np.min(im))
         return im
+        
+############################################################################
+def make_triplet_inputs(folder, n_repeats=1, mip=True):
 
     def preprocess_triplets_mip(anchor, positive, negative):
         """
