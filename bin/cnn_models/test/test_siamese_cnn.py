@@ -123,7 +123,37 @@ class TestSiameseCNN(unittest.TestCase):
         self.assertTrue(np.array_equal(e3.output_shape, [None, 256]), 'Wrong output shape')
         self.assertEqual(count_params(e3.trainable_variables), 76_514_112, "wrong number of params")
 
+#---------------------------------------------------------------------------
 
+    def test_match_file_triplets(self):
+        # Function to produce fake files.
+        def fake_files(n):
+            l = []
+            for _ in range(n):
+                f = 'aaa'
+                for _1 in range(9):
+                    f = f + '_' + str(np.random.randint(0,100))
+                f = f + '_rep0.pkl'
+                l.append(f)
+            return l
+        
+        def get_mean_param_diffs(a, n):
+            diffs = np.zeros((0, len(a[0].split('_')[1:-1])))
+            for i in range(len(a)):
+                a_params = np.array([float(x) for x in a[i].split('_')[1:-1]])
+                n_params = np.array([float(x) for x in n[i].split('_')[1:-1]])
+                diff = abs(a_params - n_params)
+                diff = np.expand_dims(diff, axis=0)
+                diffs = np.vstack((diffs, diff))
+            return diffs.mean(axis=0)
+            
+        files = fake_files(100)
+        a,p,n = match_file_triplets(files, files, 5, 0, 10)
+        dists1 = get_mean_param_diffs(a,n)
+        a,p,n = match_file_triplets(files, files, 5, 90, 100)
+        dists2 = get_mean_param_diffs(a,n)
+        for i in range(len(dists1)):
+            self.assertGreater(dists2[i], dists1[i], 'Distances should be greater for 90-100 than 0-10.')
 
 if __name__ == '__main__':
 	unittest.main()

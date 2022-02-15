@@ -31,6 +31,7 @@ import numpy as np
 import os
 import random
 import pickle
+import scipy.spatial
 import scipy.ndimage as ndimage
 import tensorflow as tf
 from pathlib import Path
@@ -573,7 +574,7 @@ def preprocess_image(filename, mip=True):
 
 #---------------------------------------------------------------------------
 def match_file_triplets(anchor_files, positive_files, num_negatives=5, 
-    upper_margin=10, lower_margin=0):
+    lower_margin=0, upper_margin=10):
     """Make file lists that match anchor-positive pairs with negative images
     within a margin of similarity.
 
