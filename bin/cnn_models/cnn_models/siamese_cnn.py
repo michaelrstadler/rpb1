@@ -1,3 +1,32 @@
+#!/usr/bin/env python
+
+"""
+A siamese CNN for determining similarity between 3D confocal microscope
+images of fluorescent Drosophila nuclei. The model is heavily based on:
+
+https://keras.io/examples/vision/siamese_network/
+
+This model in turn uses resnet architectures as the based for the CNN.
+This model can be built to take the maximum intensity projections (MIP)
+of the 3D stacks, in which case it operates as a 2D CNN, or to work on 
+the full 3D stack as a 3D CNN. The 2D architecture is based on 
+resnet50, while the 3D architecture can be either resnet18 or resnet34.
+
+Architectures based specifically on table 1 in 
+Deep Residual Learning for Image Recognition
+He, Zhang, Ren, Sun
+https://arxiv.org/pdf/1512.03385.pdf
+
+Some programming notes/challenges:
+    - 
+
+v1.0: 
+v1.1: Implemented curriculum learning.
+
+"""
+__version__ = '1.1.0'
+__author__ = 'Michael Stadler'
+
 import numpy as np
 import os
 import random
@@ -13,10 +42,8 @@ from tensorflow.keras import metrics
 from tensorflow.keras import Model
 from tensorflow.keras.applications import resnet
 
-#from flymovie.load_save import load_pickle
-
-############################################################################
-def identity_block(input_tensor, kernel_size, filters, stage, block, 
+#---------------------------------------------------------------------------
+def identity_block_2d(input_tensor, kernel_size, filters, stage, block, 
 		channels_axis=-1):
     """A block of layers that has no convolution at the shortcut.
 
@@ -30,7 +57,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 	Args:
         input_tensor: input tensor
         kernel_size: int or tuple of ints
-			The kernel size of middle conv layer at main path (default=3)
+			The kernel size of middle conv layer at main path
         filters: iterable of 3 ints 
 			List of 3 integers, the number of filters for each of the 3 
 			convolution layers
@@ -72,8 +99,8 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
     x = layers.Activation('relu')(x)
     return x
 
-############################################################################
-def conv_block(input_tensor, kernel_size, filters, stage, block,
+#---------------------------------------------------------------------------
+def conv_block_2d(input_tensor, kernel_size, filters, stage, block,
     	strides=(2, 2), channels_axis=-1):
     """A block of layers that has convolution at the shortcut.
 
@@ -89,7 +116,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 	Args:
         input_tensor: input tensor
         kernel_size: int or tuple of ints
-			The kernel size of middle conv layer at main path (default=3)
+			The kernel size of middle conv layer at main path
         filters: iterable of 3 ints 
 			List of 3 integers, the number of filters for each of the 3 
 			convolution layers
@@ -140,9 +167,11 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
     x = layers.Activation('relu')(x)
     return x
 
-############################################################################
-def make_base_cnn(image_shape=(100,100), name='base_cnn'):
+#---------------------------------------------------------------------------
+def make_base_cnn_2d(image_shape=(100,100), name='base_cnn'):
     """Make a CNN network for a single image. Based on Resnet 50
+
+    Note: channel last
 
     Args:
         image_shape: tuple of ints
@@ -166,37 +195,36 @@ def make_base_cnn(image_shape=(100,100), name='base_cnn'):
     x = layers.MaxPooling2D((3, 3), strides=(2, 2))(x)
 
 
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1))
-    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b')
-    x = identity_block(x, 3, [64, 64, 256], stage=2, block='c')
+    x = conv_block_2d(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1))
+    x = identity_block_2d(x, 3, [64, 64, 256], stage=2, block='b')
+    x = identity_block_2d(x, 3, [64, 64, 256], stage=2, block='c')
 
-    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', strides=(2,2))
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b')
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c')
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='d')
+    x = conv_block_2d(x, 3, [128, 128, 512], stage=3, block='a', strides=(2,2))
+    x = identity_block_2d(x, 3, [128, 128, 512], stage=3, block='b')
+    x = identity_block_2d(x, 3, [128, 128, 512], stage=3, block='c')
+    x = identity_block_2d(x, 3, [128, 128, 512], stage=3, block='d')
 
-    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', strides=(2,2))
-    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='b')
-    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='c')
-    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='d')
-    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='e')
-    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='f')
+    x = conv_block_2d(x, 3, [256, 256, 1024], stage=4, block='a', strides=(2,2))
+    x = identity_block_2d(x, 3, [256, 256, 1024], stage=4, block='b')
+    x = identity_block_2d(x, 3, [256, 256, 1024], stage=4, block='c')
+    x = identity_block_2d(x, 3, [256, 256, 1024], stage=4, block='d')
+    x = identity_block_2d(x, 3, [256, 256, 1024], stage=4, block='e')
+    x = identity_block_2d(x, 3, [256, 256, 1024], stage=4, block='f')
 
-    x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', strides=(1,1))
-    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b')
-    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c')
+    x = conv_block_2d(x, 3, [512, 512, 2048], stage=5, block='a', strides=(1,1))
+    x = identity_block_2d(x, 3, [512, 512, 2048], stage=5, block='b')
+    x = identity_block_2d(x, 3, [512, 512, 2048], stage=5, block='c')
 
     return Model(img_input, x, name=name)
 
-############################################################################
+#---------------------------------------------------------------------------
 def identity_block_3d(input_tensor, kernel_size, filters, stage, block, 
 		channels_axis=-1):
     """A block of layers that has no convolution at the shortcut.
 
 	Architecture:
-		- 1x1 convolution + batch norm + relu
 		- (k,k) convolution + batch norm + relu
-		- 1x1 convolution + batch norm
+		- (k,k) convolution + batch norm
 		- Residual step: add initial input to output of previous layer
 		- relu
     
@@ -204,8 +232,8 @@ def identity_block_3d(input_tensor, kernel_size, filters, stage, block,
         input_tensor: input tensor
         kernel_size: int or tuple of ints
 			The kernel size of middle conv layer at main path (default=3)
-        filters: iterable of 3 ints 
-			List of 3 integers, the number of filters for each of the 3 
+        filters: iterable of 2 ints 
+			List of 2 integers, the number of filters for each of the 2 
 			convolution layers
             **note: The last filter must equal be same as input (for adding 
 			in resnet shortcut)
@@ -236,21 +264,19 @@ def identity_block_3d(input_tensor, kernel_size, filters, stage, block,
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2b')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
-    x = layers.Activation('relu')(x)
 
     x = layers.add([x, input_tensor])
     x = layers.Activation('relu')(x)
     return x
 
-############################################################################
+#---------------------------------------------------------------------------
 def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
     	strides=(2, 2, 2), channels_axis=-1):
     """A block of layers that has convolution at the shortcut.
 
 	Architecture:
-		- 1x1 convolution + batch norm + relu
 		- (k,k) convolution + batch norm + relu
-		- 1x1 convolution + batch norm
+		- (k,k) convolution + batch norm
 		- Residual step: 
 			-(k,k) convolution of initial input + batch norm
 			- add conv of input to output of previous layer
@@ -259,9 +285,9 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
 	Args:
         input_tensor: input tensor
         kernel_size: int or tuple of ints
-			The kernel size of middle conv layer at main path (default=3)
-        filters: iterable of 3 ints 
-			List of 3 integers, the number of filters for each of the 3 
+			The kernel size of middle conv layer at main path
+        filters: iterable of 2 ints 
+			List of 2 integers, the number of filters for each of the 2 
 			convolution layers
             **note: The last filter must equal be same as input (for adding 
 			in resnet shortcut)
@@ -270,7 +296,7 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
         block: string
 			'a','b'..., current block label, used for generating layer names
 		strides: int or iterable of ints
-			Strides for the two non-1x1 conv layers in the block (middle and
+			Strides for the two reductive conv layers in the block (first and
 			shortcut)
 		channels_axis: int
 			Axis containing channel. Default is -1 for channels last format.
@@ -293,7 +319,6 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2b')(x)
     x = layers.BatchNormalization(axis=channels_axis, name=bn_name_base + '2b')(x)
-    x = layers.Activation('relu')(x)
 
     shortcut = layers.Conv3D(filters2, (1, 1, 1), strides=strides,
                              kernel_initializer='he_normal',
@@ -305,7 +330,7 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
     x = layers.Activation('relu')(x)
     return x
 
-############################################################################
+#---------------------------------------------------------------------------
 def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     """Make a CNN network for a single image.
 
@@ -373,7 +398,7 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
 
     return Model(img_input, x, name=name)
     
-############################################################################
+#---------------------------------------------------------------------------
 def make_embedding(input_model, name='base_cnn'):
     """Make a CNN (from base_cnn) that creates an embedding for a 
       single image.
@@ -395,10 +420,10 @@ def make_embedding(input_model, name='base_cnn'):
 
     return Model(input_model.input, output, name="Embedding")
 
-############################################################################
+#---------------------------------------------------------------------------
 class DistanceLayer(layers.Layer):
     """
-    This layer computes the distance between the anchor
+    Compute the distance between the anchor
     embedding and the positive embedding, and the anchor embedding and the
     negative embedding.
     """
@@ -410,7 +435,7 @@ class DistanceLayer(layers.Layer):
         an_distance = tf.reduce_sum(tf.square(anchor - negative), -1)
         return (ap_distance, an_distance)
 
-############################################################################
+#---------------------------------------------------------------------------
 def make_siamese_network(input_model, name='siamese_network'):
     """Make a siamese network consisting of three copies of input model
     fed to a distance layer.
@@ -437,7 +462,7 @@ def make_siamese_network(input_model, name='siamese_network'):
     return Model(inputs=[anchor_input, positive_input, negative_input], outputs=distances)
     
 
-############################################################################
+#---------------------------------------------------------------------------
 class SiameseModel(Model):
     """The Siamese Network model with a custom training and testing loops.
 
@@ -513,6 +538,7 @@ class SiameseModel(Model):
         # called automatically.
         return [self.loss_tracker]
 
+#---------------------------------------------------------------------------
 def preprocess_image(filename, mip=True):
         """
         Load the specified file as an ndarray, preprocess it and
@@ -521,7 +547,18 @@ def preprocess_image(filename, mip=True):
         ** Made this a standalone so it can be used by functions for 
         testing and playing with outputs.
 
+        Args:
+            filename: string tensor
+                Path to pickled ndarray file
+            mip: bool
+                Whether or not to take/return maximum intensity 
+                projection
+
+        Return:
+            im: ndarray
+                Processed image stack
         """
+        # I think this next part can be obviated with filename.name
         a = str(filename)
         _, filename, _ = a.split("'")
         with open(filename, 'rb') as file:
@@ -533,8 +570,137 @@ def preprocess_image(filename, mip=True):
         # Normalize 0-1.
         im = (im - np.min(im)) / (np.max(im) - np.min(im))
         return im
+
+#---------------------------------------------------------------------------
+def match_file_triplets(anchor_files, positive_files, num_negatives=5, 
+    upper_margin=10, lower_margin=0):
+    """Make file lists that match anchor-positive pairs with negative images
+    within a margin of similarity.
+
+    Image similarity is defined by using the euclidean distance between the 
+    (normalized) simulation parameters. The margins are determined by
+    randomly sampling image pairs to generate a distribution of parameter
+    distances, then using percentiles from that distribution (percentiles
+    defined by supplied upper and lower margins) to define the allowable
+    distances for negative images.
+    
+    Images are selected by the following algorithm:
+        1. Extract simulation parameters from all file names.
+        2. Normalize each parameter (Z-scores)
+        3. Randomly sample image pairs, calculate the euclidean distance
+            between parameters for each pair, then get distance cutoffs 
+            based on percentiles from this distribution.
+        4. For each anchor-positive pair, randomly shuffle negative images.
+        5. Search in order through shuffled negatives until a negative image
+            is found whose normalized (by mean and SD found in 3) distance
+            is within the bounds defined by margin parameters, 
+        6. Repeat 5 until num_negatives is reached
+    
+    Programming note: the slowest part of this (normally) is the sampling in 
+    get_param_stats, which is fine, but I think fewer pairs can be sampled
+    and still get good stats if the timing is a real problem.
+
+    Args:
+        anchor_files: file path
+            Iterable of files containing anchor images
+        positive_files: file path
+            Iterable of files containing positive images
+        num_negatives: int
+            The number of A-P-N triplets to make for each A-P pair
+        upper_margin: number
+            Percentile defining the upper limit of image similarity
+            for drawing negative images (50 limits images to the 
+            most similar half)
+        lower_margin: number
+            Percentile defining the lower limit of image similarity
+            for drawing negative images (50 limits images to the 
+            least similar half)
+
+    Returns:
+        a, p, n: lists
+            Ordered lists of filepaths for anchor, positive, and negative
+            images
+
+    """
+    def get_params_from_filename(filepath):
+        """Extract simulation parameters from filename as floats."""
+        filename = filepath.split('/')[-1]
+        p = filename.split('_')[1:-1]
+        p = [float(x) for x in p]
+        return p
+
+    def get_norm_params(filename, means, stds):
+        """Z-score normalize parameters."""
+        p= get_params_from_filename(filename)
+        return (p - means) / stds
+
+    def get_param_stats(files):
+        """Get the mean and std for simulation parameters across the dataset,
+        and get the mean and std for the euclidean distances between parameters 
+        of sampled image pairs."""
+
+        num_params = len(get_params_from_filename(files[-1]))
+        params = np.ndarray((0, num_params))
+
+        # Load images and extract parameters.
+        for f in files:
+            p= get_params_from_filename(f)
+            params = np.vstack([params, p])
         
-############################################################################
+        # Calculate the mean and std for parameters.
+        param_stds = params.std(axis=0)
+        param_means = params.mean(axis=0)
+
+        # Sample image pairs, get mean and std for distances.
+        distances = []
+        for _ in range(5_000):
+            rs = np.random.RandomState()
+            params1 = get_norm_params(rs.choice(files), param_means, param_stds)
+            params2 = get_norm_params(rs.choice(files), param_means, param_stds)
+            dist = scipy.spatial.distance.euclidean(params1, params2)
+            distances.append(dist)
+
+        return param_means, param_stds, distances
+    
+
+    negative_files = anchor_files + positive_files
+    param_means, param_stds, dists_sampled = get_param_stats(anchor_files)
+    dist_cutoff_upper = np.percentile(dists_sampled, upper_margin)
+    dist_cutoff_lower = np.percentile(dists_sampled, lower_margin)
+
+    # In case any parameters are invariant, set std to 1 to avoid divide by zero.
+    # Any non-zero value works, since the distances will all be 0, and when 
+    # normalized will be (0 - 0) / 1 = 0, which is the desired behavior.
+    param_stds[param_stds == 0] = 1
+    
+    # Initialize lists to contain ordered image files.
+    a, p, n = [], [], []
+
+    for i in range(len(anchor_files)):
+        anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
+        negative_files_shuf = np.random.RandomState().permutation(negative_files)
+        matches_count = 0
+        # Search in order through shuffled negatives for images that are within 
+        # the margins.
+        for f in negative_files_shuf:
+            # If enough matches have been found, exit for loop.
+            if matches_count == num_negatives:
+                break
+
+            f_params = get_norm_params(f, param_means, param_stds)
+            dist = scipy.spatial.distance.euclidean(anchor_params, f_params)
+            if dist == 0:
+                continue
+
+            if (dist >= dist_cutoff_lower) and (dist <= dist_cutoff_upper):
+                a.append(anchor_files[i])
+                p.append(positive_files[i])
+                n.append(f)
+                matches_count += 1
+
+    return a, p, n
+
+#---------------------------------------------------------------------------
 def make_triplet_inputs(folder, n_repeats=1, mip=True):
 
     def preprocess_triplets_mip(anchor, positive, negative):
@@ -618,11 +784,8 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
 
     # To generate the list of negative images, randomize the list of
     # available images and concatenate them together.
-    rng = np.random.RandomState()
-    rng.shuffle(anchor_images)
-    rng.shuffle(positive_images)
+
     negative_images = anchor_images + positive_images
-    np.random.RandomState().shuffle(negative_images)
 
     # Make negative dataset, apply shuffle so these will be shuffled 
     # when iterated over.

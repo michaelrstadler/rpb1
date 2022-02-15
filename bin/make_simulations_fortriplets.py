@@ -4,9 +4,9 @@ from time import time, process_time
 t_start = time()
 
 fm.simnuc.sim_rpb1_batch(
-    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims',
-    kernel=fm.load_pickle('/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/psf_20220210.pkl'),
-    nsims=10,
+    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims_1000',
+    kernel=fm.load_pickle('/Users/michaelstadler/Bioinformatics/Projects/rpb1/PSFs/psf_20220210_21x25x25pixels_100x50x50voxel.pkl'),
+    nsims=1000,
     nreps=2,
     nprocesses=4,
     mask_dims=(100,100,100),

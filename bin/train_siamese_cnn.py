@@ -37,7 +37,7 @@ def parse_options():
     parser.add_option("-d", action="store_true", dest="distributed",
                       help="Flag: Use distributed (multiple) GPUs.")
     parser.add_option("-m", action="store_true", dest="mip",
-                      help="Flag: write maximum intensity projection (mip).")
+                      help="Use maximum intensity projection (mip).")
     (options, args) = parser.parse_args()
     return options
 
