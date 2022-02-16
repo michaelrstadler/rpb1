@@ -155,5 +155,10 @@ class TestSiameseCNN(unittest.TestCase):
         for i in range(len(dists1)):
             self.assertGreater(dists2[i], dists1[i], 'Distances should be greater for 90-100 than 0-10.')
 
+        # Check if they're shuffled:
+        self.assertGreater(len(np.unique(a[:5])), 1, "Should be multiple non-identical files")
+        self.assertGreater(len(np.unique(a[5:10])), 1, "Should be multiple non-identical files")
+        self.assertGreater(len(np.unique(a[10:15])), 1, "Should be multiple non-identical files")
+        
 if __name__ == '__main__':
 	unittest.main()

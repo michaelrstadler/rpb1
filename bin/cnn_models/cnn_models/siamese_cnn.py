@@ -34,6 +34,7 @@ import pickle
 import scipy.spatial
 import scipy.ndimage as ndimage
 import tensorflow as tf
+import random
 from pathlib import Path
 from tensorflow.keras import applications
 from tensorflow.keras import layers
@@ -699,10 +700,14 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
                 n.append(f)
                 matches_count += 1
 
+    zipped = list(zip(a, p, n))
+    random.shuffle(zipped)
+    a, p, n = [list(x) for x in zip(*zipped)]
     return a, p, n
 
 #---------------------------------------------------------------------------
-def make_triplet_inputs(folder, n_repeats=1, mip=True):
+def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5, 
+    n_repeats=1, mip=True, batch_size=32):
 
     def preprocess_triplets_mip(anchor, positive, negative):
         """
@@ -756,9 +761,9 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
             tf_random_rotate_image(negative, mip=False)
         )
 
-    def batch_fetch(ds):
+    def batch_fetch(ds, batch_size):
         """Optimize dataset for fast parallel retrieval."""
-        ds = ds.batch(32, drop_remainder=False)
+        ds = ds.batch(batch_size, drop_remainder=False)
         ds = ds.prefetch(tf.data.AUTOTUNE)
         return ds
 
@@ -777,27 +782,22 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
         [str(positive_images_path / f) for f in os.listdir(positive_images_path)]
     )
 
-    image_count = len(anchor_images)
-
+    dataset_full_size = len(anchor_images) * num_negatives
+    dataset_take_size = len(anchor_images) * n_repeats
+    
     # Create datasets from these sorted files. These are in order and match in pairs.
-    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_images)
-    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_images)
+    anchor_files, positive_files, negative_files = match_file_triplets(anchor_images, positive_images, num_negatives, lower_margin, upper_margin)
 
-    # To generate the list of negative images, randomize the list of
-    # available images and concatenate them together.
-
-    negative_images = anchor_images + positive_images
-
-    # Make negative dataset, apply shuffle so these will be shuffled 
-    # when iterated over.
-    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_images)
-    negative_dataset = negative_dataset.shuffle(buffer_size=4096)    
-
+    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
+    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_files)
+    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_files)
+    
     # Combine datasets to form triplet images, apply shuffle to the whole
     # dataset. So upon iteration, order of triplets will be random, and
     # within triplets, the negative image will shuffle.
     dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
-    dataset = dataset.shuffle(buffer_size=1024)
+    dataset = dataset.shuffle(buffer_size=dataset_full_size)
+    dataset = dataset.take(dataset_take_size)
 
     # Apply preprocessing and rotation via special mappable functions.
     if mip:
@@ -808,13 +808,12 @@ def make_triplet_inputs(folder, n_repeats=1, mip=True):
         dataset = dataset.map(preprocess_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
         dataset = dataset.map(random_rotate_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
     
-    dataset = dataset.repeat(n_repeats)
-
     # Divide into training and evaluation, batch and prefetch.
-    train_dataset = dataset.take(round(image_count * n_repeats * 0.8))
-    val_dataset = dataset.skip(round(image_count * n_repeats * 0.8))
+    train_dataset = dataset.take(round(dataset_take_size * 0.8))
+    val_dataset = dataset.skip(round(dataset_take_size * 0.8))
 
-    train_dataset = batch_fetch(train_dataset)
-    val_dataset = batch_fetch(val_dataset)
-
+    train_dataset = batch_fetch(train_dataset, batch_size)
+    val_dataset = batch_fetch(val_dataset, batch_size)
+    """
+    """
     return train_dataset, val_dataset
