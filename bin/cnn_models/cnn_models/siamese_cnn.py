@@ -707,7 +707,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
 #---------------------------------------------------------------------------
 def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5, 
-    n_repeats=1, mip=True, batch_size=32):
+    n_repeats=1, mip=True, batch_size=32, rotate=False):
 
     def preprocess_triplets_mip(anchor, positive, negative):
         """
@@ -786,7 +786,7 @@ def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5,
     dataset_take_size = len(anchor_images) * n_repeats
     
     # Create datasets from these sorted files. These are in order and match in pairs.
-    anchor_files, positive_files, negative_files = match_file_triplets(anchor_images, positive_images, num_negatives, lower_margin, upper_margin)
+    anchor_files, positive_files, negative_files = match_file_triplets(anchor_images, positive_images, num_negatives, lower_margin=lower_margin, upper_margin=upper_margin)
 
     anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
     positive_dataset = tf.data.Dataset.from_tensor_slices(positive_files)
@@ -802,11 +802,13 @@ def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5,
     # Apply preprocessing and rotation via special mappable functions.
     if mip:
         dataset = dataset.map(preprocess_triplets_mip, num_parallel_calls=tf.data.AUTOTUNE)
-        dataset = dataset.map(random_rotate_triplets_mip, num_parallel_calls=tf.data.AUTOTUNE)
+        if rotate:
+            dataset = dataset.map(random_rotate_triplets_mip, num_parallel_calls=tf.data.AUTOTUNE)
 
     if not mip:
         dataset = dataset.map(preprocess_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
-        dataset = dataset.map(random_rotate_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
+        if rotate:
+            dataset = dataset.map(random_rotate_triplets_3d, num_parallel_calls=tf.data.AUTOTUNE)
     
     # Divide into training and evaluation, batch and prefetch.
     train_dataset = dataset.take(round(dataset_take_size * 0.8))
@@ -814,6 +816,5 @@ def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5,
 
     train_dataset = batch_fetch(train_dataset, batch_size)
     val_dataset = batch_fetch(val_dataset, batch_size)
-    """
-    """
+
     return train_dataset, val_dataset

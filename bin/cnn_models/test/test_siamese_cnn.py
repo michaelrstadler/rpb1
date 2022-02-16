@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import tempfile
+from flymovie.load_save import save_pickle
 from cnn_models.siamese_cnn import *
 
 def count_params(variables):
@@ -160,5 +161,53 @@ class TestSiameseCNN(unittest.TestCase):
         self.assertGreater(len(np.unique(a[5:10])), 1, "Should be multiple non-identical files")
         self.assertGreater(len(np.unique(a[10:15])), 1, "Should be multiple non-identical files")
         
+#---------------------------------------------------------------------------
+
+    def test_make_triplet_inputs(self):
+        # Make temp directory with left and right files.
+        with tempfile.TemporaryDirectory() as topdir:
+            os.mkdir(os.path.join(topdir, 'left'))
+            os.mkdir(os.path.join(topdir, 'right'))
+
+            # Fill with dummy images, of two types marked by altering a different pixel
+            # in each (they'll be normalized remember.). Save them with parameters clearly
+            # separated so in each folder there are two pairs of similar images.
+            im = np.ones((10,20,20))
+            im1 = im.copy()
+            im1[0,0,0] = 10
+            im2 = im.copy()
+            im2[0,0,1] = 10
+            save_pickle(im1, os.path.join(topdir, 'left', 'aaa_10_10_10_10_10_10_10_10_10_rep0.pkl'))
+            save_pickle(im1, os.path.join(topdir, 'right', 'aaa_10_10_10_10_10_10_10_10_10_rep1.pkl'))
+            save_pickle(im1, os.path.join(topdir, 'left', 'bbb_9_9_9_9_9_9_9_9_9_rep0.pkl'))
+            save_pickle(im1, os.path.join(topdir, 'right', 'bbb_9_9_9_9_9_9_9_9_9_rep1.pkl'))
+            save_pickle(im2, os.path.join(topdir, 'left', 'ccc_1_1_1_1_1_1_1_1_1_rep0.pkl'))
+            save_pickle(im2, os.path.join(topdir, 'right', 'ccc_1_1_1_1_1_1_1_1_1_rep1.pkl'))
+            save_pickle(im2, os.path.join(topdir, 'left', 'ddd_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_rep0.pkl'))
+            save_pickle(im2, os.path.join(topdir, 'right', 'ddd_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_rep1.pkl'))
+
+            cache_dir = Path(topdir)
+
+            for _ in range(4):
+                # First processess so negatives will always be the similar images.
+                train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=0, upper_margin=45, num_negatives=1, 
+                    n_repeats=1, mip=False, batch_size=1, rotate=False)
+
+                for batch in train_dataset:
+                    self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
+                    
+                for batch in val_dataset:
+                    self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
+
+                # Nexty processess so negatives will always be the dissimilar images.
+                train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=55, upper_margin=100, num_negatives=1, 
+                    n_repeats=1, mip=False, batch_size=1, rotate=False)
+
+                for batch in train_dataset:
+                    self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
+                    
+                for batch in val_dataset:
+                    self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
+
 if __name__ == '__main__':
 	unittest.main()
