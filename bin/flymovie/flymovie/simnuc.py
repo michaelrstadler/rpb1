@@ -653,4 +653,6 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     logitems['nreps'] = nreps
     logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
     write_logfile(logfilepath, logitems)
+    
+    return folder
 

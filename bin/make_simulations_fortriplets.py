@@ -1,12 +1,14 @@
 import flymovie as fm
+import subprocess
+import os
 from time import time, process_time
 
 t_start = time()
 
-fm.simnuc.sim_rpb1_batch(
+outfolder = fm.simnuc.sim_rpb1_batch(
     outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims_1000',
     kernel=fm.load_pickle('/Users/michaelstadler/Bioinformatics/Projects/rpb1/PSFs/psf_20220210_21x25x25pixels_100x50x50voxel.pkl'),
-    nsims=1000,
+    nsims=2,
     nreps=2,
     nprocesses=4,
     mask_dims=(100,100,100),
@@ -25,6 +27,15 @@ fm.simnuc.sim_rpb1_batch(
     dims_kernel=(100,50,50), 
     dims_final=(250,85,85)
 )
+
+# Sort files into left and right folders.
+left = os.path.join(outfolder, 'left')
+os.mkdir(left)
+right = os.path.join(outfolder, 'right')
+os.mkdir(right)
+
+subprocess.call(['mv ' + os.path.join(outfolder, '*rep0*') + ' ' + left], shell=True)
+subprocess.call(['mv ' + os.path.join(outfolder, '*rep1*') + ' ' + right], shell=True)
 
 t_end = time()
 print (t_end - t_start)
