@@ -713,8 +713,8 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     return a, p, n
 
 #---------------------------------------------------------------------------
-def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5, 
-    n_repeats=1, mip=True, batch_size=32, rotate=False):
+def make_triplet_inputs(folder, lower_margin=0, upper_margin=100, 
+    num_negatives=5, n_repeats=1, mip=True, batch_size=32, rotate=False):
     """Create an inpute dataset of anchor-positive-negative triplets.
 
     Args:
