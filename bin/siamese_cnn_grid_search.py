@@ -36,12 +36,13 @@ for r in initial_learning_rates:
         R = str(R)
         for e,w,u,n in curriculum_params:
             # Note: all args to subprocess.call must be type string.
+            name = '_'.join([r, R, n])
             subprocess.call(
                 [
                     'python',
                     train_siames_cnn_path,
                     '-f', data_folder_path, # folder
-                    '-n', n, # model name
+                    '-n', name, # model name
                     '-e', e, # num epochs
                     '-z', '2', # dataset size
                     '-y', '18', # model layers
