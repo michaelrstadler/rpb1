@@ -107,11 +107,11 @@ def conv_block_2d(input_tensor, kernel_size, filters, stage, block,
     """A block of layers that has convolution at the shortcut.
 
 	Architecture:
-		- 1x1 convolution + batch norm + relu
+		- 1x1 convolution with (s,s) stride length + batch norm + relu
 		- (k,k) convolution + batch norm + relu
 		- 1x1 convolution + batch norm
 		- Residual step: 
-			-(k,k) convolution of initial input + batch norm
+			-(k,k) convolution of initial input wiht (s,s) stride length + batch norm
 			- add conv of input to output of previous layer
 		- relu
     
@@ -122,14 +122,12 @@ def conv_block_2d(input_tensor, kernel_size, filters, stage, block,
         filters: iterable of 3 ints 
 			List of 3 integers, the number of filters for each of the 3 
 			convolution layers
-            **note: The last filter must equal be same as input (for adding 
-			in resnet shortcut)
         stage: int
 			The current stage label, used for generating layer names
         block: string
 			'a','b'..., current block label, used for generating layer names
 		strides: int or iterable of ints
-			Strides for the two non-1x1 conv layers in the block (middle and
+			Strides for two non-1x1 conv layers in the block (middle and
 			shortcut)
 		channels_axis: int
 			Axis containing channel. Default is -1 for channels last format.
@@ -277,7 +275,7 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
     """A block of layers that has convolution at the shortcut.
 
 	Architecture:
-		- (k,k) convolution + batch norm + relu
+		- (k,k) convolution with (s,s) stride length + batch norm + relu
 		- (k,k) convolution + batch norm
 		- Residual step: 
 			-(k,k) convolution of initial input + batch norm
@@ -291,8 +289,6 @@ def conv_block_3d(input_tensor, kernel_size, filters, stage, block,
         filters: iterable of 2 ints 
 			List of 2 integers, the number of filters for each of the 2 
 			convolution layers
-            **note: The last filter must equal be same as input (for adding 
-			in resnet shortcut)
         stage: int
 			The current stage label, used for generating layer names
         block: string
@@ -341,12 +337,15 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
             Shape of input images in pixels
         name: string
             Name for model
+        nlayers: int
+            Number of layers in the model: 18 or 34
 
     Returns:
         Keras model
     """
     if nlayers not in [18, 34]:
         raise ValueError('nlayers must be 18 or 34.')
+
     img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
     x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
 
@@ -375,7 +374,6 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
         x = conv_block_3d(x, (3,3,3), [512, 512], stage=5, block='a', strides=(1,1,1))
         x = identity_block_3d(x, (3,3,3), [512, 512], stage=5, block='b')
 
-    
     if nlayers == 34:
     
         x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,1,1))
@@ -541,7 +539,7 @@ class SiameseModel(Model):
         return [self.loss_tracker]
 
 #---------------------------------------------------------------------------
-def preprocess_image(filename, mip=True):
+def preprocess_image(input, mip=True):
         """
         Load the specified file as an ndarray, preprocess it and
         resize it to the target shape.
@@ -560,14 +558,19 @@ def preprocess_image(filename, mip=True):
             im: ndarray
                 Processed image stack
         """
-        # I think this next part can be obviated with filename.name
-        a = str(filename)
+        # This next part absolutely sucks but I cannot fucking figure out 
+        # how else to get the string out.
+        a = str(input)
         _, filename, _ = a.split("'")
+        
         with open(filename, 'rb') as file:
             im = pickle.load(file)
+
         if mip:
             im = im.max(axis=0)
+
         im = im.astype('float32')
+        # Dummy axis must be added in position 0.
         im = np.expand_dims(im, axis=-1)
         # Normalize 0-1.
         im = (im - np.min(im)) / (np.max(im) - np.min(im))
@@ -611,12 +614,14 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             The number of A-P-N triplets to make for each A-P pair
         upper_margin: number
             Percentile defining the upper limit of image similarity
-            for drawing negative images (50 limits images to the 
-            most similar half)
+            for drawing negative images 
         lower_margin: number
             Percentile defining the lower limit of image similarity
-            for drawing negative images (50 limits images to the 
-            least similar half)
+            for drawing negative images 
+        
+        Margin examples:
+            lower = 0, upper = 50: negatives limited to most similar half
+            lower = 50, upper = 100: negatives limited to least similar half
 
     Returns:
         a, p, n: lists
@@ -678,6 +683,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     # Initialize lists to contain ordered image files.
     a, p, n = [], [], []
 
+    # Go through each anchor-positive pair, find negative matches.
     for i in range(len(anchor_files)):
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
         negative_files_shuf = np.random.RandomState().permutation(negative_files)
@@ -700,6 +706,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
                 n.append(f)
                 matches_count += 1
 
+    # Shuffle lists using a shared order by zipping and unzipping.
     zipped = list(zip(a, p, n))
     random.shuffle(zipped)
     a, p, n = [list(x) for x in zip(*zipped)]
@@ -708,6 +715,35 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 #---------------------------------------------------------------------------
 def make_triplet_inputs(folder, lower_margin, upper_margin, num_negatives=5, 
     n_repeats=1, mip=True, batch_size=32, rotate=False):
+    """Create an inpute dataset of anchor-positive-negative triplets.
+
+    Args:
+        folder: Path object
+            Folder containing left and right subfolders with matching images
+        upper_margin: number
+            Percentile defining the upper limit of image similarity
+            for drawing negative images 
+        lower_margin: number
+            Percentile defining the lower limit of image similarity
+            for drawing negative images
+        num_negatives: int
+            Number of negative images to match with each A-P pair. Defines
+            number of possible triplets per A-P pair.
+        n_repeats: int
+            Number of times dataset is repeated in each epoch, or the mean
+            number of triplets for each A-P pair that will be seen in each 
+            epoch.
+        mip: bool
+            Use maximum intensity projections of input images
+        batch_size: int
+            Batch size
+        rotate: bool
+            If true, images are randomly rotated before each epoch.
+    
+    Returns:
+        train_dataset and val_dataset, two tf.data.Datasets ready to be loaded
+            by models.
+    """
 
     def preprocess_triplets_mip(anchor, positive, negative):
         """
