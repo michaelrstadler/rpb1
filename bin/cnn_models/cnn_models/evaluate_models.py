@@ -75,3 +75,38 @@ def embed_images(im_folder, embedding, mip=False):
         im_embeddings = np.vstack([im_embeddings, e])
         
     return im_embeddings, params
+
+#---------------------------------------------------------------------------
+def rank_embeddingdist_matchedpairs(embeddings1, embeddings2):
+    """Determine the ranking of matched pairs of images w.r.t. embedding 
+    distance.
+    
+    Takes two sets of embeddings that represent matched pairs of images 
+    (the same row in embeddings1 and embeddings2 correspond to paired images,
+    e.g. two different simulations performed with the same parameters). For
+    each image, the distance to every other image is calculated, the 
+    distances are ranked, and the ranking of its matched pair is recorded. 
+    For an ideal model, the ranking will always be 0. 
+    
+    
+    """
+    def get_ranks(embeddins1, embeddings2):
+        ranks = []
+        for n in range(embeddings1.shape[0]):
+            emb_ref = embeddings1[n]
+            # Stack all the embeddings EXCEPT self from first set onto second
+            # set. The row number of the matched pair will be unchanged.
+            embeddings_nonself = np.vstack((embeddings2, embeddings1[:n, :], 
+                                embeddings1[(1+n):, :]))
+            dists = np.sum((embeddings_nonself - emb_ref) ** 2, axis=1)
+            # Rank indexes by distance, add the rank of the matched pair.
+            idxs_sorted = np.argsort(dists)
+            ranks.append(np.where(idxs_sorted == n)[0][0])
+            
+        return np.array(ranks)
+    
+    # Get the ranks wrt each image in embeddings1, then embeddings2, return mean 
+    # rank for each pair.
+    ranks1 = get_ranks(embeddings1, embeddings2)
+    ranks2 = get_ranks(embeddings2, embeddings1)
+    return (ranks1 + ranks2) / 2
