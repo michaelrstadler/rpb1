@@ -40,6 +40,14 @@ class TestEvaluateModels(unittest.TestCase):
         ranks = ev.rank_embeddingdist_matchedpairs(e1, e_shuff)
         self.assertGreater(np.mean(ranks), 0, 'Ranks should be >0 after shuffling.')
 
+    #-----------------------------------------------------------------------
+    def test_plot_pca(self):
+        e1 = np.random.random((20,256))
+        e2 = np.random.random((20,256))
+
+        # Just make sure no errors.
+        ev.plot_pca(e1, e2)
+
 
 if __name__ == '__main__':
 	unittest.main()

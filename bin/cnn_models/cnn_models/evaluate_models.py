@@ -11,6 +11,8 @@ __copyright__   = "Copyright 2022, California, USA"
 from .siamese_cnn import preprocess_image
 import os
 import numpy as np
+import sklearn.decomposition
+import matplotlib.pyplot as plt
 
 # Idea: compare replicate folders. Run through net, see how often images are closest to their twin.
 
@@ -110,3 +112,36 @@ def rank_embeddingdist_matchedpairs(embeddings1, embeddings2):
     ranks1 = get_ranks(embeddings1, embeddings2)
     ranks2 = get_ranks(embeddings2, embeddings1)
     return (ranks1 + ranks2) / 2
+
+#---------------------------------------------------------------------------
+def plot_pca(embeddings1, embeddings2):
+    """Plot a 2d and 3d PCA of embeddings of matched pair images.
+    
+    Embeddings represent matched pairs (same row in each represent
+    embeddings of similar images). PCA is performed on all embeddings
+    together, PCA is applied to each set, and positions of each sample
+    are plotted in scatterplots using random color pallet such that matched
+    pairs are the same color.
+
+    2D scatterplot features PC1 vs. PC2; 3D scatter added PC3.
+
+    Args:
+        embeddings1 and embeddings2: ndarray
+            Embedding locations for images, each row is an image
+    
+    Returns: None
+    """
+    # Combine and perform PCA dimensionality reduction.
+    combined = np.vstack((embeddings1, embeddings2))
+    pca = sklearn.decomposition.PCA(n_components=3)
+    pca.fit(combined)
+    print(pca.explained_variance_ratio_)
+    fig = plt.figure(figsize=plt.figaspect(0.5))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2, projection='3d')
+    
+    # Plot separately for each set of embeddings.
+    for e in (embeddings1, embeddings2):
+        tfm = pca.transform(e)
+        ax1.scatter(tfm[:,0], tfm[:,1], c = np.arange(tfm.shape[0]), cmap='prism')
+        ax2.scatter(tfm[:,0], tfm[:,1], tfm[:,2], c = np.arange(tfm.shape[0]), cmap='prism')
