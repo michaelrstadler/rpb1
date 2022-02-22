@@ -9,6 +9,9 @@ __author__ = 'Michael Stadler'
 __copyright__   = "Copyright 2022, California, USA"
 
 from .siamese_cnn import preprocess_image
+import cnn_models.siamese_cnn as sm
+from fpdf import FPDF
+import tempfile
 import os
 import numpy as np
 import sklearn.decomposition
@@ -54,8 +57,9 @@ def embed_images(im_folder, embedding, mip=False):
     params = np.ndarray((0, num_params))
 
     # Load images and extract parameters.
+    # Ensure it's a good file, ignore hidden files.
     for f in files:
-        if f[3] != '_':
+        if (f[3] != '_') or (f[0] == '.'):
             continue
         # Because of the silliness with extracting filename from tensor, 
         # have to add two single quotes flanking filename.
@@ -135,7 +139,6 @@ def plot_pca(embeddings1, embeddings2):
     combined = np.vstack((embeddings1, embeddings2))
     pca = sklearn.decomposition.PCA(n_components=3)
     pca.fit(combined)
-    print(pca.explained_variance_ratio_)
     fig = plt.figure(figsize=plt.figaspect(0.5))
     ax1 = fig.add_subplot(1, 2, 1)
     ax2 = fig.add_subplot(1, 2, 2, projection='3d')
@@ -143,5 +146,152 @@ def plot_pca(embeddings1, embeddings2):
     # Plot separately for each set of embeddings.
     for e in (embeddings1, embeddings2):
         tfm = pca.transform(e)
-        ax1.scatter(tfm[:,0], tfm[:,1], c = np.arange(tfm.shape[0]), cmap='prism')
-        ax2.scatter(tfm[:,0], tfm[:,1], tfm[:,2], c = np.arange(tfm.shape[0]), cmap='prism')
+        ax1.scatter(tfm[:,0], tfm[:,1], c = np.arange(tfm.shape[0]), cmap='cividis')
+        ax2.scatter(tfm[:,0], tfm[:,1], tfm[:,2], c = np.arange(tfm.shape[0]), cmap='cividis')
+    
+    ax1.set_title('PC1 vs. PC2')
+    ax2.set_title('PC1 vs. PC2 vs. PC3')
+    return fig
+
+#---------------------------------------------------------------------------
+def evaluate_model(folder, weights_file, outfolder, mip=False, nlayers=18, 
+            imsize=(34,100,100)):
+    """Evaluate performance of an embedding model against multiple image sets.
+    
+    Test datasets consist of paired images: Each image in the dataset has
+    a similar image (e.g., rotation of itself or an independent simulation
+    performed with identical parameters) which *should* be the closest image
+    in the model. Performance on each dataset is assessed by where similar
+    images rank in distance, performed by function 
+    rank_embeddingdist_matchedpairs. A PDF is produced where each page is 
+    a new test dataset. The dataset name, average pair rank, top1 and top5
+    accuracy is printed, and a 2D and 3D PCA is displayed.
+    
+    Args:
+        folder: string
+            Path to folder containing image sets. Within folder, each folder
+            is a dataset and contains left and right folders with paired
+            images
+        weights_file: string
+            Path to files containing model weights
+        outfolder: string
+            Path to folder to which to write outfiles
+        mip: bool
+            Whether model is for maximum intensity projections
+        nlayers: int (18 or 34)
+            Number of layers in 3D CNN model
+        imsize: iterable of ints
+            Size of input images to model
+    
+    Returns:
+        avg_ranks: list
+            Mean rank for self-pairs in each test dataset
+        good_dirs: list
+            Names of test file directories
+
+    Writes:
+        evaluate_model + name + .pdf: PDF describing model performance
+            on different test datasets. Contains paired ranking metrics
+            and plots of 2D and 3D PCA.
+    """
+    # Load model from weights.
+    if mip is False:
+        base_cnn = sm.make_base_cnn_3d(image_shape=imsize, nlayers=nlayers)
+    else:
+        base_cnn = sm.make_base_cnn_2d(image_shape=imsize)
+    embedding = sm.make_embedding(base_cnn)
+    embedding.load_weights(weights_file)
+
+    pdf = FPDF()
+    dirs = os.listdir(folder)
+    avg_ranks = []
+    good_dirs = []
+    # For each folder containing test data.
+    for dir_ in dirs:
+        # Ignore .DS_store (all hidden files)
+        if dir_[0] == '.':
+            continue
+        
+        good_dirs.append(dir_)
+        # Calculate embeddings, determine ranks for pairs.
+        embeddings1, _ = embed_images(os.path.join(folder, dir_, 'left'), embedding, mip)
+        embeddings2, _ = embed_images(os.path.join(folder, dir_, 'right'), embedding, mip)
+        ranks = rank_embeddingdist_matchedpairs(embeddings1, embeddings2)
+        avg_ranks.append(np.mean(ranks))
+
+        # Construct PDF.
+        pdf.add_page()
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(120, 10, dir_, 0, 1)
+        pdf.set_font('Arial', '', 12)
+        pdf.cell(120, 10, 'Mean rank: ' + str(np.mean(ranks)), 0, 1)
+        top1 = np.count_nonzero(ranks == 0) / len(ranks)
+        top5 = np.count_nonzero(ranks <= 4) / len(ranks)
+        pdf.cell(120, 10, 'Top1 accuracy: ' + str(top1), 0, 1)
+        pdf.cell(120, 10, 'Top5 accuracy: ' + str(top5), 0, 1)
+        pdf.cell(120, 10, ','.join([str(x) for x in ranks]), 0, 1)
+        
+        # Create images by saving to temprary files, inserting in pdf.
+        with tempfile.NamedTemporaryFile('w', suffix='.png') as f:
+            fig = plot_pca(embeddings1, embeddings2)
+            plt.savefig(f.name, dpi=150)
+            pdf.image(f.name, w=200, h=100)
+            plt.close(fig)
+    
+    outfile = os.path.join(outfolder, 'evaluate_model_' + weights_file.split('/')[-1] + '.pdf')
+    pdf.output(outfile, 'F')
+    return avg_ranks, good_dirs
+
+#---------------------------------------------------------------------------
+def evaluate_models(data_folder, out_folder, weights_folder, nlayers=18):
+    """Evaluate multiple CNN models against multiple test datasets.
+    
+    This is mostly a wrapper for evaluate_model. Identifies each model 
+    variable set in the weights_folder and calls evaluate_model. In addition
+    to PDFs, save a tsv file with the average rank for each model against
+    each dataset.
+
+    ** Currently only for 3D CNNs (no MIP support)
+
+    Args:
+        data_folder: string
+            Path to folder containing image sets. Within folder, each folder
+            is a dataset and contains left and right folders with paired
+            images
+        out_folder: string
+            Path to folder to which to write outfiles
+        weights_folder: string
+            Folder containing files containing variable for models
+        nlayers: int
+            Number of layers in CNN model
+    
+    Returns:
+        stats: dict of lists
+            Average rank data for each model (model name is key)
+        data_dirs: list
+            Names of test file directories
+
+    Writes:
+        ...evaluation_summary.tsv: average pair ranks for each model against
+        each dataset
+    """
+    stats = {}
+    data_dirs = []
+    for f in os.listdir(weights_folder):
+        if f[-5:] == 'index':
+            weights_file = os.path.join(weights_folder, f[:-6])
+            try:
+                avg_ranks, data_dirs = evaluate_model(data_folder, weights_file, out_folder, nlayers=nlayers)
+                stats[weights_file] = avg_ranks
+            except:
+                print('Failed: ' + weights_file)
+
+    outfilepath = os.path.join(out_folder, weights_folder.split('/')[-1] + ' evaluation_summary.tsv')
+    with open(outfilepath, 'w') as outfile:
+        # Write colnames.
+        outfile.write('\t'.join(data_dirs) + '\n')
+        for wf in stats:
+            outfile.write(wf.split('/')[-1] + '\t')
+            outfile.write('\t'.join([str(x) for x in stats[wf]]) + '\n')
+
+    return stats, data_dirs
