@@ -146,8 +146,10 @@ def plot_pca(embeddings1, embeddings2):
     # Plot separately for each set of embeddings.
     for e in (embeddings1, embeddings2):
         tfm = pca.transform(e)
-        ax1.scatter(tfm[:,0], tfm[:,1], c = np.arange(tfm.shape[0]), cmap='cividis')
-        ax2.scatter(tfm[:,0], tfm[:,1], tfm[:,2], c = np.arange(tfm.shape[0]), cmap='cividis')
+        ax1.scatter(tfm[:,0], tfm[:,1], c = np.arange(tfm.shape[0]), 
+                                    cmap='prism')
+        ax2.scatter(tfm[:,0], tfm[:,1], tfm[:,2], 
+                    c = np.arange(tfm.shape[0]), cmap='prism')
     
     ax1.set_title('PC1 vs. PC2')
     ax2.set_title('PC1 vs. PC2 vs. PC3')
