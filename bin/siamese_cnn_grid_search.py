@@ -24,7 +24,7 @@ learning_rate_exps = [0.05, 0.1, 0.25]
 
 curriculum_params = (
     # epoch lengths, lower margins, upper margins, name
-    ('2', '0', '100', 'nocurriculum'),
+    ('10', '0', '100', 'nocurriculum'),
     ('10,10,10', '0,0,0', '100,66,33', 'all_to_hard'),
     ('10,10,10', '66,33,0', '100,100,100', 'easy_to_all'),
     ('10,10,10', '66,33,0', '100,66,33', 'easy_to_hard')
@@ -33,7 +33,7 @@ curriculum_params = (
 # Constant parameters
 z = '2' # datset size
 y = '18' # model layers
-c = '5' # learning rate contant for c epochs
+c = '2' # learning rate contant for c epochs
 
 ##################################################################### 
 
