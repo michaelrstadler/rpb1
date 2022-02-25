@@ -343,8 +343,8 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     Returns:
         Keras model
     """
-    if nlayers not in [18, 34]:
-        raise ValueError('nlayers must be 18 or 34.')
+    if nlayers not in [8, 18, 34]:
+        raise ValueError('nlayers must be 8, 18 or 34.')
 
     img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
     x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv1_pad')(img_input)
@@ -359,6 +359,24 @@ def make_base_cnn_3d(image_shape=(20, 100,100), name='base_cnn', nlayers=18):
     x = layers.Activation('relu')(x)
     x = layers.ZeroPadding3D(padding=(1, 1, 1), name='pool1_pad')(x)
     x = layers.MaxPooling3D((3, 3, 3), strides=(2, 2, 2))(x)
+
+    if nlayers == 8:
+        x = layers.ZeroPadding3D(padding=(1, 3, 3), name='conv2_pad')(x)
+
+        x = layers.Conv3D(64, (3,7,7),
+                        strides=(2, 2, 2),
+                        padding='valid',
+                        kernel_initializer='he_normal',
+                        name='conv2')(x)
+
+        x = conv_block_3d(x, (3,3,3), [64, 64], stage=2, block='a', strides=(2,2,2))
+        x = identity_block_3d(x, (3,3,3), [64, 64], stage=2, block='b')
+
+        x = conv_block_3d(x, (3,3,3), [128, 128], stage=3, block='a', strides=(2,1,1))
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=3, block='b')
+
+        x = conv_block_3d(x, (3,3,3), [128, 128], stage=4, block='a', strides=(1,1,1))
+        x = identity_block_3d(x, (3,3,3), [128, 128], stage=4, block='b')
 
     if nlayers == 18:
     
@@ -714,7 +732,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
 #---------------------------------------------------------------------------
 def make_triplet_inputs(folder, lower_margin=0, upper_margin=100, 
-    num_negatives=5, n_repeats=1, mip=True, batch_size=32, rotate=False):
+    num_negatives=5, n_repeats=1, mip=False, batch_size=32, rotate=False):
     """Create an inpute dataset of anchor-positive-negative triplets.
 
     Args:
@@ -767,11 +785,23 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         return (anchor, positive, negative)
 
     def tf_random_rotate_image(image, mip=True):
-        """Apply random rotation -30 to 30 degrees to image."""
+        """Apply random rotations/flips to image. Rotations are multiple of 
+        90 degrees, 50% of images are flipped along axis 1."""
         def random_rotate_image_mip(image):
-            return ndimage.rotate(image, np.random.RandomState().uniform(-30, 30), reshape=False)
+            rs = np.random.RandomState()
+            im_rot = ndimage.rotate(image, rs.choice([0,90,180,270]), reshape=False)
+            if rs.choice([0,1]) == 1:
+                im_rot = np.flip(im_rot, axis=1)
+            return im_rot
+
         def random_rotate_image_3d(image):
-            return ndimage.rotate(image, np.random.RandomState().uniform(-30, 30), axes=(1,2), reshape=False)
+            rs = np.random.RandomState()
+            im_rot = ndimage.rotate(image, rs.choice([0,90,180,270]), axes=(1,2), reshape=False)
+            if rs.choice([0,1]) == 1:
+                im_rot = np.flip(im_rot, axis=1)
+            return im_rot
+
+
 
         im_shape = image.shape
         if mip:

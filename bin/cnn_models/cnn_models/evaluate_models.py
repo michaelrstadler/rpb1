@@ -9,6 +9,7 @@ __author__ = 'Michael Stadler'
 __copyright__   = "Copyright 2022, California, USA"
 
 from .siamese_cnn import preprocess_image
+import flymovie as fm
 import cnn_models.siamese_cnn as sm
 from fpdf import FPDF
 import tempfile
@@ -17,7 +18,6 @@ import numpy as np
 import sklearn.decomposition
 import matplotlib.pyplot as plt
 
-# Idea: compare replicate folders. Run through net, see how often images are closest to their twin.
 
 #---------------------------------------------------------------------------
 def embed_images(im_folder, embedding, mip=False):
@@ -297,3 +297,87 @@ def evaluate_models(data_folder, out_folder, weights_folder, nlayers=18):
             outfile.write('\t'.join([str(x) for x in stats[wf]]) + '\n')
 
     return stats, data_dirs
+
+#---------------------------------------------------------------------------
+def visualize_simfolder(folder, n=32, **kwargs):
+    """Load viewer for files in left and right folders in a simulated image
+     output folder.
+     
+    Args:
+        folder: str
+            Folder containing left and right subfolders with pickled
+                image files
+        n: int
+            Number of images from left and right to load
+        kwargs:
+            kwargs for viewer function
+    """
+    def stack_images(subfolder, n):
+        files = os.listdir(subfolder)
+        sample_file = os.path.join(subfolder, files[-1])
+        stack = np.zeros(fm.load_pickle(sample_file).shape)
+        stack = np.expand_dims(stack, axis=0)
+        im_count = 0
+        for f in files:
+            if f[0] == '.':
+                continue
+            if im_count == n:
+                break
+            im = fm.load_pickle(os.path.join(subfolder, f))
+            im = np.expand_dims(im, axis=0)
+            stack = np.vstack([stack, im])
+            im_count += 1
+        return stack[1:]
+
+    left = os.path.join(folder, 'left')
+    right = os.path.join(folder, 'right')
+    if os.path.exists(left) and os.path.exists(right):
+        left_stack = stack_images(left, n)
+        right_stack = stack_images(right, n)
+    fm.viewer([left_stack, right_stack], **kwargs)
+
+#---------------------------------------------------------------------------
+def plot_history(pkl_file, ymax=0.25):
+    """Plot history of loss and value loss from keras output.
+    
+    Args:
+        pkl_file: str
+            Path to pickled file containing history['history']
+        ymax: number
+            Maximum value for y axis    
+    """
+    history = fm.load_pickle(pkl_file)
+    val_loss = []
+    loss = []
+    for i in range(len(history)):
+        val_loss = val_loss + history[i]['val_loss']
+        loss = loss + history[i]['loss']
+
+    plt.plot(loss)
+    plt.plot(val_loss)
+    plt.ylim((0, ymax))
+    plt.legend(['loss', 'val_loss'])
+
+#---------------------------------------------------------------------------
+def visualize_batch(ds, figsize=4, **kwargs):
+    """Visualize a batch of a triplet dataset.
+    
+    Args:
+        ds: keras dataset
+            Triplet image dataset
+        figsize: int
+            Figsize for viewer
+        kwargs:
+            kwargs for viewer function
+    """
+    def process_im(arr):
+        im = np.squeeze(arr)
+        return (im - np.min(im)) / (np.max(im) - np.min(im)) * 1000
+    
+    iter = ds.as_numpy_iterator()
+    batch = next(iter)
+    im1 = process_im(batch[0])
+    im2 = process_im(batch[1])
+    im3 = process_im(batch[2])
+
+    fm.viewer([im1, im2, im3], figsize, **kwargs)

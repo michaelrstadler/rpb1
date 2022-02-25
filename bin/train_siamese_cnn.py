@@ -95,7 +95,6 @@ def scheduler(rel_epoch, lr, start_epoch, constant_epochs, learning_rate_exp):
     new_lr = lr
     if true_epoch > constant_epochs :
         new_lr = lr * tf.math.exp(-1 * learning_rate_exp)
-    print(new_lr)
     return new_lr
 
 # Process all options.
