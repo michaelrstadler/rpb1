@@ -801,8 +801,6 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
                 im_rot = np.flip(im_rot, axis=1)
             return im_rot
 
-
-
         im_shape = image.shape
         if mip:
             [image,] = tf.py_function(random_rotate_image_mip, [image], [tf.float32])
