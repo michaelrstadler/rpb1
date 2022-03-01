@@ -92,6 +92,7 @@ def scheduler(rel_epoch, lr, start_epoch, constant_epochs, learning_rate_exp):
         new_lr = lr * tf.math.exp(-1 * learning_rate_exp)
     return new_lr
 
+
 # Process all options.
 options = parse_options()
 train_data_folder = options.training_data_folder
@@ -135,7 +136,8 @@ if initial_weights_file is not None:
     embedding.load_weights(initial_weights_file)
 
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(initial_learning_rate))
-checkpoint_path = os.path.join(train_data_folder, 'checkpoint_' + model_name)
+final_checkpoint_path = os.path.join(train_data_folder, 'checkpoint_final_' + model_name)
+best_checkpoint_path = os.path.join(train_data_folder, 'checkpoint_best_' + model_name)
 history_path = os.path.join(train_data_folder, 'history_' + model_name + '.pkl')
 
 # Go through each iteration in epoch_nums individually.
@@ -161,15 +163,22 @@ for i in range(len(epoch_nums)):
 
     lr_scheduler_callback = tf.keras.callbacks.LearningRateScheduler(scheduler_function)
 
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+            filepath=best_checkpoint_path,
+            save_weights_only=True,
+            monitor='val_accuracy',
+            mode='max',
+            save_best_only=True)
+
     # Train model, store history.
     history = siamese_model.fit(train_dataset, epochs=epoch_num, validation_data=val_dataset, 
-        callbacks=[lr_scheduler_callback], verbose=True)
+        callbacks=[lr_scheduler_callback, model_checkpoint_callback], verbose=True)
 
     histories.append(history.history)
     epoch_count += epoch_num
 
 # Save everything.
-embedding.save_weights(checkpoint_path)
+embedding.save_weights(final_checkpoint_path)
 with open(history_path, 'wb') as history_file:
     pickle.dump(histories, history_file)
 
