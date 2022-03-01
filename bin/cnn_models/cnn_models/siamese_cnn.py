@@ -776,6 +776,31 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         [negative,] = tf.py_function(preprocess_batch,[negative,],[tf.float32,])
         return (anchor, positive, negative)
 
+    def rotate_batch(batch):
+        def rotate_im(im):
+            return np.flip(im, axis=1)
+        rotated_ims = []
+        for im in batch:
+            #im_rot = ndimage.rotate(im, 90, axes=(1,2), reshape=False)
+            [im_rot,] = tf.py_function(rotate_im,[im,],[tf.float32,])
+            print(type(im_rot))
+            #im_rot = rotate_im(im)
+            rotated_ims.append(im_rot)
+        #return np.random.random((10,10))
+        return np.array(rotated_ims)
+
+    def rotate_triplets(anchor, positive, negative):
+        """
+        Given the filenames corresponding to the three images, load and
+        preprocess them.
+        """
+        [anchor,] = tf.py_function(rotate_batch,[anchor,],[tf.float32,])
+        [positive,] = tf.py_function(rotate_batch,[positive,],[tf.float32,])
+        [negative,] = tf.py_function(rotate_batch,[negative,],[tf.float32,])
+        return (anchor, positive, negative)
+
+
+
     # Set up input directories.
     cache_dir=folder
     anchor_images_path = cache_dir / "left"
@@ -812,6 +837,9 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
 
     # Apply preprocessing and rotation via special mappable functions.
     dataset = dataset.map(preprocess_triplets, num_parallel_calls=tf.data.AUTOTUNE)
+
+    if rotate:
+        dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
 
     # Divide into training and evaluation, batch and prefetch.
     train_dataset = dataset.take(round(dataset_take_size * 0.8))
