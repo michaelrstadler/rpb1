@@ -2,7 +2,7 @@
 
 """train_siamese_cnn.py: Train a siamense CNN image similarity detector
 
-CNN model can be trained on max projections (MIPs) or on full 3D image stacks
+CNN model trained on full 3D image stacks
 with multiple architectures. Curriculum learning can be implemented by restricting
 the similarity of training images.
 
@@ -33,8 +33,6 @@ def parse_options():
     parser.add_option("-e", "--num_epochs", dest="num_epochs",
                       help="Number of epochs to train for. Either a single number or a comma-separated " +
                        "list of epochs for curriculum learning.")
-    parser.add_option("-m", action="store_true", dest="mip",
-                      help="Use maximum intensity projection (mip).")
     parser.add_option("-z", "--dataset_size", dest="dataset_size", default=1,
                       help="Size of the dataset used in each epoch as a multiple of the number of input files.")
     parser.add_option("-y", "--num_layers", dest="nlayers", default=18,
@@ -65,26 +63,21 @@ def parse_options():
     (options, args) = parser.parse_args()
     return options
 
-def get_target_shape(dir_, mip):
+def get_target_shape(dir_):
     """Retrieve the image target size."""
     left = dir_ / 'left'
     imfile = os.listdir(left)[-1]
     impath = os.path.join(left, imfile)
     with open(impath, 'rb') as file:
         im = pickle.load(file)
-    if mip:
-        shape = im.shape[1:]
-    else:
-        shape = im.shape
+
+    shape = im.shape
     return shape
 
-def build_siamese_model(mip):
+def build_siamese_model():
     """Construct siamese CNN model."""
-    if mip:
-        base_cnn = cn.make_base_cnn_2d(image_shape=target_shape)
 
-    if not mip:
-        base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=nlayers)
+    base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=nlayers)
 
     embedding = cn.make_embedding(base_cnn)
     siamese_network = cn.make_siamese_network(embedding)
@@ -104,7 +97,6 @@ options = parse_options()
 train_data_folder = options.training_data_folder
 model_name = options.model_name
 epoch_nums = [int(x) for x in options.num_epochs.split(',')]
-mip = options.mip
 dataset_size = int(options.dataset_size)
 nlayers = int(options.nlayers)
 initial_learning_rate = float(options.initial_learning_rate)
@@ -127,17 +119,17 @@ if (len(epoch_nums) != len(lower_margins)) or (len(lower_margins) != len(upper_m
 # Set paths and shape.
 model_save_path = os.path.join(train_data_folder, 'model_' + model_name)
 cache_dir = Path(train_data_folder)
-target_shape = get_target_shape(cache_dir, mip)
+target_shape = get_target_shape(cache_dir)
 t1 = time()
 
 # Construct model, set files.
 if distributed:
     mirrored_strategy = tf.distribute.MirroredStrategy()
     with mirrored_strategy.scope():
-        embedding, siamese_model = build_siamese_model(mip)
+        embedding, siamese_model = build_siamese_model()
 
 else:
-    embedding, siamese_model = build_siamese_model(mip)
+    embedding, siamese_model = build_siamese_model()
 
 if initial_weights_file is not None:
     embedding.load_weights(initial_weights_file)
@@ -159,8 +151,7 @@ for i in range(len(epoch_nums)):
         lower_margin=lower_margin, 
         upper_margin=upper_margin, 
         num_negatives=num_neg_pairs,
-        n_repeats=dataset_size, 
-        mip=mip,
+        n_repeats=dataset_size,
         batch_size=batch_size,
         rotate=rotate)
 
