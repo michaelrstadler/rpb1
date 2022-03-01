@@ -191,7 +191,7 @@ class TestSiameseCNN(unittest.TestCase):
             for _ in range(4):
                 # First processess so negatives will always be the similar images.
                 train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=0, upper_margin=45, num_negatives=1, 
-                    n_repeats=1, mip=False, batch_size=1, rotate=False)
+                    n_repeats=1, batch_size=1, rotate=False)
 
                 for batch in train_dataset:
                     self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
@@ -201,7 +201,7 @@ class TestSiameseCNN(unittest.TestCase):
 
                 # Nexty processess so negatives will always be the dissimilar images.
                 train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=55, upper_margin=100, num_negatives=1, 
-                    n_repeats=1, mip=False, batch_size=1, rotate=False)
+                    n_repeats=1, batch_size=1, rotate=False)
 
                 for batch in train_dataset:
                     self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
@@ -211,9 +211,7 @@ class TestSiameseCNN(unittest.TestCase):
 
             # Run it in a few more modes and make sure it doesn't explode.
             train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=22, upper_margin=89, num_negatives=1, 
-                    n_repeats=1, mip=False, batch_size=1, rotate=True)
-            train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=0, upper_margin=78, num_negatives=5, 
-                    n_repeats=5, mip=True, batch_size=32, rotate=True)
+                    n_repeats=1, batch_size=1, rotate=True)
 
 if __name__ == '__main__':
 	unittest.main()

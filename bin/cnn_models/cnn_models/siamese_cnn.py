@@ -732,7 +732,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
 #---------------------------------------------------------------------------
 def make_triplet_inputs(folder, lower_margin=0, upper_margin=100, 
-    num_negatives=5, n_repeats=1, batch_size=128, rotate=False):
+    num_negatives=5, n_repeats=1, batch_size=32, rotate=False):
     """Create an input dataset of anchor-positive-negative triplets.
 
     Args:
@@ -753,6 +753,9 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
             epoch.
         batch_size: int
             Batch size
+        rotate: bool
+            If true, apply random transformation to each image: 50% flipped
+            along axis 1, random rotation at 90-degree multiples
     
     Returns:
         train_dataset and val_dataset, two tf.data.Datasets ready to be loaded
@@ -767,38 +770,32 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         return np.array(ims)
 
     def preprocess_triplets(anchor, positive, negative):
-        """
-        Given the filenames corresponding to the three images, load and
-        preprocess them.
-        """
+        """Given the filenames corresponding to the three images, load and
+        preprocess them."""
         [anchor,] = tf.py_function(preprocess_batch,[anchor,],[tf.float32,])
         [positive,] = tf.py_function(preprocess_batch,[positive,],[tf.float32,])
         [negative,] = tf.py_function(preprocess_batch,[negative,],[tf.float32,])
         return (anchor, positive, negative)
 
-    def rotate_batch(batch):
-        def rotate_im(im):
-            return np.flip(im, axis=1)
-        rotated_ims = []
-        for im in batch:
-            #im_rot = ndimage.rotate(im, 90, axes=(1,2), reshape=False)
-            [im_rot,] = tf.py_function(rotate_im,[im,],[tf.float32,])
-            print(type(im_rot))
-            #im_rot = rotate_im(im)
-            rotated_ims.append(im_rot)
-        #return np.random.random((10,10))
-        return np.array(rotated_ims)
+    def rotate_batch(input, mip=False):
+        """Apply random rotations/flips to batch of images. Rotations are multiple 
+        of 90 degrees, 50% of images are flipped along axis 1."""
+        rs = np.random.RandomState()
+        ims = []
+        for im in input:
+            im_rot = ndimage.rotate(im, rs.choice([0,90,180,270]), axes=(1,2), 
+                        reshape=False)
+            if rs.choice([0,1]) == 1:
+                im_rot = np.flip(im_rot, axis=1)
+            ims.append(im_rot)
+        return np.array(ims)
 
     def rotate_triplets(anchor, positive, negative):
-        """
-        Given the filenames corresponding to the three images, load and
-        preprocess them.
-        """
+        """Wrapper to apply random flips/rotations to each image in triplet."""
         [anchor,] = tf.py_function(rotate_batch,[anchor,],[tf.float32,])
         [positive,] = tf.py_function(rotate_batch,[positive,],[tf.float32,])
         [negative,] = tf.py_function(rotate_batch,[negative,],[tf.float32,])
         return (anchor, positive, negative)
-
 
 
     # Set up input directories.
@@ -833,6 +830,7 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
     dataset = dataset.shuffle(buffer_size=dataset_full_size)
     dataset = dataset.take(dataset_take_size)
 
+    # Batch (before mapping -- supposed to be faster).
     dataset = dataset.batch(batch_size, drop_remainder=False)
 
     # Apply preprocessing and rotation via special mappable functions.
@@ -842,8 +840,8 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
 
     # Divide into training and evaluation, batch and prefetch.
-    train_dataset = dataset.take(round(dataset_take_size * 0.8))
-    val_dataset = dataset.skip(round(dataset_take_size * 0.8))
+    train_dataset = dataset.take(round(dataset_take_size * 0.9))
+    val_dataset = dataset.skip(round(dataset_take_size * 0.1))
 
     #train_dataset = batch_fetch(train_dataset, batch_size)
     #val_dataset = batch_fetch(val_dataset, batch_size)
