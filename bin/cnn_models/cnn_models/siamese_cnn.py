@@ -713,8 +713,9 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
         matches_count = 0
         used_indexes = []
-        # Search in order through shuffled negatives for images that are within 
-        # the margins.
+        # Try randomly drawn negative images to find images that fall within
+        # distance cutoffs, check to make sure negatives aren't repeated and 
+        # that the anchor and positive image are excluded.
         for _ in range(int(len(negative_files) * 2)): # Avoiding while loop
             # If enough matches have been found, exit for loop.
             if matches_count == num_negatives:
@@ -861,11 +862,9 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
 
     # Divide into training and evaluation, batch and prefetch.
-    train_dataset = dataset.take(round(dataset_take_size * 0.9))
-    val_dataset = dataset.skip(round(dataset_take_size * 0.1))
+    train_dataset = dataset.take(round(dataset_take_size / batch_size  * 0.9))
+    val_dataset = dataset.skip(round(dataset_take_size / batch_size  * 0.9))
 
-    #train_dataset = batch_fetch(train_dataset, batch_size)
-    #val_dataset = batch_fetch(val_dataset, batch_size)
     train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
     val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
 

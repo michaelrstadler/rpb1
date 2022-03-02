@@ -148,10 +148,11 @@ class TestSiameseCNN(unittest.TestCase):
                 diffs = np.vstack((diffs, diff))
             return diffs.mean(axis=0)
             
-        files = fake_files(100)
-        a,p,n = match_file_triplets(files, files, 5, 0, 10)
+        files1 = fake_files(100)
+        files2 = fake_files(100)
+        a,p,n = match_file_triplets(files1, files2, 5, 0, 10)
         dists1 = get_mean_param_diffs(a,n)
-        a,p,n = match_file_triplets(files, files, 5, 90, 100)
+        a,p,n = match_file_triplets(files1, files2, 5, 90, 100)
         dists2 = get_mean_param_diffs(a,n)
         for i in range(len(dists1)):
             self.assertGreater(dists2[i], dists1[i], 'Distances should be greater for 90-100 than 0-10.')
@@ -160,6 +161,18 @@ class TestSiameseCNN(unittest.TestCase):
         self.assertGreater(len(np.unique(a[:5])), 1, "Should be multiple non-identical files")
         self.assertGreater(len(np.unique(a[5:10])), 1, "Should be multiple non-identical files")
         self.assertGreater(len(np.unique(a[10:15])), 1, "Should be multiple non-identical files")
+
+        # Check that negatives aren't repeated:
+        a_n_matches = {}
+        for i in range(len(a)):
+            a_ = a[i]
+            n_ = n[i]
+            if a_ not in a_n_matches:
+                a_n_matches[a_] = [n_]
+            else:
+                self.assertTrue(n_ not in a_n_matches[a_], 'A negative image is repeated.')
+                a_n_matches[a_].append(n_)
+                
         
 #---------------------------------------------------------------------------
 
@@ -199,7 +212,7 @@ class TestSiameseCNN(unittest.TestCase):
                 for batch in val_dataset:
                     self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
 
-                # Nexty processess so negatives will always be the dissimilar images.
+                # Next processess so negatives will always be the dissimilar images.
                 train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=55, upper_margin=100, num_negatives=1, 
                     n_repeats=1, batch_size=1, rotate=False)
 
