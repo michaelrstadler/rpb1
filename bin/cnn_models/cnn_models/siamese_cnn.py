@@ -596,7 +596,7 @@ def preprocess_image(input, mip=False):
 
 #---------------------------------------------------------------------------
 def match_file_triplets(anchor_files, positive_files, num_negatives=5, 
-    lower_margin=0, upper_margin=10):
+    lower_margin=0, upper_margin=100):
     """Make file lists that match anchor-positive pairs with negative images
     within a margin of similarity.
 
@@ -671,14 +671,14 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         for f in files:
             p= get_params_from_filename(f)
             params = np.vstack([params, p])
-        
+
         # Calculate the mean and std for parameters.
         param_stds = params.std(axis=0)
         param_means = params.mean(axis=0)
 
         # Sample image pairs, get mean and std for distances.
         distances = []
-        for _ in range(5_000):
+        for _ in range(2_500):
             rs = np.random.RandomState()
             params1 = get_norm_params(rs.choice(files), param_means, param_stds)
             params2 = get_norm_params(rs.choice(files), param_means, param_stds)
@@ -688,7 +688,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         return param_means, param_stds, distances
     
 
-    negative_files = anchor_files + positive_files
+    negative_files = positive_files + anchor_files
     param_means, param_stds, dists_sampled = get_param_stats(anchor_files)
     dist_cutoff_upper = np.percentile(dists_sampled, upper_margin)
     dist_cutoff_lower = np.percentile(dists_sampled, lower_margin)
@@ -702,20 +702,31 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     a, p, n = [], [], []
 
     # Go through each anchor-positive pair, find negative matches.
+    rs = np.random.RandomState()
+    filecount = 0
     for i in range(len(anchor_files)):
+        # Print a helpful counter for monitoring progress.
+        if filecount % 5_000 == 0:
+            print(filecount)
+        filecount += 1
+
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
-        negative_files_shuf = np.random.RandomState().permutation(negative_files)
+        idxs_shuffled = rs.choice(len(negative_files), len(negative_files), replace=False)
+
         matches_count = 0
         # Search in order through shuffled negatives for images that are within 
         # the margins.
-        for f in negative_files_shuf:
+        for idx in idxs_shuffled:
             # If enough matches have been found, exit for loop.
             if matches_count == num_negatives:
                 break
-
+            if idx == i: # If this is the positive image.
+                continue
+            
+            f = negative_files[idx]
             f_params = get_norm_params(f, param_means, param_stds)
             dist = scipy.spatial.distance.euclidean(anchor_params, f_params)
-            if dist == 0:
+            if dist == 0: # If this is the anchor image.
                 continue
 
             if (dist >= dist_cutoff_lower) and (dist <= dist_cutoff_upper):
