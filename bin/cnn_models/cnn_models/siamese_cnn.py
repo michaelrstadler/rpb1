@@ -711,29 +711,38 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         filecount += 1
 
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
-        idxs_shuffled = rs.choice(len(negative_files), len(negative_files), replace=False)
-
         matches_count = 0
+        used_indexes = []
         # Search in order through shuffled negatives for images that are within 
         # the margins.
-        for idx in idxs_shuffled:
+        for _ in range(int(len(negative_files) * 2)): # Avoiding while loop
             # If enough matches have been found, exit for loop.
             if matches_count == num_negatives:
                 break
-            if idx == i: # If this is the positive image.
-                continue
+
+            # Get random index for negative files.
+            idx = rs.randint(len(negative_files))
             
+            # Skip rest of loop if this is the positive image.
+            if idx == i: 
+                continue
+
             f = negative_files[idx]
             f_params = get_norm_params(f, param_means, param_stds)
             dist = scipy.spatial.distance.euclidean(anchor_params, f_params)
-            if dist == 0: # If this is the anchor image.
+            # If this is the anchor image, skip rest of loop.
+            if dist == 0:
                 continue
-
+            
+            # Add triplet if negative image is within distance cutoffs and 
+            # hasn't been used.
             if (dist >= dist_cutoff_lower) and (dist <= dist_cutoff_upper):
-                a.append(anchor_files[i])
-                p.append(positive_files[i])
-                n.append(f)
-                matches_count += 1
+                if idx not in used_indexes:
+                    a.append(anchor_files[i])
+                    p.append(positive_files[i])
+                    n.append(f)
+                    used_indexes.append(idx)
+                    matches_count += 1
 
     # Shuffle lists using a shared order by zipping and unzipping.
     zipped = list(zip(a, p, n))
@@ -828,6 +837,7 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
     dataset_take_size = len(anchor_images) * n_repeats
     
     # Create datasets from these sorted files. These are in order and match in pairs.
+    print('Matching triplets...')
     anchor_files, positive_files, negative_files = match_file_triplets(anchor_images, positive_images, num_negatives, lower_margin=lower_margin, upper_margin=upper_margin)
 
     anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
