@@ -80,6 +80,11 @@ def make_datasets(folder, batch_size=32):
     params = params_l + params_r
     image_count = len(files)
 
+    # Get param means and stds:
+    param_np = np.array(params)
+    param_means = param_np.mean(axis=0)
+    param_stds = param_np.std(axis=0)
+
     # Build datasets, preprocess, divide into train/val, batch
     # and prefetch.
     dataset = tf.data.Dataset.from_tensor_slices((files, params))
@@ -96,9 +101,9 @@ def make_datasets(folder, batch_size=32):
     train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
     val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
 
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, param_means, param_stds
 
-def build_cnn(target_shape, nparams, nlayers):
+def build_cnn(target_shape, nparams, nlayers, param_means, param_stds):
     """Build cnn model."""
     base_cnn = cn.make_base_cnn_3d(target_shape, 'base_cnn', nlayers=nlayers)
     flatten = layers.Flatten()(base_cnn.output)
@@ -107,7 +112,10 @@ def build_cnn(target_shape, nparams, nlayers):
     dense2 = layers.Dense(256, activation="relu")(dense1)
     dense2 = layers.BatchNormalization()(dense2)
     output = layers.Dense(nparams)(dense2)
-    model = Model(base_cnn.input, output, name="Model")
+    # For surpassing reasons, must add a dummy axis for param_means.
+    param_means = np.expand_dims(param_means, axis=0)
+    output_scaled = tf.keras.layers.Multiply()([output, param_means])
+    model = Model(base_cnn.input, output_scaled, name="Model")
     return model
 
 def main():
@@ -130,16 +138,16 @@ def main():
 
     # Make datasets.
     target_shape, nparams = get_target_shape_nparams(cache_dir)
-    train_dataset, val_dataset = make_datasets(cache_dir)
+    train_dataset, val_dataset, param_means, param_stds = make_datasets(cache_dir)
 
     # Construct model.
     if distributed:
         mirrored_strategy = tf.distribute.MirroredStrategy()
         with mirrored_strategy.scope():
-            model = build_cnn(target_shape, nparams, nlayers)
+            model = build_cnn(target_shape, nparams, nlayers, param_means, param_stds)
 
     else:
-        model = build_cnn(target_shape, nparams, nlayers)
+        model = build_cnn(target_shape, nparams, nlayers, param_means, param_stds)
 
     # Train model.
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
