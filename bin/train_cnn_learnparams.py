@@ -149,7 +149,6 @@ def main():
     model.compile(
         loss="mean_absolute_percentage_error",
         optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
-        metrics=["acc"],
     )
 
     history = model.fit(
