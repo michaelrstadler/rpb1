@@ -156,7 +156,6 @@ def main():
         validation_data=val_dataset,
         epochs=epochs,
         shuffle=True,
-        verbose=2
     )
 
     # Save everything.
