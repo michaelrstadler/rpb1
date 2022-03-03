@@ -80,10 +80,12 @@ def make_datasets(folder, batch_size=32):
     params = params_l + params_r
     image_count = len(files)
 
-    # Get param means and stds:
-    param_np = np.array(params)
-    param_means = param_np.mean(axis=0)
-    param_stds = param_np.std(axis=0)
+    # Get param means and stds, scale params (z-scores):
+    params = np.array(params)
+    param_means = params.mean(axis=0)
+    param_stds = params.std(axis=0)
+    params_scaled = (params - params.mean(axis=0)) / params.std(axis=0)
+    params = list(params_scaled)
 
     # Build datasets, preprocess, divide into train/val, batch
     # and prefetch.
@@ -103,7 +105,7 @@ def make_datasets(folder, batch_size=32):
 
     return train_dataset, val_dataset, param_means, param_stds
 
-def build_cnn(target_shape, nparams, nlayers, param_means, param_stds):
+def build_cnn(target_shape, nparams, nlayers):
     """Build cnn model."""
     base_cnn = cn.make_base_cnn_3d(target_shape, 'base_cnn', nlayers=nlayers)
     flatten = layers.Flatten()(base_cnn.output)
@@ -112,10 +114,7 @@ def build_cnn(target_shape, nparams, nlayers, param_means, param_stds):
     dense2 = layers.Dense(256, activation="relu")(dense1)
     dense2 = layers.BatchNormalization()(dense2)
     output = layers.Dense(nparams)(dense2)
-    # For surpassing reasons, must add a dummy axis for param_means.
-    param_means = np.expand_dims(param_means, axis=0)
-    output_scaled = tf.keras.layers.Multiply()([output, param_means])
-    model = Model(base_cnn.input, output_scaled, name="Model")
+    model = Model(base_cnn.input, output, name="Model")
     return model
 
 def main():
@@ -144,10 +143,10 @@ def main():
     if distributed:
         mirrored_strategy = tf.distribute.MirroredStrategy()
         with mirrored_strategy.scope():
-            model = build_cnn(target_shape, nparams, nlayers, param_means, param_stds)
+            model = build_cnn(target_shape, nparams, nlayers)
 
     else:
-        model = build_cnn(target_shape, nparams, nlayers, param_means, param_stds)
+        model = build_cnn(target_shape, nparams, nlayers)
 
     # Train model.
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -155,7 +154,7 @@ def main():
     )
 
     model.compile(
-        loss="mean_absolute_percentage_error",
+        loss="mean_squared_error",
         optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
     )
 
@@ -166,8 +165,15 @@ def main():
         shuffle=True,
     )
 
+    # Rescale the outputs
+    param_means = np.expand_dims(param_means, axis=0)
+    param_stds = np.expand_dims(param_stds, axis=0)
+    output_scaled = tf.keras.layers.Multiply()([model.output, param_stds])
+    output_scaled = tf.keras.layers.Add()([output_scaled, param_means])
+    model_scaled = Model(model.input, output_scaled, name="ModelScaled")
+
     # Save everything.
-    model.save_weights(final_checkpoint_path)
+    model_scaled.save_weights(final_checkpoint_path)
 
     with open(history_path, 'wb') as history_file:
         pickle.dump(history.history, history_file)
