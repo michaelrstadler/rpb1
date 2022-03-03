@@ -29,6 +29,8 @@ def parse_args():
             help="Optional: decay rate for learning rate (default: 0.95)")
     parser.add_argument("-s", "--decay_steps", dest="decay_steps", default=100_000, type=int,
             help="Optional: decay steps for learning rate scheduler (default: 1e5)")
+    parser.add_argument("-t", "--training_split", dest="training_split", default=0.9, type=float,
+            help="Optional: Fraction of data to take for training (default: 0.9 [0.1 for validation])")
     parser.add_argument("-d", action="store_true", dest="distributed",
             help="Optional: use distributed (multi-GPU) mode")
     
@@ -47,7 +49,7 @@ def get_target_shape_nparams(dir_):
     nparams = len(imfile.split('_')) - 2
     return shape, nparams
 
-def make_datasets(folder, batch_size=32):
+def make_datasets(folder, training_split, batch_size=32):
     """Make training and validation datasets"""
     def get_files_params(subfolder):
         """Get filenames, extract parameters."""
@@ -94,8 +96,8 @@ def make_datasets(folder, batch_size=32):
 
     dataset = dataset.map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
     
-    train_dataset = dataset.take(round(image_count * 0.9))
-    val_dataset = dataset.skip(round(image_count * 0.9))
+    train_dataset = dataset.take(round(image_count * training_split))
+    val_dataset = dataset.skip(round(image_count * training_split))
     
     train_dataset = train_dataset.batch(32)
     val_dataset = val_dataset.batch(32)
@@ -128,6 +130,7 @@ def main():
     decay_steps = args.decay_steps
     model_name = args.model_name
     epochs = args.epochs
+    training_split = args.training_split
 
     # Set up paths.
     cache_dir = Path(image_folder)
@@ -137,7 +140,7 @@ def main():
 
     # Make datasets.
     target_shape, nparams = get_target_shape_nparams(cache_dir)
-    train_dataset, val_dataset, param_means, param_stds = make_datasets(cache_dir)
+    train_dataset, val_dataset, param_means, param_stds = make_datasets(cache_dir, training_split)
 
     # Construct model.
     if distributed:
