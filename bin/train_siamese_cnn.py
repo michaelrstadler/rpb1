@@ -138,6 +138,7 @@ if initial_weights_file is not None:
 siamese_model.compile(optimizer=tf.keras.optimizers.Adam(initial_learning_rate))
 final_checkpoint_path = os.path.join(train_data_folder, 'checkpoint_final_' + model_name)
 best_checkpoint_path = os.path.join(train_data_folder, 'checkpoint_best_' + model_name)
+log_path = os.path.join(train_data_folder, model_name + '_log.txt')
 history_path = os.path.join(train_data_folder, 'history_' + model_name + '.pkl')
 
 # Go through each iteration in epoch_nums individually.
@@ -182,6 +183,10 @@ embedding.save_weights(final_checkpoint_path)
 with open(history_path, 'wb') as history_file:
     pickle.dump(histories, history_file)
 
+with open(log_path, 'w') as log_file:
+    log_file.write(str(options))
+
 t2 = time()
 sys.stdout.write('training time: ' + str(t2 - t1) + '\n')
 sys.stdout.flush()
+
