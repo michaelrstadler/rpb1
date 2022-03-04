@@ -637,10 +637,11 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     f_kwargs['outfolder'] = folder
     f_kwargs['nreps'] = nreps
     
+    rs = np.random.RandomState()
     for _ in range(nsims):
         f_kwargs_loc = f_kwargs.copy()
         # Get random HLB coordinates.
-        hlb_coords_rand = hlb_coords_possible[np.random.RandomState().choice(num_hlb_coords, nreps * 2)]
+        hlb_coords_rand = hlb_coords_possible[rs.choice(num_hlb_coords, nreps * 2)]
         f_kwargs_loc['hlb_coords'] = hlb_coords_rand
         arglist.append(f_kwargs_loc)
     print('arglist done')

@@ -678,8 +678,10 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
         # Sample image pairs, get mean and std for distances.
         distances = []
-        for _ in range(10_000):
-            rs = np.random.RandomState()
+        # Number to sample: expected number to sample to get 1 within margins * 250
+        num_to_sample = int(100 / (upper_margin - lower_margin) * 250)
+        rs = np.random.RandomState()
+        for _ in range(num_to_sample):
             params1 = get_norm_params(rs.choice(files), param_means, param_stds)
             params2 = get_norm_params(rs.choice(files), param_means, param_stds)
             dist = scipy.spatial.distance.euclidean(params1, params2)
