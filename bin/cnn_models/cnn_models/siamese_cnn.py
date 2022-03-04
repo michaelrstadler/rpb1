@@ -706,7 +706,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     filecount = 0
     for i in range(len(anchor_files)):
         # Print a helpful counter for monitoring progress.
-        if filecount % 5_000 == 0:
+        if filecount % 10_000 == 0:
             print(filecount)
         filecount += 1
 
