@@ -678,7 +678,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
         # Sample image pairs, get mean and std for distances.
         distances = []
-        for _ in range(2_500):
+        for _ in range(10_000):
             rs = np.random.RandomState()
             params1 = get_norm_params(rs.choice(files), param_means, param_stds)
             params2 = get_norm_params(rs.choice(files), param_means, param_stds)
