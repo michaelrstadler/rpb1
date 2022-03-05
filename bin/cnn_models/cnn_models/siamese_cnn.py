@@ -712,6 +712,11 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         filecount += 1
 
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
+
+        negative_file_params = []
+        for f in negative_files:
+            negative_file_params.append(get_norm_params(f, param_means, param_stds))
+
         matches_count = 0
         used_indexes = []
         # Try randomly drawn negative images to find images that fall within
@@ -729,9 +734,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             if idx == i: 
                 continue
 
-            f = negative_files[idx]
-            f_params = get_norm_params(f, param_means, param_stds)
-            dist = scipy.spatial.distance.euclidean(anchor_params, f_params)
+            dist = scipy.spatial.distance.euclidean(anchor_params, negative_file_params[idx])
             # If this is the anchor image, skip rest of loop.
             if dist == 0:
                 continue
@@ -742,7 +745,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
                 if idx not in used_indexes:
                     a.append(anchor_files[i])
                     p.append(positive_files[i])
-                    n.append(f)
+                    n.append(negative_files[idx])
                     used_indexes.append(idx)
                     matches_count += 1
 

@@ -30,11 +30,13 @@ def parse_options():
                       help="Folder containing training data in folders labeled left and right.")
     parser.add_option("-n", "--model_name", dest="model_name",
                       help="Name for model -- is appended to folder.")
+    parser.add_option("-p", "--triplets_file", dest="triplets_file",
+                      help="CSV file with file triplets.")
     parser.add_option("-e", "--num_epochs", dest="num_epochs",
                       help="Number of epochs to train for. Either a single number or a comma-separated " +
                        "list of epochs for curriculum learning.")
-    parser.add_option("-z", "--dataset_size", dest="dataset_size", default=1,
-                      help="Size of the dataset used in each epoch as a multiple of the number of input files.")
+    parser.add_option("-z", "--epoch_size", dest="epoch_size",
+                      help="Size of the dataset used in each epoch.")
     parser.add_option("-y", "--num_layers", dest="nlayers", default=18,
                       help="Number of layers in resnet 3D CNN (8, 18, or 34, default=18)")
     parser.add_option("-r", "--initial_learning_rate", dest="initial_learning_rate", default=0.0001,
@@ -43,14 +45,6 @@ def parse_options():
                       help="Exponential decay factor R for learning rate lr = lr * exp(-R) (default=0.05)")
     parser.add_option("-c", "--learning_rate_constant_epochs", dest="learning_rate_constant_epochs", default=10,
                       help="Number of epochs to train at initial rate before beginning exponential decay (default=10)")
-    parser.add_option("-w", "--lower_margin", dest="lower_margin", default='0',
-                      help="Single number or comma-separated list of lower margins for curriculum learning, " +
-                        "must be same length as epochs list (default=0)")
-    parser.add_option("-u", "--upper_margin", dest="upper_margin", default='100',
-                      help="Single number or comma-separated list of upper margins for curriculum learning, " +
-                        "must be same length as epochs list (default=100)")
-    parser.add_option("-p", "--num_neg_pairs", dest="num_neg_pairs", default=0,
-                      help="Number of possible negative pairings to generate for each anchor-positive pair (default is 3 * dataset_size")
     parser.add_option("-b", "--batch_size", dest="batch_size", default=32,
                       help="Batch size")
     parser.add_option("-W", "--initial_weights_file", dest="initial_weights_file", default=None,
@@ -96,26 +90,21 @@ def scheduler(rel_epoch, lr, start_epoch, constant_epochs, learning_rate_exp):
 # Process all options.
 options = parse_options()
 train_data_folder = options.training_data_folder
+triplets_files = options.triplets_file.split(',')
 model_name = options.model_name
 epoch_nums = [int(x) for x in options.num_epochs.split(',')]
-dataset_size = int(options.dataset_size)
+epoch_size = int(options.epoch_size)
 nlayers = int(options.nlayers)
 initial_learning_rate = float(options.initial_learning_rate)
 learning_rate_exp = float(options.learning_rate_exp)
 learning_rate_constant_epochs = int(options.learning_rate_constant_epochs)
-lower_margins = [float(x) for x in options.lower_margin.split(',')]
-upper_margins = [float(x) for x in options.upper_margin.split(',')]
-num_neg_pairs = int(options.num_neg_pairs)
 batch_size = int(options.batch_size)
 rotate = options.rotate
 distributed = options.distributed
 initial_weights_file = options.initial_weights_file
 
-if num_neg_pairs == 0:
-    num_neg_pairs = 3 * dataset_size
-
-if (len(epoch_nums) != len(lower_margins)) or (len(lower_margins) != len(upper_margins)):
-    raise ValueError('epoch_nums, lower_margins, and upper_margins must be same length.')
+if len(epoch_nums) != len(triplets_files):
+    raise ValueError('Epoch number list and triplets file lists are diffrent lengths.')
 
 # Set paths and shape.
 model_save_path = os.path.join(train_data_folder, 'model_' + model_name)
@@ -146,15 +135,11 @@ histories = []
 epoch_count = 1
 for i in range(len(epoch_nums)):
     epoch_num = epoch_nums[i]
-    lower_margin = lower_margins[i]
-    upper_margin = upper_margins[i]
-
+    triplets_file = triplets_files[i]
     # Generate datasets.
-    train_dataset, val_dataset = cn.make_triplet_inputs(cache_dir, 
-        lower_margin=lower_margin, 
-        upper_margin=upper_margin, 
-        num_negatives=num_neg_pairs,
-        n_repeats=dataset_size,
+    train_dataset, val_dataset = cn.make_triplet_inputs( 
+        triplets_file, 
+        epoch_size,
         batch_size=batch_size,
         rotate=rotate)
 

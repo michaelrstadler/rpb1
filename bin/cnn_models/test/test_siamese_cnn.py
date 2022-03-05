@@ -2,6 +2,9 @@ import unittest
 import numpy as np
 import tempfile
 from flymovie.load_save import save_pickle
+import os
+import gzip
+from pathlib import Path
 from cnn_models.siamese_cnn import *
 
 def count_params(variables):
@@ -177,10 +180,18 @@ class TestSiameseCNN(unittest.TestCase):
 #---------------------------------------------------------------------------
 
     def test_make_triplet_inputs(self):
+        def save_temp_csv(input, file):
+            a, p, n = input
+            with gzip.open(file, 'wt') as outfile:
+                for i in range(len(a)):
+                    outfile.write(','.join([a[i], p[i], n[i]]) + '\n')
+
         # Make temp directory with left and right files.
         with tempfile.TemporaryDirectory() as topdir:
-            os.mkdir(os.path.join(topdir, 'left'))
-            os.mkdir(os.path.join(topdir, 'right'))
+            left_dir = os.path.join(topdir, 'left')
+            right_dir = os.path.join(topdir, 'right')
+            os.mkdir(left_dir)
+            os.mkdir(right_dir)
 
             # Fill with dummy images, of two types marked by altering a different pixel
             # in each (they'll be normalized remember.). Save them with parameters clearly
@@ -199,32 +210,44 @@ class TestSiameseCNN(unittest.TestCase):
             save_pickle(im2, os.path.join(topdir, 'left', 'ddd_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_rep0.pkl'))
             save_pickle(im2, os.path.join(topdir, 'right', 'ddd_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_1.5_rep1.pkl'))
 
-            cache_dir = Path(topdir)
+            anchor_files = [x for x in os.listdir(left_dir) if x[0] != '.']
+            positive_files = [x for x in os.listdir(right_dir) if x[0] != '.']
 
+            anchor_files = sorted([os.path.join(left_dir, f) for f in anchor_files])
+            positive_files = sorted([os.path.join(right_dir, f) for f in positive_files])
+
+            temp_csv = os.path.join(topdir, 'temp_triplets.csv.gz')
             for _ in range(4):
                 # First processess so negatives will always be the similar images.
-                train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=0, upper_margin=45, num_negatives=1, 
-                    n_repeats=1, batch_size=1, rotate=False)
 
+                save_temp_csv(
+                    match_file_triplets(anchor_files, positive_files, num_negatives=1, lower_margin=0, upper_margin=35),
+                    temp_csv
+                    )
+
+                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False)
+            
                 for batch in train_dataset:
                     self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
                     
                 for batch in val_dataset:
                     self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
-
+            
                 # Next processess so negatives will always be the dissimilar images.
-                train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=55, upper_margin=100, num_negatives=1, 
-                    n_repeats=1, batch_size=1, rotate=False)
+                save_temp_csv(
+                    match_file_triplets(anchor_files, positive_files, num_negatives=1, lower_margin=65, upper_margin=100),
+                    temp_csv
+                    )
+
+                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False)
 
                 for batch in train_dataset:
                     self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
                     
                 for batch in val_dataset:
                     self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
-
-            # Run it in a few more modes and make sure it doesn't explode.
-            train_dataset, val_dataset = make_triplet_inputs(cache_dir, lower_margin=22, upper_margin=89, num_negatives=1, 
-                    n_repeats=1, batch_size=1, rotate=True)
+            # Run it in rotate mode and make sure it doesn't explode.
+            train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=True)
 
 if __name__ == '__main__':
 	unittest.main()
