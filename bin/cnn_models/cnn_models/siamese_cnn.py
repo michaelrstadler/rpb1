@@ -702,6 +702,11 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     # Initialize lists to contain ordered image files.
     a, p, n = [], [], []
 
+    # Get normalized params for negative files into list.
+    negative_file_params = []
+    for f in negative_files:
+        negative_file_params.append(get_norm_params(f, param_means, param_stds))
+
     # Go through each anchor-positive pair, find negative matches.
     rs = np.random.RandomState()
     filecount = 0
@@ -712,10 +717,6 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         filecount += 1
 
         anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
-
-        negative_file_params = []
-        for f in negative_files:
-            negative_file_params.append(get_norm_params(f, param_means, param_stds))
 
         matches_count = 0
         used_indexes = []
