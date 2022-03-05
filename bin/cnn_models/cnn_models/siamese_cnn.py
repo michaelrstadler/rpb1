@@ -626,6 +626,10 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     and runs in constant time with respect to the cutoffs/margins. Upshot:
     matrix math is fast as hell on CPUs.
 
+    Second note: It still scales terribly with size, though it probably
+    just doesn't matter. The searching could be chunked to do better
+    on this count.
+
     Args:
         anchor_files: file path
             Iterable of files containing anchor images
@@ -694,6 +698,23 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
         return params
 
+    def get_good_idxs(ref_params, params, dist_cutoff_lower, 
+                dist_cutoff_upper, chunk_size, target_num, rs):
+        """Search chunks of param matrix to find indexes of rows that are
+        within cutoff distances of reference row."""
+        shuffled_idxs = rs.choice(np.arange(params.shape[0]), params.shape[0],replace=False)
+        good_idxs = np.zeros(0)
+        for start in range(0, len(shuffled_idxs), chunk_size):
+            chunk_idxs = shuffled_idxs[start:start + chunk_size]
+            distances = dist_row_to_all(ref_params, params[chunk_idxs, :])
+            good_idxs_chunk = chunk_idxs[np.where((distances != 0) & (distances >= dist_cutoff_lower) 
+                    & (distances <= dist_cutoff_upper))[0]]
+            good_idxs = np.concatenate([good_idxs, good_idxs_chunk])
+            if len(good_idxs) >= target_num:
+                break
+        return [int(x) for x in good_idxs[:target_num]]
+
+
     negative_files = positive_files + anchor_files
 
     # Get parameters from anchor and negative files.
@@ -714,7 +735,8 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
     # Get the upper and lower cutoffs from the sampled distribution of distances.
     dist_cutoff_lower, dist_cutoff_upper = sample_distances(anchor_params, lower_margin, upper_margin)
-    
+    chunk_size = int(100 / (upper_margin - lower_margin) * 10)
+
     # Initialize lists to contain ordered image files.
     a, p, n = [], [], []
 
@@ -728,20 +750,12 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             sys.stdout.flush()
         filecount += 1
 
-        # Get distance between this image and all negative candidates, get indexes of 
-        # images that are within allowable distances, randomly choose from these indexes.
-        distances = dist_row_to_all(anchor_params[i, :], negative_params)
-        possible_idxs = np.where((distances >= dist_cutoff_lower) & (distances <= dist_cutoff_upper))[0]
-        idxs = rs.choice(possible_idxs, np.min([len(possible_idxs), num_negatives + 2]), replace=False)
+        # Get random indexes of rows that are within distance cutoff.
+        idxs = get_good_idxs(anchor_params[i, :], negative_params, dist_cutoff_lower, 
+                dist_cutoff_upper, chunk_size, num_negatives, rs)
 
         # Add files of selected triplets.
         for idx in idxs:
-            # Skip if this is the positive image.
-            if idx == i: 
-                continue
-            # Skip if this is the anchor image.
-            if distances[idx] == 0:
-                continue
             a.append(anchor_files[i])
             p.append(positive_files[i])
             n.append(negative_files[idx])
