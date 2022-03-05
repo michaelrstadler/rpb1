@@ -35,6 +35,7 @@ import scipy.spatial
 import scipy.ndimage as ndimage
 import tensorflow as tf
 import random
+import sys
 from tensorflow.keras import applications
 from tensorflow.keras import layers
 from tensorflow.keras import losses
@@ -646,6 +647,20 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             images
 
     """
+    def dist_row_to_all(x, mat):
+        return np.sqrt(np.sum(((mat - x) ** 2), axis=1))
+
+    def sample_distances(params, lower_margin, upper_margin):
+        distances = np.zeros(0)
+        idxs = np.random.RandomState().choice(np.arange(params.shape[0]), size=np.min([params.shape[0], 1_000]), replace=False)
+        for idx in idxs:
+            distance = dist_row_to_all(params[idx, :], params)
+            distances = np.concatenate([distances, distance])
+
+        lower_cutoff = np.percentile(distances, lower_margin)
+        upper_cutoff = np.percentile(distances, upper_margin)
+        return lower_cutoff, upper_cutoff
+
     def get_params_from_filename(filepath):
         """Extract simulation parameters from filename as floats."""
         filename = filepath.split('/')[-1]
@@ -658,11 +673,8 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         p= get_params_from_filename(filename)
         return (p - means) / stds
 
-    def get_param_stats(files):
-        """Get the mean and std for simulation parameters across the dataset,
-        and get the mean and std for the euclidean distances between parameters 
-        of sampled image pairs."""
-
+    def get_params(files):
+        """"""
         num_params = len(get_params_from_filename(files[-1]))
         params = np.ndarray((0, num_params))
 
@@ -671,84 +683,60 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             p= get_params_from_filename(f)
             params = np.vstack([params, p])
 
-        # Calculate the mean and std for parameters.
-        param_stds = params.std(axis=0)
-        param_means = params.mean(axis=0)
+        return params
 
-        # Sample image pairs, get mean and std for distances.
-        distances = []
-        # Number to sample: expected number to sample to get 1 within margins * 250
-        num_to_sample = int(100 / (upper_margin - lower_margin) * 250)
-        rs = np.random.RandomState()
-        for _ in range(num_to_sample):
-            params1 = get_norm_params(rs.choice(files), param_means, param_stds)
-            params2 = get_norm_params(rs.choice(files), param_means, param_stds)
-            dist = scipy.spatial.distance.euclidean(params1, params2)
-            distances.append(dist)
-
-        return param_means, param_stds, distances
-    
 
     negative_files = positive_files + anchor_files
-    param_means, param_stds, dists_sampled = get_param_stats(anchor_files)
-    dist_cutoff_upper = np.percentile(dists_sampled, upper_margin)
-    dist_cutoff_lower = np.percentile(dists_sampled, lower_margin)
 
+    # Get parameters from anchor and negative files.
+    anchor_params = get_params(anchor_files)
+    negative_params = get_params(negative_files)
+
+    # Determine the mean and std of the entire dataset.
+    param_means = np.mean(negative_params, axis=0)
+    param_stds = np.std(negative_params, axis=0)
     # In case any parameters are invariant, set std to 1 to avoid divide by zero.
     # Any non-zero value works, since the distances will all be 0, and when 
     # normalized will be (0 - 0) / 1 = 0, which is the desired behavior.
     param_stds[param_stds == 0] = 1
+
+    # Normalize anchor and negative parameters.
+    anchor_params = (anchor_params - param_means) / param_stds
+    negative_params = (negative_params - param_means) / param_stds
+
+    # Get the upper and lower cutoffs from the sampled distribution of distances.
+    dist_cutoff_lower, dist_cutoff_upper = sample_distances(anchor_params, lower_margin, upper_margin)
     
     # Initialize lists to contain ordered image files.
     a, p, n = [], [], []
 
-    # Get normalized params for negative files into list.
-    negative_file_params = []
-    for f in negative_files:
-        negative_file_params.append(get_norm_params(f, param_means, param_stds))
-
     # Go through each anchor-positive pair, find negative matches.
     rs = np.random.RandomState()
-    filecount = 0
+    filecount = 1
     for i in range(len(anchor_files)):
         # Print a helpful counter for monitoring progress.
         if filecount % 10_000 == 0:
-            print(filecount)
+            sys.stdout.write(str(filecount))
+            sys.stdout.flush()
         filecount += 1
 
-        anchor_params = get_norm_params(anchor_files[i], param_means, param_stds)
+        # Get distance between this image and all negative candidates, get indexes of 
+        # images that are within allowable distances, randomly choose from these indexes.
+        distances = dist_row_to_all(anchor_params[i, :], negative_params)
+        possible_idxs = np.where((distances >= dist_cutoff_lower) & (distances <= dist_cutoff_upper))[0]
+        idxs = rs.choice(possible_idxs, np.min([len(possible_idxs), num_negatives + 2]),replace=False)
 
-        matches_count = 0
-        used_indexes = []
-        # Try randomly drawn negative images to find images that fall within
-        # distance cutoffs, check to make sure negatives aren't repeated and 
-        # that the anchor and positive image are excluded.
-        for _ in range(int(len(negative_files) * 2)): # Avoiding while loop
-            # If enough matches have been found, exit for loop.
-            if matches_count == num_negatives:
-                break
-
-            # Get random index for negative files.
-            idx = rs.randint(len(negative_files))
-            
-            # Skip rest of loop if this is the positive image.
+        # Add files of selected triplets.
+        for idx in idxs:
+            # Skip if this is the positive image.
             if idx == i: 
                 continue
-
-            dist = scipy.spatial.distance.euclidean(anchor_params, negative_file_params[idx])
-            # If this is the anchor image, skip rest of loop.
-            if dist == 0:
+            # Skip if this is the anchor image.
+            if distances[idx] == 0:
                 continue
-            
-            # Add triplet if negative image is within distance cutoffs and 
-            # hasn't been used.
-            if (dist >= dist_cutoff_lower) and (dist <= dist_cutoff_upper):
-                if idx not in used_indexes:
-                    a.append(anchor_files[i])
-                    p.append(positive_files[i])
-                    n.append(negative_files[idx])
-                    used_indexes.append(idx)
-                    matches_count += 1
+            a.append(anchor_files[i])
+            p.append(positive_files[i])
+            n.append(negative_files[idx])
 
     # Shuffle lists using a shared order by zipping and unzipping.
     zipped = list(zip(a, p, n))
