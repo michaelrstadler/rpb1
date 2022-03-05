@@ -610,18 +610,21 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     Images are selected by the following algorithm:
         1. Extract simulation parameters from all file names.
         2. Normalize each parameter (Z-scores)
-        3. Randomly sample image pairs, calculate the euclidean distance
-            between parameters for each pair, then get distance cutoffs 
-            based on percentiles from this distribution.
-        4. For each anchor-positive pair, randomly shuffle negative images.
-        5. Search in order through shuffled negatives until a negative image
-            is found whose normalized (by mean and SD found in 3) distance
-            is within the bounds defined by margin parameters, 
-        6. Repeat 5 until num_negatives is reached
-    
-    Programming note: the slowest part of this (normally) is the sampling in 
-    get_param_stats, which is fine, but I think fewer pairs can be sampled
-    and still get good stats if the timing is a real problem.
+        3. Determine distribution of distances by randomly sampling
+            some images (up to 1000), calculating the distances
+            between these sampled images and all other images, 
+            and then taking percentiles of the resulting
+            distribution.
+        4. For each anchor-positive pair, calculate distance to all
+            potential negative images.
+        5. Randomly select the indicated number of negative images
+            from the potential list.
+
+    Programming note: I tried writing this in ways that didnt' involve
+    all the one-vs-all calculations, but it always ran slow and scaled
+    poorly. This version takes about 20 minutes to run on 100,000 samples
+    and runs in constant time with respect to the cutoffs/margins. Upshot:
+    matrix math is fast as hell on CPUs.
 
     Args:
         anchor_files: file path
@@ -648,9 +651,14 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
     """
     def dist_row_to_all(x, mat):
+        """Calculate euclidean distance between a 1d vector and 
+        all rows of a matrix."""
         return np.sqrt(np.sum(((mat - x) ** 2), axis=1))
 
     def sample_distances(params, lower_margin, upper_margin):
+        """Sample up to 1000 rows, calculate the distance to all other
+        rows, collect the distances, return upper and lower cutoffs
+        from percentiles."""
         distances = np.zeros(0)
         idxs = np.random.RandomState().choice(np.arange(params.shape[0]), size=np.min([params.shape[0], 1_000]), replace=False)
         for idx in idxs:
@@ -674,7 +682,8 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         return (p - means) / stds
 
     def get_params(files):
-        """"""
+        """Extract parameters from a list of files, return as 
+        numpy array."""
         num_params = len(get_params_from_filename(files[-1]))
         params = np.ndarray((0, num_params))
 
@@ -684,7 +693,6 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             params = np.vstack([params, p])
 
         return params
-
 
     negative_files = positive_files + anchor_files
 
@@ -716,7 +724,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     for i in range(len(anchor_files)):
         # Print a helpful counter for monitoring progress.
         if filecount % 10_000 == 0:
-            sys.stdout.write(str(filecount))
+            sys.stdout.write(str(filecount) + '\n')
             sys.stdout.flush()
         filecount += 1
 
@@ -724,7 +732,7 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         # images that are within allowable distances, randomly choose from these indexes.
         distances = dist_row_to_all(anchor_params[i, :], negative_params)
         possible_idxs = np.where((distances >= dist_cutoff_lower) & (distances <= dist_cutoff_upper))[0]
-        idxs = rs.choice(possible_idxs, np.min([len(possible_idxs), num_negatives + 2]),replace=False)
+        idxs = rs.choice(possible_idxs, np.min([len(possible_idxs), num_negatives + 2]), replace=False)
 
         # Add files of selected triplets.
         for idx in idxs:
