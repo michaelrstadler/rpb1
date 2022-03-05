@@ -11,6 +11,7 @@ import string
 from pathlib import Path
 import argparse
 import random
+import gzip
 
 def parse_args():
     parser = argparse.ArgumentParser(description='.')
@@ -46,11 +47,13 @@ positive_files = sorted([str(positive_images_path / f) for f in positive_files])
 file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
 # Generate file triplets.
-output = cn.match_file_triplets(anchor_files, positive_files, num_negatives=args.num_triplets, 
+a, p, n = cn.match_file_triplets(anchor_files, positive_files, num_negatives=args.num_triplets, 
 lower_margin=args.lower_margin, upper_margin=args.upper_margin)
 
 # Save.
 outfilepath = os.path.join(data_dir, 'filetriplets_' + str(args.lower_margin) + 
-        '_' + str(args.upper_margin) + '_' + file_id + '.pkl')
-with open(outfilepath, 'wb') as outfile:
-    pickle.dump(output, outfile)
+        '_' + str(args.upper_margin) + '_' + file_id + '.csv.gz')
+
+with gzip.open(outfilepath, 'wt') as outfile:
+    for i in range(len(a)):
+        outfile.write(','.join([a[i], p[i], n[i]]) + '\n')
