@@ -12,6 +12,7 @@ from pathlib import Path
 import argparse
 import random
 import gzip
+from time import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description='.')
@@ -26,6 +27,8 @@ def parse_args():
     
     args = parser.parse_args()
     return args
+
+t1 = time()
 
 args = parse_args()
 
@@ -57,3 +60,6 @@ outfilepath = os.path.join(data_dir, 'filetriplets_' + str(args.lower_margin) +
 with gzip.open(outfilepath, 'wt') as outfile:
     for i in range(len(a)):
         outfile.write(','.join([a[i], p[i], n[i]]) + '\n')
+
+t2 = time()
+print(t2 - t1)
