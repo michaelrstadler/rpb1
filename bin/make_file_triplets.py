@@ -52,7 +52,7 @@ lower_margin=args.lower_margin, upper_margin=args.upper_margin)
 
 # Save.
 outfilepath = os.path.join(data_dir, 'filetriplets_' + str(args.lower_margin) + 
-        '_' + str(args.upper_margin) + '_' + file_id + '.csv.gz')
+        '_' + str(args.upper_margin) + '_' + str(args.num_triplets) + '_' + file_id + '.csv.gz')
 
 with gzip.open(outfilepath, 'wt') as outfile:
     for i in range(len(a)):

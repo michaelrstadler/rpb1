@@ -28,14 +28,13 @@ __version__ = '1.1.0'
 __author__ = 'Michael Stadler'
 
 import numpy as np
-import os
 import random
 import pickle
+import pandas as pd
 import scipy.spatial
 import scipy.ndimage as ndimage
 import tensorflow as tf
 import random
-from pathlib import Path
 from tensorflow.keras import applications
 from tensorflow.keras import layers
 from tensorflow.keras import losses
@@ -754,26 +753,17 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     return a, p, n
 
 #---------------------------------------------------------------------------
-def make_triplet_inputs(folder, lower_margin=0, upper_margin=100, 
-    num_negatives=5, n_repeats=1, batch_size=32, rotate=False):
+def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
     """Create an input dataset of anchor-positive-negative triplets.
 
     Args:
         folder: Path object
             Folder containing left and right subfolders with matching images
-        upper_margin: number
-            Percentile defining the upper limit of image similarity
-            for drawing negative images 
-        lower_margin: number
-            Percentile defining the lower limit of image similarity
-            for drawing negative images
-        num_negatives: int
-            Number of negative images to match with each A-P pair. Defines
-            number of possible triplets per A-P pair.
-        n_repeats: int
-            Number of times dataset is repeated in each epoch, or the mean
-            number of triplets for each A-P pair that will be seen in each 
-            epoch.
+        triplets_file: str
+            CSV file containing file triplets (anchor, positive, negative)
+        epoch_size: int
+            Number of triplets to use in each training epoch (randomly sampled
+            from triplets in file)
         batch_size: int
             Batch size
         rotate: bool
@@ -821,27 +811,16 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         return (anchor, positive, negative)
 
 
-    # Set up input directories.
-    cache_dir=folder
-    anchor_images_path = cache_dir / "left"
-    positive_images_path = cache_dir / "right"
-
-    # We need to make sure both the anchor and positive images are loaded in
-    # sorted order so we can match them together.
-    anchor_images = sorted(
-        [str(anchor_images_path / f) for f in os.listdir(anchor_images_path)]
-    )
-
-    positive_images = sorted(
-        [str(positive_images_path / f) for f in os.listdir(positive_images_path)]
-    )
-
-    dataset_full_size = len(anchor_images) * num_negatives
-    dataset_take_size = len(anchor_images) * n_repeats
-    
     # Create datasets from these sorted files. These are in order and match in pairs.
-    print('Matching triplets...')
-    anchor_files, positive_files, negative_files = match_file_triplets(anchor_images, positive_images, num_negatives, lower_margin=lower_margin, upper_margin=upper_margin)
+    file_triplets = pd.read_csv(triplets_file, header=None)
+    anchor_files = list(file_triplets.iloc[:,0])
+    positive_files = list(file_triplets.iloc[:,1])
+    negative_files = list(file_triplets.iloc[:,2])
+
+    dataset_full_size = len(anchor_files)
+
+    if epoch_size > dataset_full_size:
+        raise ValueError('Epoch size must be <= full dataset size.')
 
     anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
     positive_dataset = tf.data.Dataset.from_tensor_slices(positive_files)
@@ -852,7 +831,7 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
     # within triplets, the negative image will shuffle.
     dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
     dataset = dataset.shuffle(buffer_size=dataset_full_size)
-    dataset = dataset.take(dataset_take_size)
+    dataset = dataset.take(epoch_size)
 
     # Batch (before mapping -- supposed to be faster).
     dataset = dataset.batch(batch_size, drop_remainder=False)
@@ -864,7 +843,7 @@ def make_triplet_inputs(folder, lower_margin=0, upper_margin=100,
         dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
 
     # Divide into training and evaluation.
-    train_size = np.max([round(dataset_take_size / batch_size  * 0.95), 1])
+    train_size = np.max([round(epoch_size / batch_size  * 0.95), 1])
     train_dataset = dataset.take(train_size)
     val_dataset = dataset.skip(train_size)
 
