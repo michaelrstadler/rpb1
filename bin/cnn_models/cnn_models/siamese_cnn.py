@@ -615,20 +615,10 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             between these sampled images and all other images, 
             and then taking percentiles of the resulting
             distribution.
-        4. For each anchor-positive pair, calculate distance to all
-            potential negative images.
-        5. Randomly select the indicated number of negative images
-            from the potential list.
-
-    Programming note: I tried writing this in ways that didnt' involve
-    all the one-vs-all calculations, but it always ran slow and scaled
-    poorly. This version takes about 20 minutes to run on 100,000 samples
-    and runs in constant time with respect to the cutoffs/margins. Upshot:
-    matrix math is fast as hell on CPUs.
-
-    Second note: It still scales terribly with size, though it probably
-    just doesn't matter. The searching could be chunked to do better
-    on this count.
+        4. For each anchor-positive pair, find random negative images 
+            that are within specified distance cutoffs (not sure this
+            is most efficient but it works -- see get_good_idxs).
+        5. Add triplet files for these random matches.
 
     Args:
         anchor_files: file path
@@ -680,11 +670,6 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         p = [float(x) for x in p]
         return p
 
-    def get_norm_params(filename, means, stds):
-        """Z-score normalize parameters."""
-        p= get_params_from_filename(filename)
-        return (p - means) / stds
-
     def get_params(files):
         """Extract parameters from a list of files, return as 
         numpy array."""
@@ -695,12 +680,11 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
         for f in files:
             p= get_params_from_filename(f)
             params = np.vstack([params, p])
-
         return params
 
     def get_good_idxs(ref_params, params, dist_cutoff_lower, 
                 dist_cutoff_upper, chunk_size, target_num, rs):
-        """Search chunks of param matrix to find indexes of rows that are
+        """Search matrix by chunks to find indexes of rows that are
         within cutoff distances of reference row."""
         shuffled_idxs = rs.choice(np.arange(params.shape[0]), params.shape[0],replace=False)
         good_idxs = np.zeros(0)
@@ -713,7 +697,6 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
             if len(good_idxs) >= target_num:
                 break
         return [int(x) for x in good_idxs[:target_num]]
-
 
     negative_files = positive_files + anchor_files
 
@@ -735,7 +718,8 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
 
     # Get the upper and lower cutoffs from the sampled distribution of distances.
     dist_cutoff_lower, dist_cutoff_upper = sample_distances(anchor_params, lower_margin, upper_margin)
-    chunk_size = int(100 / (upper_margin - lower_margin) * 10)
+    # Get chunk size for searching matrix.
+    chunk_size = int(100 / (upper_margin - lower_margin) * num_negatives * 2)
 
     # Initialize lists to contain ordered image files.
     a, p, n = [], [], []
