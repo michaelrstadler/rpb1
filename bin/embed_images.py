@@ -11,7 +11,7 @@ __copyright__   = "Copyright 2022, California, USA"
 
 import argparse
 import sys
-import flymovie as fm
+import pickle
 import cnn_models.siamese_cnn as cn
 from cnn_models.evaluate_models import embed_images
 
@@ -45,7 +45,8 @@ def main(argv):
     embeddings = embed_images(args.image_folder, embedding)
 
     # Save.
-    fm.save_pickle(embeddings, args.outfile)
+    with open(args.outfile, 'wb') as outfile:
+        pickle.dump(embeddings, outfile, protocol=4)
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
