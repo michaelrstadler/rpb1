@@ -63,7 +63,7 @@ def embed_images(im_folder, embedding, mip=False, verbose=False):
     for f in files:
         if (f[3] != '_') or (f[0] == '.'):
             continue
-        if verbose and (count / 1_000 == 0):
+        if verbose and (count % 1_000 == 0):
             print(count)
             sys.stdout.flush()
         count += 1
