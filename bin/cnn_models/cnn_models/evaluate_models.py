@@ -51,10 +51,10 @@ def embed_images(im_folder, embedding, mip=False):
         p = (p - p.mean(axis=0)) / std
         return p
         
-    ims = []
     files = sorted(os.listdir(im_folder))
     num_params = len(files[-1].split('_')) - 2
     params = np.ndarray((0, num_params))
+    im_embeddings = np.ndarray((0,256))
 
     # Load images and extract parameters.
     # Ensure it's a good file, ignore hidden files.
@@ -64,21 +64,18 @@ def embed_images(im_folder, embedding, mip=False):
         # Because of the silliness with extracting filename from tensor, 
         # have to add two single quotes flanking filename.
         filename = "_'" + os.path.join(im_folder, f) + "'_"
+        # Get embedding.
         im = preprocess_image(filename, mip)
-        ims.append(im)
+        im = np.expand_dims(im, axis=0)
+        e = embedding(im).numpy()
+        im_embeddings = np.vstack([im_embeddings, e])
+
+        # Get parameters.
         p= f.split('_')[1:-1]
         p = [float(x) for x in p]
         params = np.vstack([params, p])
     
     params = normalize_params(params)
-
-    # Calculate embedding for each image.
-    im_embeddings = np.ndarray((0,256))
-    for i in range(len(ims)):
-        im = ims[i]
-        im = np.expand_dims(im, axis=0)
-        e = embedding(im).numpy()
-        im_embeddings = np.vstack([im_embeddings, e])
         
     return im_embeddings, params
 
