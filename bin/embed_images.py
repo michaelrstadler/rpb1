@@ -42,7 +42,7 @@ def main(argv):
     embedding.load_weights(args.model_path)
 
     # Get embeddings.
-    embeddings = embed_images(args.image_folder, embedding)
+    embeddings = embed_images(args.image_folder, embedding, verbose=True)
 
     # Save.
     with open(args.outfile, 'wb') as outfile:

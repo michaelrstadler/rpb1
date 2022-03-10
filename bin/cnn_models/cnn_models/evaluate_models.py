@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 
 #---------------------------------------------------------------------------
-def embed_images(im_folder, embedding, mip=False):
+def embed_images(im_folder, embedding, mip=False, verbose=False):
     """Pass images from a folder through embedding model, return their 
     location and normalized simulation parameters.
     
@@ -58,12 +58,18 @@ def embed_images(im_folder, embedding, mip=False):
 
     # Load images and extract parameters.
     # Ensure it's a good file, ignore hidden files.
+    count = 1
     for f in files:
         if (f[3] != '_') or (f[0] == '.'):
             continue
+        if verbose and (count / 1_000 == 0):
+            print(count)
+            sys.stdout.flush()
+
         # Because of the silliness with extracting filename from tensor, 
         # have to add two single quotes flanking filename.
         filename = "_'" + os.path.join(im_folder, f) + "'_"
+        
         # Get embedding.
         im = preprocess_image(filename, mip)
         im = np.expand_dims(im, axis=0)
