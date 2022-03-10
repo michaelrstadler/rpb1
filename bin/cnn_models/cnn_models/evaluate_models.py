@@ -15,6 +15,7 @@ from fpdf import FPDF
 import tempfile
 import os
 import numpy as np
+import sys
 import sklearn.decomposition
 import matplotlib.pyplot as plt
 
