@@ -58,14 +58,14 @@ def embed_images(im_folder, embedding, mip=False, verbose=False):
 
     # Load images and extract parameters.
     # Ensure it's a good file, ignore hidden files.
-    count = 1
+    count = 0
     for f in files:
         if (f[3] != '_') or (f[0] == '.'):
             continue
         if verbose and (count / 1_000 == 0):
             print(count)
             sys.stdout.flush()
-
+        count += 1
         # Because of the silliness with extracting filename from tensor, 
         # have to add two single quotes flanking filename.
         filename = "_'" + os.path.join(im_folder, f) + "'_"
