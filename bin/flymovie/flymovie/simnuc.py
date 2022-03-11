@@ -434,6 +434,21 @@ def randomize_ab(ab, rs=None):
     return (rs.random() * (b - a)) + a
 
 #-----------------------------------------------------------------------
+def make_imperfect_masks(dims=(34,100,100), nucrad_mean=45, nucrad_range=3, center_range=5, n=20):
+    rs = np.random.RandomState()
+    maskdims = (dims[0], dims[1] + (2 * center_range), dims[2] + (2 * center_range))
+    masks = []
+    for _ in range(n):
+        nucrad_adj = rs.randint(-1 * nucrad_range, nucrad_range)
+        i_adj = rs.randint(0, 2 * center_range)
+        j_adj = rs.randint(0, 2 * center_range)
+        mask = Sim.make_spherical_mask(maskdims[0], maskdims[1], maskdims[2], nucrad_mean + nucrad_adj)
+        mask = mask[:, i_adj:(i_adj + dims[1]), j_adj:(j_adj + dims[2])]
+        masks.append(mask)
+
+    return masks
+
+#-----------------------------------------------------------------------
 def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
