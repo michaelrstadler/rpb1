@@ -414,7 +414,7 @@ class Sim():
 #-----------------------------------------------------------------------
 
 #-----------------------------------------------------------------------
-def randomize_ab(ab):
+def randomize_ab(ab, rs=None):
     """Find random float number between a and b, given b > a.
     
     Args:
@@ -429,7 +429,8 @@ def randomize_ab(ab):
         raise ValueError('b must be greater than a')
     if (b == a):
         return a
-    rs = np.random.RandomState()
+    if rs is None:
+        rs = np.random.RandomState()
     return (rs.random() * (b - a)) + a
 
 #-----------------------------------------------------------------------
