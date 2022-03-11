@@ -494,17 +494,18 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
     gfp_intensity = 100
+    rs = np.random.RandomState()
 
     ### Randomly draw parameters from supplied ranges. ###
-    nfree = round(randomize_ab(nfree_rng))
-    hlb_diam = float(randomize_ab(hlb_diam_rng))
-    hlb_nmols = round(randomize_ab(hlb_nmols_rng))
-    n_clusters = round(randomize_ab(n_clusters_rng))
-    cluster_diam_mean = round(randomize_ab(cluster_diam_mean_rng))
-    cluster_diam_var = randomize_ab(cluster_diam_var_rng)
-    cluster_nmols_mean = round(randomize_ab(cluster_nmols_mean_rng))
-    cluster_nmols_var = randomize_ab(cluster_nmols_var_rng)
-    noise_sigma = float(randomize_ab(noise_sigma_rng))
+    nfree = round(randomize_ab(nfree_rng, rs))
+    hlb_diam = float(randomize_ab(hlb_diam_rng, rs))
+    hlb_nmols = round(randomize_ab(hlb_nmols_rng, rs))
+    n_clusters = round(randomize_ab(n_clusters_rng, rs))
+    cluster_diam_mean = round(randomize_ab(cluster_diam_mean_rng, rs))
+    cluster_diam_var = randomize_ab(cluster_diam_var_rng, rs)
+    cluster_nmols_mean = round(randomize_ab(cluster_nmols_mean_rng, rs))
+    cluster_nmols_var = randomize_ab(cluster_nmols_var_rng, rs)
+    noise_sigma = float(randomize_ab(noise_sigma_rng, rs))
 
     cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
     cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
