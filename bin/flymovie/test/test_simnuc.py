@@ -266,7 +266,8 @@ class TestSimRpb1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tdir:
             mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
                 nuc_rad=8)
-            sim_rpb1(mask=mask, kernel=np.ones((2,2,2)), 
+            masks = [mask, mask]
+            sim_rpb1(mask=masks, kernel=np.ones((2,2,2)), 
                 outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
                 hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
                 cluster_diam_mean_rng=[1,1], cluster_diam_var_rng=[1,1], 

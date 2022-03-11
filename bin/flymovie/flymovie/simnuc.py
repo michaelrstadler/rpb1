@@ -434,22 +434,51 @@ def randomize_ab(ab, rs=None):
     return (rs.random() * (b - a)) + a
 
 #-----------------------------------------------------------------------
-def make_imperfect_masks(dims=(34,100,100), nucrad_mean=45, nucrad_range=3, center_range=5, n=20):
+def make_imperfect_masks(dims=(34,100,100), nucrad_mean=45, 
+        nucrad_range=3, center_range=5, n=20):
+    """Make spherical nuclear masks that vary in center position and
+    radius.
+
+    Nuclear radius and center position are drawn from uniform 
+    distributions defined by range parameters.
+    
+    Args:
+        dims: tuple of ints
+            Dimensions of masks to make
+        nucrad_mean: int
+            Average nuclear radius
+        nucrad_range: int
+            Range (+ and -) to vary nuclear radius
+        center_range: int
+            Range (+ and -) to vary the nucleus position from the 
+            image center in lateral dimensions only. Variation applied
+            independently in i and j dimension.
+        n: int
+            Number of masks to make
+
+    Returns:
+        masks: list of ndarrays
+            List of masks
+    """
     rs = np.random.RandomState()
-    maskdims = (dims[0], dims[1] + (2 * center_range), dims[2] + (2 * center_range))
+    # Create mask in expanded mask, differentially slice to vary
+    # center position.
+    maskdims = (dims[0], dims[1] + (2 * center_range), dims[2] + (2 * 
+            center_range))
     masks = []
     for _ in range(n):
         nucrad_adj = rs.randint(-1 * nucrad_range, nucrad_range)
         i_adj = rs.randint(0, 2 * center_range)
         j_adj = rs.randint(0, 2 * center_range)
-        mask = Sim.make_spherical_mask(maskdims[0], maskdims[1], maskdims[2], nucrad_mean + nucrad_adj)
+        mask = Sim.make_spherical_mask(maskdims[0], maskdims[1], 
+                maskdims[2], nucrad_mean + nucrad_adj)
         mask = mask[:, i_adj:(i_adj + dims[1]), j_adj:(j_adj + dims[2])]
         masks.append(mask)
 
     return masks
 
 #-----------------------------------------------------------------------
-def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
+def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
@@ -470,7 +499,8 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     to generate clusters.
 
     Args:
-        mask: ndarray; input mask for building nucleus
+        masks: list of ndarrays; list of input masks for building nucleus.
+            Length must equal number of reps
         kernel: ndarray; kernel for convolution
         outfolder: string; folder in which to write outputs
         nreps: int; number of replicate simulations to make with each 
@@ -527,6 +557,7 @@ def sim_rpb1(mask, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
 
     ### Simulate an Rpb1 nucleus with selected parameters. ###
     for nrep in range(nreps):
+        mask = masks[nrep]
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
         # Add free population.
@@ -600,7 +631,7 @@ def write_logfile(filepath, logitems):
 
 #-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
-    sim_func=sim_rpb1, nuc_rad=90, **kwargs):
+    sim_func=sim_rpb1, nuc_rad=90, nmasks=50, **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
 
     Note: I tried to make a batch function that would be general
@@ -619,6 +650,8 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
         sim_func: function, function that recieved kwargs, performs
             simulations, and writes to file
         nuc_rad: number, radius in pixels of spherical nucleus in mask
+        nmasks: int, the number of different masks to make (different
+            nucleus sizes and shapes)
         kwargs: args supplied to sim_func
     
     Outputs:
@@ -636,30 +669,45 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     folder = outfolder + '_' + folder_id
     os.mkdir(folder)
     
-    mask = Sim.make_spherical_mask(mask_dims[0], mask_dims[1], mask_dims[2], nuc_rad)
+    # Generate masks.
+    masks = make_imperfect_masks(dims=mask_dims, nucrad_mean=nuc_rad, 
+            nucrad_range=round(nuc_rad * 0.05), center_range=5, n=nmasks)
 
     # Get a list of candidate HLB coordinates by performing erosion on nuclear mask.
     # This ensures that the HLB won't be placed at the nuclear periphery and end up
     # outside the nucleus.
-    hlb_coords_possible = Sim(mask).get_eroded_coordinates(10)
-    num_hlb_coords = len(hlb_coords_possible[0])
-    hlb_coords_possible = np.array(list(zip(hlb_coords_possible[0], hlb_coords_possible[1], hlb_coords_possible[2])))
-    
-    # For each sim, built a local set of args that will be sent to sim_rpb1,
-    # add each set of parameters to arglist.
-    arglist = []
+    hlb_coords_possible_list = []
+    num_hlb_coords_list = []
+    for mask in masks:
+        hlb_coords_possible = Sim(mask).get_eroded_coordinates(10)
+        num_hlb_coords = len(hlb_coords_possible[0])
+        hlb_coords_possible = list(zip(hlb_coords_possible[0], hlb_coords_possible[1], hlb_coords_possible[2]))
+        hlb_coords_possible_list.append(hlb_coords_possible)
+        num_hlb_coords_list.append(num_hlb_coords)
+
+    # Set constant args.
     f_kwargs = kwargs.copy()
-    f_kwargs['mask'] = mask
     f_kwargs['kernel'] = kernel
     f_kwargs['outfolder'] = folder
     f_kwargs['nreps'] = nreps
     
+    # For each replicate, perform selection of random masks and matching
+    # HLB coordinates, add all kwargs to arglist for parallel calling.
+    arglist = []
     rs = np.random.RandomState()
+    # Select random masks, from masks select random HLB coordinates.
     for _ in range(nsims):
         f_kwargs_loc = f_kwargs.copy()
-        # Get random HLB coordinates.
-        hlb_coords_rand = hlb_coords_possible[rs.choice(num_hlb_coords, nreps * 2)]
-        f_kwargs_loc['hlb_coords'] = hlb_coords_rand
+        mask_idxs = rs.randint(0, len(masks), nreps)
+        hlb_coords = []
+        for idx in mask_idxs:
+            num_coords = num_hlb_coords_list[idx]
+            hlb_coords_possible = hlb_coords_possible_list[idx]
+            coords = [hlb_coords_possible[x] for x in rs.choice(num_coords, 2)]
+            hlb_coords = hlb_coords + coords
+        
+        f_kwargs_loc['hlb_coords'] = hlb_coords
+        f_kwargs_loc['masks'] = [masks[x] for x in mask_idxs]
         arglist.append(f_kwargs_loc)
     print('arglist done')
 
