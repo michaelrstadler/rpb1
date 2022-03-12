@@ -577,8 +577,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         sim.add_noise('poisson')
         sim.convolve()
         sim.resize(dims_final, order=1)
-        sim.im = stack_normalize_minmax(sim.im) * 1000
         sim.add_noise('gaussian', sigma=noise_sigma)
+        sim.im = stack_normalize_minmax(sim.im) * (100)
+
         # Bound values.
         sim.im[sim.im < 0] = 0
         sim.im[sim.im > 65_536] = 65_536
