@@ -482,7 +482,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
-    dims_kernel=(250,85,85), dims_final=(250,85,85)):
+    dims_kernel=(250,85,85), dims_final=(250,85,85), return_sim=False):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
         write to file.
 
@@ -511,6 +511,8 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         dims_init: tuple; dimensions (in nm) of voxels in initial image
         dims_kernel: tuple; dimensions (in nm) of kernel
         dims_final: tuple; dimensions (in nm) of final image
+        return_sim: bool; if true, performs one simulation and returns,
+            does not write to file.
 
     Output:
         Simulated images are saved as pickled ndarrays. Filenames contain 
@@ -579,6 +581,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         # Bound values.
         sim.im[sim.im < 0] = 0
         sim.im[sim.im > 65_536] = 65_536
+
+        if return_sim:
+            return sim
 
         paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
                 hlb_diam, hlb_nmols, n_clusters, cluster_diam_mean, 
