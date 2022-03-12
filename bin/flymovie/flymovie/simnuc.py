@@ -244,7 +244,7 @@ class Sim():
             ((j - center_coords[2]) ** 2)) < (rad ** 2))
         num_pixels = len(pix_coords[0])
         intensity_per_pixel = intensity * num_fluors / num_pixels
-        self.im[pix_coords] = intensity_per_pixel
+        self.im[pix_coords] = self.im[pix_coords] + intensity_per_pixel
 
     #-----------------------------------------------------------------------
     def add_object(self, coords, intensity, num_fluors, length):
@@ -567,6 +567,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         # Add HLB.
         sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
         sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
+
         # Add clusters.
         sim.add_n_objects(n_clusters, gfp_intensity, fluors_per_object=cluster_nmols_vals, 
             size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
