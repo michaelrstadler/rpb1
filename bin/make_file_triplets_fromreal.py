@@ -17,97 +17,96 @@ import numpy as np
 
 def make_parser():
     parser = argparse.ArgumentParser(description='.')
-    parser.add_argument("-r", "--real_image_folder", type=str,  required=True,
+    parser.add_argument("-a", "--anchor_image_folder", type=str,  required=True,
+                        help='Folder containing pickled image files.')
+    parser.add_argument("-p", "--positive_image_folder", type=str,  required=True,
+                        help='Folder containing pickled image files.')
+    parser.add_argument("-n", "--negative_image_folder", type=str,  required=True,
                         help='Folder containing pickled image files.')
     parser.add_argument("-t", "--num_triplets", type=int, required=True,
                         help='Number of triplets to make for each real image')
-    parser.add_argument("-s", "--sim_folder", default=None,
-                        help='optional: folder containing matched simulations')
-    parser.add_argument("-n", "--negative_folder", default=None,
-                        help='optional: folder containing images for negative slot')
+    parser.add_argument("-o", "--outfile", type=str, required=True,
+                        help='File to write triplets to')
 
     return parser
 
-def get_filepaths(folder, sort=False):
-    if sort is False:
-        return [os.path.join(folder, x) for x in os.listdir(folder) if x[0] != '.']
-    else:
-        files = {}
-        for f in os.listdir(folder):
-            if f[0] == '.':
-                continue
-            path = os.path.join(folder, f)
-            tag = f.split('_')[0]
-            if tag in files:
-                files[tag].append(path)
-            else:
-                files[tag] = [path]
-        return files
 
-def get_negative_image(real_images, anchor_tag, negative_images, rs):
-    if negative_images is not None:
-        return rs.choice(negative_images)
-    
-    tags = rs.choice(list(real_images.keys()), 2, replace=False)
-    for tag in tags:
-        if tag != anchor_tag:
-            return rs.choice(real_images[tag])
+def get_files(folder):
+    files = {}
+    for f in os.listdir(folder):
+        if f[0] == '.':
+            continue
+        path = os.path.join(folder, f)
+        sampleID = f.split('_')[0]
+        stackID = f.split('_')[1]
+        nucID = f.split('_')[2]
 
-def get_positive_image(real_images, real_image, tag, positive_images, rs):
-    if positive_images is not None:
-        return rs.choice(positive_images[tag])
-    else:
-        ims = rs.choice(real_images[tag], 2, replace=False)
-        for im in ims:
-            if im != real_image:
-                return im
-
-def make_triplets_withsims(real_image_folder, num_triplets, sim_folder, negative_folder):
-    real_images = get_filepaths(real_image_folder, sort=True)
-    #sims = get_filepaths(sim_folder, sort=True)
-    if negative_folder is not None:
-        negative_images = get_filepaths(negative_folder, sort=False)
-    else:
-        negative_images = None
-
-    if sim_folder is not None:
-        positive_images = get_filepaths(sim_folder, sort=True)
-    else:
-        positive_images = None
-
-    rs = np.random.RandomState()
-
-    triplets = []
-    for tag in real_images:
-        for real_image in real_images[tag]:
-            for n in range(num_triplets):
-                positive_image = get_positive_image(real_images, real_image, tag, positive_images, rs)
-                negative_image = get_negative_image(real_images, tag, negative_images, rs)
-                if rs.choice([0,1]) == 0:
-                    triplets.append((real_image, positive_image, negative_image))
+        if sampleID in files:
+            if stackID in files[sampleID]:
+                if nucID in files[sampleID]:
+                    files[sampleID][stackID][nucID].append(path)
                 else:
-                    triplets.append((positive_image, real_image, negative_image))
+                    files[sampleID][stackID][nucID] = [path]
+            else:
+                files[sampleID][stackID] = {nucID: [path]}
 
-    return triplets
+        else:
+            files[sampleID] = {
+                stackID: {
+                    nucID: [path]
+                }
+            }
+
+    return files
+
+
+def get_negatives(negative_files, sampleID, n, rs):
+    count = 0
+    selections = []
+    for _ in range(n * 10):
+        sampleID_choice = rs.choice(list(negative_files.keys()))
+        if sampleID_choice != sampleID:
+            stackID_choice = rs.choice(list(negative_files[sampleID_choice].keys()))
+            nucID_choice = rs.choice(list(negative_files[sampleID_choice][stackID_choice].keys()))
+            selection = rs.choice(negative_files[sampleID_choice][stackID_choice][nucID_choice])
+            selections.append(selection)
+    return selections
+
+def get_positives(positive_files, sampleID, stackID, nucID, n, rs):
+    count = 0
+    selections = []
+    for _ in range(n * 10):
+        nucID_choice = rs.choice(list(positive_files[sampleID][stackID].keys()))
+        if nucID_choice != nucID:
+            selection = rs.choice(positive_files[sampleID][stackID][nucID_choice])
+            selections.append(selection)
+    return selections
+
+
+def make_triplets(anchor_files, positive_files, negative_files, outfilepath, num_triplets):
+    rs = np.random.RandomState()
+    with open(outfilepath, 'w') as outfile:
+        for sampleID in anchor_files.keys():
+            for stackID in anchor_files[sampleID].keys():
+                for nucID in anchor_files[sampleID][stackID].keys():
+                    anchor_selections = rs.choice(anchor_files[sampleID][stackID][nucID], num_triplets)
+                    positive_selections = get_positives(positive_files, sampleID, stackID, nucID, num_triplets, rs)
+                    negative_selections = get_negatives(negative_files, sampleID, num_triplets, rs)
+                    for i in range(len(anchor_selections)):
+                        outfile.write('\t'.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
+
+
 
 
 def main(argv):
     parser = make_parser()
     args = parser.parse_args(argv)
 
-    real_image_folder = args.real_image_folder
-    num_triplets = args.num_triplets
-    sim_folder = args.sim_folder
-    negative_folder = args.negative_folder
+    anchor_files = get_files(args.anchor_image_folder)
+    positive_files = get_files(args.positive_image_folder)
+    negative_files = get_files(args.negative_image_folder)
 
-    
-    triplets = make_triplets_withsims(real_image_folder, num_triplets, sim_folder, negative_folder)
-    for i in triplets:
-        print(i)
-    
-
-    
-    
+    make_triplets(anchor_files, positive_files, negative_files, args.outfile, args.num_triplets)
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
