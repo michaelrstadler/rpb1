@@ -684,7 +684,7 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     
     # Generate masks.
     masks = make_imperfect_masks(dims=mask_dims, nucrad_mean=nuc_rad, 
-            nucrad_range=round(nuc_rad * 0.05), center_range=5, n=nmasks)
+            nucrad_range=round(nuc_rad * 0.05), center_range=round(nuc_rad * 0.1), n=nmasks)
 
     # Get a list of candidate HLB coordinates by performing erosion on nuclear mask.
     # This ensures that the HLB won't be placed at the nuclear periphery and end up
