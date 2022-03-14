@@ -404,8 +404,8 @@ class Sim():
                 self.res_ij / dims[1],
                 self.res_ij / dims[2]
             )
-        im_rs = ndi.zoom(self.im, zoom_factors, order=order)
-        self.im = im_rs
+        self.im = ndi.zoom(self.im, zoom_factors, order=order)
+        self.mask = ndi.zoom(self.mask, zoom_factors, order=0)
         self.res_z = dims[0]
         self.res_ij = dims[1]
 
