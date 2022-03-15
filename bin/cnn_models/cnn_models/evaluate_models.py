@@ -64,7 +64,7 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
     # Ensure it's a good file, ignore hidden files.
     count = 0
     for f in files:
-        if (f[3] != '_') or (f[0] == '.'):
+        if (f[-3:] != 'pkl') or (f[0] == '.'):
             continue
         if verbose and (count % 1_000 == 0):
             print(count)
