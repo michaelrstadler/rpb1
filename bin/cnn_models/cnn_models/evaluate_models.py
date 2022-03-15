@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 
 
 #---------------------------------------------------------------------------
-def embed_images(im_folder, embedding, mip=False, verbose=False):
+def embed_images(im_folder, embedding, mip=False, verbose=False, 
+    return_params=True):
     """Pass images from a folder through embedding model, return their 
     location and normalized simulation parameters.
     
@@ -32,6 +33,8 @@ def embed_images(im_folder, embedding, mip=False, verbose=False):
             model for image embedding
         mip: bool
             Use maximum intensity projections
+        return_params: bool
+            Return normalized parameters
         
     Returns:
         im_embeddings: ndarray
@@ -78,13 +81,16 @@ def embed_images(im_folder, embedding, mip=False, verbose=False):
         im_embeddings = np.vstack([im_embeddings, e])
 
         # Get parameters.
-        p= f.split('_')[1:-1]
-        p = [float(x) for x in p]
-        params = np.vstack([params, p])
+        if return_params:
+            p= f.split('_')[1:-1]
+            p = [float(x) for x in p]
+            params = np.vstack([params, p])
     
-    params = normalize_params(params)
-        
-    return im_embeddings, params
+    if return_params:
+        params = normalize_params(params)
+        return im_embeddings, params
+    
+    return im_embeddings
 
 #---------------------------------------------------------------------------
 def rank_embeddingdist_matchedpairs(embeddings1, embeddings2):
