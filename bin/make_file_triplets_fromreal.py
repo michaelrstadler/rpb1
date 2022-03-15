@@ -93,7 +93,7 @@ def make_triplets(anchor_files, positive_files, negative_files, outfilepath, num
                     positive_selections = get_positives(positive_files, sampleID, stackID, nucID, num_triplets, rs)
                     negative_selections = get_negatives(negative_files, sampleID, num_triplets, rs)
                     for i in range(len(anchor_selections)):
-                        outfile.write('\t'.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
+                        outfile.write(','.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
 
 
 
