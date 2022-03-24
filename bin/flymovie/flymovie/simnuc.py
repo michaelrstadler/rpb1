@@ -23,6 +23,7 @@ from flymovie.general_functions import mesh_like, stack_normalize_minmax
 from flymovie.load_save import save_pickle, load_pickle
 import scipy
 import random
+import warnings
 import numpy as np
 import scipy.ndimage as ndi
 import multiprocessing as mp
@@ -223,28 +224,119 @@ class Sim():
         return eroded_mask_coords
 
     #-----------------------------------------------------------------------
-    def add_sphere(self, center_coords, intensity, num_fluors, rad):
-        """Add a spherical object at specified coordinates.
-
-        Intensity is distributed evenly such that the intensity of each
-        pixel in the object is equal to:
-            intensity * num_fluors / num_pixels
+    def _add_box_to_stack(self, box, coords):
+        """Add pixel values from a supplied "box" to a sim objects im at a 
+        position centered at supplied coordinates.
+        
+        Programming note: though this adds a bit of complication, this
+        method is MUCH faster than the method of making a mesh grid for 
+        the whole image and delineating spheres that way.
 
         Args:
-            coords: iterable of ints, location lowest-index coordinate (
+            box: ndarray, the box to add to the image stack
+            coords: iterable of ints, coordinates marking center of position
+                in stack to which to add box
+        """
+        stack = self.im
+        # Initialize arrays to store the start and end coordinates for the 
+        # stack and the box in each dimension. They are arrays because they
+        # will store the start/end position in each of the three dimensions.
+        box_starts = [] # Start positions relative to box [z, i, j] 
+        box_ends = []
+        stack_starts = []
+        stack_ends = []
+        # For each dimension, find the start and stop positions for the box and 
+        # the stack to be centered at coords; handle the cases where the supplied 
+        # coordinates and box size will result in trying to assign positions 
+        # outside the stack.
+        for dim in range(0, 3):
+            # Initialize start and stop locations for case where box is entirely
+            # within stack dimensions.
+            start = coords[dim] - int(box.shape[dim] / 2)
+            end = coords[dim] + int(box.shape[dim] / 2) + 1
+            stack_start = start
+            stack_end = end
+            box_start = 0
+            box_end = box.shape[dim]
+            # Adjust for cases where box falls out of bounds of stack.
+            if start < 0:
+                stack_start = 0
+                box_start = -start
+            if end > stack.shape[dim]:
+                stack_end = stack.shape[dim]
+                box_end = box.shape[dim] - (end - stack.shape[dim])
+            # Append corrected starts and stops for this dimension.
+            stack_starts.append(stack_start)
+            stack_ends.append(stack_end)
+            box_starts.append(box_start)
+            box_ends.append(box_end)
+        # Ensure that the shapes of the subsection of the stack to add to
+        # and the box to add are the same. If so, add box values to stack.
+        substack_shape = stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]].shape
+        box_to_add = box[box_starts[0]:box_ends[0], box_starts[1]:box_ends[1], box_starts[2]:box_ends[2]]
+        if substack_shape == box_to_add.shape:
+            stack[stack_starts[0]:stack_ends[0], stack_starts[1]:stack_ends[1], stack_starts[2]:stack_ends[2]] += box_to_add
+        else:
+            warnings.warn('Dimensions of box to add and stack to replace do not match.')
+    
+    #-----------------------------------------------------------------------
+    def add_sphere(self, center_coords, fluor_intensity, num_fluors, rad, 
+        random=False, rng=None):
+        """Add a spherical object at specified coordinates.
+
+        In random mode, fluors are place at random positions within spherical
+        region defined by radius.
+
+        In non-random mode, intensity is distributed evenly such that the 
+        intensity of each pixel in the object is equal to:
+            intensity * num_fluors / num_pixels
+        
+        Args:
+            center_coords: iterable of ints, location lowest-index coordinate (
                 bottom in z, top-left in xy)
-            intensity: int, intensity of fluors making up object
+            fluor_intensity: int, intensity of fluors making up object
             num_fluors: int, number of fluors in object
             rad: float: radius of object
+            random: bool, whether to place fluors randomly or distribute 
+                intensity uniformly
+            rng: numpy rng, if None, a new rng will be generated from os seed
         """
-        mesh = mesh_like(self.im, 3)
-        z, i, j = mesh
+        def make_odd(x):
+            x = round(x)
+            if x % 2 == 0:
+                return x + 1
+            return x
 
-        pix_coords = np.where((((z - center_coords[0]) ** 2) + ((i - center_coords[1]) ** 2) + 
-            ((j - center_coords[2]) ** 2)) < (rad ** 2))
+        # Set up an empty box with odd dimensions, same length all sides.
+        box_len = int(make_odd(rad * 2))
+        box_center_coord = int(box_len / 2)
+        box = np.zeros((box_len, box_len, box_len))
+
+        # Get coordinates for a sphere of radius r within box.
+        mesh = mesh_like(box, 3)
+        z, i, j = mesh
+        pix_coords = np.where((((z - box_center_coord) ** 2) + ((i - box_center_coord) ** 2) + 
+                        ((j - box_center_coord) ** 2)) < (rad ** 2))
         num_pixels = len(pix_coords[0])
-        intensity_per_pixel = intensity * num_fluors / num_pixels
-        self.im[pix_coords] = self.im[pix_coords] + intensity_per_pixel
+
+        # For random mode, place the indicated number of fluors by randomly
+        # sampling from sphere coordinates.
+        if random:
+            if rng is None:
+                rng = np.random.default_rng()
+            
+            for _ in range(num_fluors):
+                idx = rng.integers(0, num_pixels)
+                coords = (pix_coords[0][idx], pix_coords[1][idx], pix_coords[2][idx])
+                box[coords] += fluor_intensity
+
+        # In non-random mode, assign single intensity to all pixels in sphere.
+        else:
+            intensity_per_pixel = fluor_intensity * num_fluors / num_pixels
+            for idx in range(num_pixels):
+                box[pix_coords[0][idx], pix_coords[1][idx], pix_coords[2][idx]] = intensity_per_pixel
+        
+        self._add_box_to_stack(box, center_coords)
 
     #-----------------------------------------------------------------------
     def add_object(self, coords, intensity, num_fluors, length):
@@ -478,6 +570,47 @@ def make_imperfect_masks(dims=(34,100,100), nucrad_mean=45,
     return masks
 
 #-----------------------------------------------------------------------
+def run_pooled_processes(arglist, nprocesses, func, batch_size=1000):
+    """Launch a parallel process using multiprocessing Pool function.
+    
+    I have had some odd problems when supplying large numbers of processes
+    to Pool, and I have found empirically that batching helps speed things
+    up. This seems to defeat the purpose of Pool, but it works and achieves
+    parallelization since batch sizes can still be quite large (1000 seems
+    to work just fine; 10,000 runs very slowly).
+
+    Args:
+        arglist: iterable; list of arguments to map to function
+        nprocesses: int; number of parallel processes to launch (typically,
+            number of available cores)
+        func: function to call in parallel (target of arglist)
+        batch_size: int; size of batches sent to Pool. I think this can be
+            left at 1000.
+    
+    """
+    mp.set_start_method('fork', force=True) # Important for macOS.
+    with mp.Pool(nprocesses) as pool:
+        for i in range(0, len(arglist), batch_size):
+            end = i + batch_size
+            arglist_sub = arglist[i:end]   
+            results = [pool.apply_async(func, (), x) for x in arglist_sub]
+            [p.get() for p in results]
+
+#-----------------------------------------------------------------------
+def write_logfile(filepath, logitems):
+    """Write a logfile with parameters.
+    
+    Args:
+        filepath: string; path for logfile
+        logitems: dict; dict containing items to log
+    """
+    with open(filepath, 'w') as logfile:
+        logfile.write(datetime.now().ctime() + '\n')
+        for key in logitems:
+            logfile.write(key + ': ' + str(logitems[key]))
+            logfile.write('\n')
+
+#-----------------------------------------------------------------------
 def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
@@ -602,47 +735,6 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         save_pickle(sim.im, filepath)
 
 #-----------------------------------------------------------------------
-def run_pooled_processes(arglist, nprocesses, func, batch_size=1000):
-    """Launch a parallel process using multiprocessing Pool function.
-    
-    I have had some odd problems when supplying large numbers of processes
-    to Pool, and I have found empirically that batching helps speed things
-    up. This seems to defeat the purpose of Pool, but it works and achieves
-    parallelization since batch sizes can still be quite large (1000 seems
-    to work just fine; 10,000 runs very slowly).
-
-    Args:
-        arglist: iterable; list of arguments to map to function
-        nprocesses: int; number of parallel processes to launch (typically,
-            number of available cores)
-        func: function to call in parallel (target of arglist)
-        batch_size: int; size of batches sent to Pool. I think this can be
-            left at 1000.
-    
-    """
-    mp.set_start_method('fork', force=True) # Important for macOS.
-    with mp.Pool(nprocesses) as pool:
-        for i in range(0, len(arglist), batch_size):
-            end = i + batch_size
-            arglist_sub = arglist[i:end]   
-            results = [pool.apply_async(func, (), x) for x in arglist_sub]
-            [p.get() for p in results]
-
-#-----------------------------------------------------------------------
-def write_logfile(filepath, logitems):
-    """Write a logfile with parameters.
-    
-    Args:
-        filepath: string; path for logfile
-        logitems: dict; dict containing items to log
-    """
-    with open(filepath, 'w') as logfile:
-        logfile.write(datetime.now().ctime() + '\n')
-        for key in logitems:
-            logfile.write(key + ': ' + str(logitems[key]))
-            logfile.write('\n')
-
-#-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     sim_func=sim_rpb1, nuc_rad=90, nmasks=50, **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
@@ -735,3 +827,62 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     
     return folder
 
+#-----------------------------------------------------------------------
+def sim_histones(mask, kernel, outfolder, nreps, nfree, n_domains, a1,
+    p1, p2, domain_rad_range=(0.5,1,1.5,2,2.5), dims_init=(85, 85, 85), 
+    dims_kernel=(250,85,85), dims_final=(250,85,85), return_sim=False,
+    mask_nuclei=False):
+    """
+    """
+
+    # Generate random file prefix.
+    file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
+
+    gfp_intensity = 100
+    rs = np.random.RandomState()
+
+    
+
+    cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
+    cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
+
+    ### Simulate an Rpb1 nucleus with selected parameters. ###
+    for nrep in range(nreps):
+        mask = masks[nrep]
+        sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
+        sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+        # Add free population.
+        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+        # Add HLB.
+        sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
+        sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
+
+        # Add clusters.
+        sim.add_n_objects(n_clusters, gfp_intensity, fluors_per_object=cluster_nmols_vals, 
+            size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
+            size_probs=cluster_diam_probs)
+        
+        # Add noise and convolve.
+        sim.add_noise('poisson')
+        sim.convolve()
+        sim.resize(dims_final, order=1)
+        sim.add_noise('gaussian', sigma=noise_sigma)
+        sim.im = stack_normalize_minmax(sim.im) * (100)
+
+        # Bound values.
+        sim.im[sim.im < 0] = 0
+        sim.im[sim.im > 65_536] = 65_536
+
+        if mask_nuclei:
+            sim.im = np.where(sim.mask, sim.im, 0)
+
+        if return_sim:
+            return sim
+
+        paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
+                hlb_diam, hlb_nmols, n_clusters, cluster_diam_mean, 
+                cluster_diam_var, cluster_nmols_mean, cluster_nmols_var, 
+                noise_sigma]])
+        filepath = os.path.join(outfolder, file_id + '_' + paramstring 
+            + '_rep' + str(nrep) + '.pkl')
+        save_pickle(sim.im, filepath)
