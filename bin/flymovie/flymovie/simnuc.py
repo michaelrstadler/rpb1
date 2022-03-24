@@ -281,7 +281,7 @@ class Sim():
     
     #-----------------------------------------------------------------------
     def add_sphere(self, center_coords, fluor_intensity, num_fluors, rad, 
-        random=False, rng=None):
+        random=False, rng=None, density=False):
         """Add a spherical object at specified coordinates.
 
         In random mode, fluors are place at random positions within spherical
@@ -300,6 +300,10 @@ class Sim():
             random: bool, whether to place fluors randomly or distribute 
                 intensity uniformly
             rng: numpy rng, if None, a new rng will be generated from os seed
+            density: bool, (random mode only) if false, num_fluors defines
+                the total number of fluors deposited. If true, num_fluors is
+                the number of fluors per pixel in the object added. 
+                Number fluors added = num_fluors * num_pixels
         """
         def make_odd(x):
             x = round(x)
@@ -325,7 +329,12 @@ class Sim():
             if rng is None:
                 rng = np.random.default_rng()
             
-            for _ in range(num_fluors):
+            if density:
+                num_to_place = num_fluors * num_pixels
+            else:
+                num_to_place = num_pixels
+
+            for _ in range(num_to_place):
                 idx = rng.integers(0, num_pixels)
                 coords = (pix_coords[0][idx], pix_coords[1][idx], pix_coords[2][idx])
                 box[coords] += fluor_intensity
@@ -828,9 +837,9 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     return folder
 
 #-----------------------------------------------------------------------
-def sim_histones(mask, kernel, outfolder, nreps, nfree, n_domains, a1,
+def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
     p1, p2, domain_rad_range=(0.5,1,1.5,2,2.5), dims_init=(85, 85, 85), 
-    dims_kernel=(250,85,85), dims_final=(250,85,85), return_sim=False,
+    dims_kernel=(100,50,50), dims_final=(250,85,85), return_sim=False,
     mask_nuclei=False):
     """
     """
@@ -839,13 +848,17 @@ def sim_histones(mask, kernel, outfolder, nreps, nfree, n_domains, a1,
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
     gfp_intensity = 100
-    rs = np.random.RandomState()
+    rng = np.random.default_rng()
 
-    
+    sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
+    sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+    # Add free population.
+    sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
 
-    cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
-    cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
-
+    # Select size from power-law distribution.
+    size = 2
+    # Select density based on size.
+    density = 5
     ### Simulate an Rpb1 nucleus with selected parameters. ###
     for nrep in range(nreps):
         mask = masks[nrep]
