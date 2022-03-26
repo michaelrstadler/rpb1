@@ -845,7 +845,7 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
 
 #-----------------------------------------------------------------------
 def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
-    p1, noise_sigma, repnum, rad_range=(0.5,1,1.5,2,2.5), 
+    p1, noise_sigma, nreps, rad_range=(0.5,1,1.5,2,2.5), 
     density_range=np.arange(2,10), dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), dims_final=(250,85,85), rng=None, 
     return_sim=False, mask_nuclei=False):
@@ -886,8 +886,8 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
             Sensitivity of density to domain size
         noise_sigma: float
             Sigma for gaussian noise
-        repnum: int
-            Replicate number
+        nreps: int
+            Number of replicates to simulate
         rad_range: iterable of floats
             Range of possible domain radii
         density_range: iterable of floats 
@@ -917,57 +917,59 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
     # Generate random file prefix.
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
-    # Initialize sim.
-    sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
-    sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
-    
-    # Add free population.
-    sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, 
-                mode='nuc')
-
     # Get domain radius probabilities from power law.
     rad_range_norm = norm_range(rad_range)
     rad_exp = rad_range_norm ** a1
     rad_probs = rad_exp / np.sum(rad_exp)
-
-    # Add domains by randomly drawing from domain sizes and densities,
-    # placing at random nuclear coordinates.
     density_range_norm = norm_range(density_range)
-    eroded_coords = sim.get_eroded_coordinates(5)
-    coord_idxs = rng.integers(0, len(eroded_coords[0]), n_domains)
-    rad_idxs = rng.choice(np.arange(len(rad_range)), size=n_domains, p=rad_probs)
-    for n in range(n_domains):
-        # Set coords and radius.
-        rad = rad_range[rad_idxs[n]]
-        rad_norm = rad_range_norm[rad_idxs[n]]
-        coord_idx = coord_idxs[n]
+
+    for nrep in range(nreps):
+        # Initialize sim.
+        sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
+        sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+
+        # Add domains by randomly drawing from domain sizes and densities,
+        # placing at random nuclear coordinates.
+        eroded_coords = sim.get_eroded_coordinates(5)
+        coord_idxs = rng.integers(0, len(eroded_coords[0]), n_domains)
+        rad_idxs = rng.choice(np.arange(len(rad_range)), size=n_domains, p=rad_probs)
+
+        # Add free population.
+        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, 
+                mode='nuc')
+
+        for n in range(n_domains):
+            # Set coords and radius.
+            rad = rad_range[rad_idxs[n]]
+            rad_norm = rad_range_norm[rad_idxs[n]]
+            coord_idx = coord_idxs[n]
+            
+            # Get density.
+            a2 = p1 * rad_norm
+            densities_exp = density_range_norm ** a2
+            density_probs = densities_exp / np.sum(densities_exp)
+            density = rng.choice(density_range, p=density_probs)
+
+            coords = (eroded_coords[0][coord_idx], eroded_coords[1][coord_idx], eroded_coords[2][coord_idx])
+            sim.add_sphere(center_coords=coords, fluor_intensity=gfp_intensity, 
+                        num_fluors=density, rad=rad, random=True, rng=rng, 
+                        density=True)
+
+        # Add noise and convolve.
+        sim.add_noise('poisson')
+        sim.convolve()
+        sim.resize(dims_final, order=1)
+        sim.add_noise('gaussian', sigma=noise_sigma)
+        sim.im = stack_normalize_minmax(sim.im) * (100)
+
+        if mask_nuclei:
+            sim.im = np.where(sim.mask, sim.im, 0)
+
+        if return_sim:
+            return sim
         
-        # Get density.
-        a2 = p1 * rad_norm
-        densities_exp = density_range_norm ** a2
-        density_probs = densities_exp / np.sum(densities_exp)
-        density = rng.choice(density_range, p=density_probs)
-
-        coords = (eroded_coords[0][coord_idx], eroded_coords[1][coord_idx], eroded_coords[2][coord_idx])
-        sim.add_sphere(center_coords=coords, fluor_intensity=gfp_intensity, 
-                    num_fluors=density, rad=rad, random=True, rng=rng, 
-                    density=True)
-
-    # Add noise and convolve.
-    sim.add_noise('poisson')
-    sim.convolve()
-    sim.resize(dims_final, order=1)
-    sim.add_noise('gaussian', sigma=noise_sigma)
-    sim.im = stack_normalize_minmax(sim.im) * (100)
-
-    if mask_nuclei:
-        sim.im = np.where(sim.mask, sim.im, 0)
-
-    if return_sim:
-        return sim
-    
-    paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
-            n_domains, a1, p1, noise_sigma]])
-    filepath = os.path.join(outfolder, file_id + '_' + paramstring 
-        + '_rep' + str(repnum) + '.pkl')
-    save_pickle(sim.im, filepath)
+        paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
+                n_domains, a1, p1, noise_sigma]])
+        filepath = os.path.join(outfolder, file_id + '_' + paramstring 
+            + '_rep' + str(nrep) + '.pkl')
+        save_pickle(sim.im, filepath)
