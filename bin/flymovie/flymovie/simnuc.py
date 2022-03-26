@@ -631,8 +631,8 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
-    dims_kernel=(250,85,85), dims_final=(250,85,85), return_sim=False,
-    mask_nuclei=False):
+    dims_kernel=(100,50,50), dims_final=(250,85,85), return_sim=False,
+    mask_nuclei=False, dilation_struct=np.ones((1,7,7))):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
         write to file.
 
@@ -665,6 +665,8 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
             does not write to file.
         mask_nuclei: bool, if true, mask out nuclei in final image (
             background set to 0)
+        dilation_struct: ndarray, structure for dilating mask if mask_nuclei 
+            is true
 
     Output:
         Simulated images are saved as pickled ndarrays. Filenames contain 
@@ -737,7 +739,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         sim.im[sim.im > 65_536] = 65_536
 
         if mask_nuclei:
-            sim.im = np.where(sim.mask, sim.im, 0)
+            mask = ndi.morphology.binary_dilation(sim.mask, 
+                structure=dilation_struct)
+            sim.im = np.where(mask, sim.im, 0)
 
         if return_sim:
             return sim
@@ -849,7 +853,7 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
     density_range=np.arange(2,10), dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), dims_final=(250,85,85), rng=None, 
     return_sim=False, mask_nuclei=False, 
-    dilation_struct=np.ones((1,7,7)),):
+    dilation_struct=np.ones((1,7,7))):
     """Simulate a nucleus with histones labeled.
 
     Nuclei are modeled by discrete spherical domains. The sizes (radii)
