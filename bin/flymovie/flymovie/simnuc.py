@@ -331,8 +331,15 @@ class Sim():
             
             if density:
                 num_to_place = num_fluors * num_pixels
+                if num_to_place >= 1:
+                    num_to_place = round(num_to_place)
+                # if num_to_place is less than one, turn into probability of adding
+                # a fluor
+                else:
+                    num_to_place = rng.choice((0,1), p=(1 - num_fluors, num_fluors))
+            
             else:
-                num_to_place = num_pixels
+                num_to_place = num_fluors
 
             for _ in range(num_to_place):
                 idx = rng.integers(0, num_pixels)
@@ -838,64 +845,129 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
 
 #-----------------------------------------------------------------------
 def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
-    p1, p2, domain_rad_range=(0.5,1,1.5,2,2.5), dims_init=(85, 85, 85), 
-    dims_kernel=(100,50,50), dims_final=(250,85,85), return_sim=False,
-    mask_nuclei=False):
-    """
-    """
+    p1, noise_sigma, repnum, rad_range=(0.5,1,1.5,2,2.5), 
+    density_range=np.arange(2,10), dims_init=(85, 85, 85), 
+    dims_kernel=(100,50,50), dims_final=(250,85,85), rng=None, 
+    return_sim=False, mask_nuclei=False):
+    """Simulate a nucleus with histones labeled.
 
+    Nuclei are modeled by discrete spherical domains. The sizes (radii)
+    of domains are drawn from a powerlaw distribution with exponent a1.
+    The densities (fluors/pixel) of domains are drawn from a power-law
+    distribution with exponent a2 that is a function of domain size.
+    The math is a bit confusing so I'll describe in depth:
+
+    - The ranges for radii and density are first normalized so that the
+    max value is 1 (note: 0 is 0, not minimum).
+
+    - The radius is selected based on power-law with exponent a1
+
+    - The density distribution for a given radius is a power-law
+    distribution with exponent defined by radius (normalized) * p1.
+    This means that the maximum exponent (for the largest radius) will
+    be p1. A higher value means that density is more strongly correlated
+    with domain size (e.g., bigger domains more likely to be denser), 
+    a value of 0 means all densities equally likely for all domain sizes.
+
+    Args:
+        mask: ndarray
+            Nuclear mask
+        kernel: ndarray
+            Convolution kernel
+        outfolder: string
+            Folder to write pickled images
+        nfree: int
+            Number of "free" (single and randomly distributed in nucleus) fluors
+        n_domains: int
+            Number of domains to add
+        a1: float
+            Exponent for power law defining domain radius
+        p1: float
+            Sensitivity of density to domain size
+        noise_sigma: float
+            Sigma for gaussian noise
+        repnum: int
+            Replicate number
+        rad_range: iterable of floats
+            Range of possible domain radii
+        density_range: iterable of floats 
+            Range of possible domain densities, in fluors per pixel
+        dims_init: tuple 
+            Dimensions (in nm) of voxels in initial image
+        dims_kernel: tuple 
+            Dimensions (in nm) of kernel
+        dims_final: tuple
+            Dimensions (in nm) of final image
+        rng: numpy rng
+            (optional) rng object
+        return_sim: bool; if true, performs one simulation and returns,
+            does not write to file.
+        mask_nuclei: bool, if true, mask out nuclei in final image (
+            background set to 0)
+    """
+    def norm_range(x):
+        """Normalize a range list just on max (0=0, max=1)."""
+        return (x / np.max(x))
+
+    a1, p1 = (float(a1), float(p1))
+    gfp_intensity = 100
+    if rng is None:
+        rng = np.random.default_rng()
+    
     # Generate random file prefix.
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
-    gfp_intensity = 100
-    rng = np.random.default_rng()
-
+    # Initialize sim.
     sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
     sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+    
     # Add free population.
-    sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+    sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, 
+                mode='nuc')
 
-    # Select size from power-law distribution.
-    size = 2
-    # Select density based on size.
-    density = 5
-    ### Simulate an Rpb1 nucleus with selected parameters. ###
-    for nrep in range(nreps):
-        mask = masks[nrep]
-        sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
-        sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
-        # Add free population.
-        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
-        # Add HLB.
-        sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
-        sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
+    # Get domain radius probabilities from power law.
+    rad_range_norm = norm_range(rad_range)
+    rad_exp = rad_range_norm ** a1
+    rad_probs = rad_exp / np.sum(rad_exp)
 
-        # Add clusters.
-        sim.add_n_objects(n_clusters, gfp_intensity, fluors_per_object=cluster_nmols_vals, 
-            size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
-            size_probs=cluster_diam_probs)
+    # Add domains by randomly drawing from domain sizes and densities,
+    # placing at random nuclear coordinates.
+    density_range_norm = norm_range(density_range)
+    eroded_coords = sim.get_eroded_coordinates(5)
+    coord_idxs = rng.integers(0, len(eroded_coords[0]), n_domains)
+    rad_idxs = rng.choice(np.arange(len(rad_range)), size=n_domains, p=rad_probs)
+    for n in range(n_domains):
+        # Set coords and radius.
+        rad = rad_range[rad_idxs[n]]
+        rad_norm = rad_range_norm[rad_idxs[n]]
+        coord_idx = coord_idxs[n]
         
-        # Add noise and convolve.
-        sim.add_noise('poisson')
-        sim.convolve()
-        sim.resize(dims_final, order=1)
-        sim.add_noise('gaussian', sigma=noise_sigma)
-        sim.im = stack_normalize_minmax(sim.im) * (100)
+        # Get density.
+        a2 = p1 * rad_norm
+        densities_exp = density_range_norm ** a2
+        density_probs = densities_exp / np.sum(densities_exp)
+        density = rng.choice(density_range, p=density_probs)
 
-        # Bound values.
-        sim.im[sim.im < 0] = 0
-        sim.im[sim.im > 65_536] = 65_536
+        coords = (eroded_coords[0][coord_idx], eroded_coords[1][coord_idx], eroded_coords[2][coord_idx])
+        sim.add_sphere(center_coords=coords, fluor_intensity=gfp_intensity, 
+                    num_fluors=density, rad=rad, random=True, rng=rng, 
+                    density=True)
 
-        if mask_nuclei:
-            sim.im = np.where(sim.mask, sim.im, 0)
+    # Add noise and convolve.
+    sim.add_noise('poisson')
+    sim.convolve()
+    sim.resize(dims_final, order=1)
+    sim.add_noise('gaussian', sigma=noise_sigma)
+    sim.im = stack_normalize_minmax(sim.im) * (100)
 
-        if return_sim:
-            return sim
+    if mask_nuclei:
+        sim.im = np.where(sim.mask, sim.im, 0)
 
-        paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
-                hlb_diam, hlb_nmols, n_clusters, cluster_diam_mean, 
-                cluster_diam_var, cluster_nmols_mean, cluster_nmols_var, 
-                noise_sigma]])
-        filepath = os.path.join(outfolder, file_id + '_' + paramstring 
-            + '_rep' + str(nrep) + '.pkl')
-        save_pickle(sim.im, filepath)
+    if return_sim:
+        return sim
+    
+    paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
+            n_domains, a1, p1, noise_sigma]])
+    filepath = os.path.join(outfolder, file_id + '_' + paramstring 
+        + '_rep' + str(repnum) + '.pkl')
+    save_pickle(sim.im, filepath)

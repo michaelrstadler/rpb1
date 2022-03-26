@@ -260,22 +260,6 @@ class TestRandomizeAB(unittest.TestCase):
 
 #---------------------------------------------------------------------------
 
-class TestSimRpb1(unittest.TestCase):
-    # Just test to see if it runs.
-    def test_sim_rpb1(self):
-        with tempfile.TemporaryDirectory() as tdir:
-            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
-                nuc_rad=8)
-            masks = [mask, mask]
-            sim_rpb1(masks=masks, kernel=np.ones((2,2,2)), 
-                outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
-                hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
-                cluster_diam_mean_rng=[1,1], cluster_diam_var_rng=[1,1], 
-                cluster_nmols_mean_rng=[1,1], cluster_nmols_var_rng=[1,1], 
-                noise_sigma_rng=[1,1], hlb_coords=[(10,10,10),(11,11,11),(5,5,5),(17,17,17)])
-
-#---------------------------------------------------------------------------
-
 class TestRunPooledProcesses(unittest.TestCase):
     # Just test to see if it runs.
     def test_run_pooled_processes(self):
@@ -292,7 +276,23 @@ class TestWriteLogfile(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as tfile:
             logitems = {'a': 4}
             write_logfile(tfile.name, logitems)
-            
+
+#---------------------------------------------------------------------------
+
+class TestSimRpb1(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_rpb1(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+                nuc_rad=8)
+            masks = [mask, mask]
+            sim_rpb1(masks=masks, kernel=np.ones((2,2,2)), 
+                outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
+                hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
+                cluster_diam_mean_rng=[1,1], cluster_diam_var_rng=[1,1], 
+                cluster_nmols_mean_rng=[1,1], cluster_nmols_var_rng=[1,1], 
+                noise_sigma_rng=[1,1], hlb_coords=[(10,10,10),(11,11,11),(5,5,5),(17,17,17)])
+
 #---------------------------------------------------------------------------
 
 class TestSimRpb1Batch(unittest.TestCase):
@@ -306,6 +306,18 @@ class TestSimRpb1Batch(unittest.TestCase):
                 cluster_nmols_mean_rng=[10,100], cluster_nmols_var_rng=[1,10], 
                 noise_sigma_rng=[1_000, 2_000])  
 
+#---------------------------------------------------------------------------
+
+class TestSimHistones(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_histones(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+                nuc_rad=8)
+            sim_histones(mask, kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=1000, n_domains=100, a1=-2, p1=0, noise_sigma=3,
+                repnum=3,  
+            )
 """
 """ 
 
