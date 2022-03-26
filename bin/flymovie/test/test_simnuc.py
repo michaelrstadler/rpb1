@@ -316,7 +316,7 @@ class TestSimHistones(unittest.TestCase):
                 nuc_rad=8)
             sim_histones(mask, kernel=np.ones((2,2,2)), outfolder=tdir,
                 nfree=1000, n_domains=100, a1=-2, p1=0, noise_sigma=3,
-                repnum=3,  
+                nreps=2,  
             )
 """
 """ 

@@ -848,7 +848,8 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
     p1, noise_sigma, nreps, rad_range=(0.5,1,1.5,2,2.5), 
     density_range=np.arange(2,10), dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), dims_final=(250,85,85), rng=None, 
-    return_sim=False, mask_nuclei=False):
+    return_sim=False, mask_nuclei=False, 
+    dilation_struct=np.ones((1,7,7)),):
     """Simulate a nucleus with histones labeled.
 
     Nuclei are modeled by discrete spherical domains. The sizes (radii)
@@ -904,6 +905,8 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
             does not write to file.
         mask_nuclei: bool, if true, mask out nuclei in final image (
             background set to 0)
+        dilation_struct: ndarray
+            Structure for dilating mask if mask_nuclei is true
     """
     def norm_range(x):
         """Normalize a range list just on max (0=0, max=1)."""
@@ -963,7 +966,9 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
         sim.im = stack_normalize_minmax(sim.im) * (100)
 
         if mask_nuclei:
-            sim.im = np.where(sim.mask, sim.im, 0)
+            mask = ndi.morphology.binary_dilation(sim.mask, 
+                structure=dilation_struct)
+            sim.im = np.where(mask, sim.im, 0)
 
         if return_sim:
             return sim
