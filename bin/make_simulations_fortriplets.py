@@ -6,8 +6,9 @@ from time import time, process_time
 t_start = time()
 
 outfolder = fm.simnuc.sim_rpb1_batch(
-    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims_1000',
-    kernel=fm.load_pickle('/Users/michaelstadler/Bioinformatics/Projects/rpb1/PSFs/psf_20220210_21x25x25pixels_100x50x50voxel.pkl'),
+    outfolder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/results/testsims_abc',
+    kernelfile='/Users/michaelstadler/Bioinformatics/Projects/rpb1/PSFs/psf_20220210_21x25x25pixels_100x50x50voxel.pkl',
+    maskfile='/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/real_masks/mask_files/nc13_1.pkl',
     nsims=2,
     nreps=2,
     nprocesses=4,
@@ -22,7 +23,7 @@ outfolder = fm.simnuc.sim_rpb1_batch(
     cluster_diam_var_rng=[0,1], 
     cluster_nmols_mean_rng=[5,50], 
     cluster_nmols_var_rng=[1,10],
-    noise_sigma_rng=[20,40], 
+    noise_sigma_rng=[1,1], 
     dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), 
     dims_final=(250,85,85)

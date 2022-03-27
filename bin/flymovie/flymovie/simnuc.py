@@ -42,7 +42,7 @@ class Sim():
 
     def __init__(self, mask, res_z=220, res_ij=85):
         self.mask = mask.astype('bool')
-        self.im = np.zeros_like(mask)
+        self.im = np.zeros_like(mask).astype('float64')
         self.res_z = res_z
         self.res_ij = res_ij
         self.z_ij_ratio = self.res_z / self.res_ij
@@ -755,8 +755,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         save_pickle(sim.im, filepath)
 
 #-----------------------------------------------------------------------
-def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
-    sim_func=sim_rpb1, nuc_rad=90, nmasks=50, **kwargs):
+def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
+    nprocesses, mask_dims, sim_func=sim_rpb1, nuc_rad=90, nmasks=50, 
+    **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
 
     Note: I tried to make a batch function that would be general
@@ -795,8 +796,9 @@ def sim_rpb1_batch(outfolder, kernel, nsims, nreps, nprocesses, mask_dims,
     os.mkdir(folder)
     
     # Generate masks.
-    masks = make_imperfect_masks(dims=mask_dims, nucrad_mean=nuc_rad, 
-            nucrad_range=round(nuc_rad * 0.08), center_range=round(nuc_rad * 0.15), n=nmasks)
+    masks = load_pickle(maskfile)
+    kernel = load_pickle(kernelfile)
+    #masks = make_imperfect_masks(dims=mask_dims, nucrad_mean=nuc_rad, nucrad_range=round(nuc_rad * 0.08), center_range=round(nuc_rad * 0.15), n=nmasks)
 
     # Get a list of candidate HLB coordinates by performing erosion on nuclear mask.
     # This ensures that the HLB won't be placed at the nuclear periphery and end up
@@ -982,3 +984,17 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
         filepath = os.path.join(outfolder, file_id + '_' + paramstring 
             + '_rep' + str(nrep) + '.pkl')
         save_pickle(sim.im, filepath)
+
+#-----------------------------------------------------------------------
+def make_mask_file(folder, outfile, target_dims=(100,100,100)):
+    masks = np.ndarray(tuple([0]) + target_dims)
+    for f in os.listdir(folder):
+        if f[0] == '.':
+            continue
+        mask = load_pickle(os.path.join(folder, f))
+
+        mask = ndi.zoom(mask, zoom=(target_dims[0] / mask.shape[0], target_dims[1] / mask.shape[1], target_dims[2] / mask.shape[2]), order=0)
+        mask = np.expand_dims(mask, axis=0)
+        masks = np.vstack((masks, mask))
+    
+    save_pickle(masks.astype(bool), outfile)
