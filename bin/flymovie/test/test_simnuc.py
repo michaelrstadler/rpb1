@@ -3,6 +3,7 @@ import numpy as np
 import scipy.ndimage as ndi
 import tempfile
 from copy import deepcopy
+from flymovie import save_pickle
 from flymovie.simnuc import *
 
 #---------------------------------------------------------------------------
@@ -285,7 +286,7 @@ class TestSimRpb1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tdir:
             mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
                 nuc_rad=8)
-            masks = [mask, mask]
+            masks = [mask, mask]            
             sim_rpb1(masks=masks, kernel=np.ones((2,2,2)), 
                 outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
                 hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
@@ -299,7 +300,16 @@ class TestSimRpb1Batch(unittest.TestCase):
     # Just test to see if it runs.
     def test_sim_rpb1_batch(self):
         with tempfile.TemporaryDirectory() as tdir:
-            sim_rpb1_batch(tdir, np.ones((3,3,3)), 2,2,2,(50,50,50), nuc_rad=20, 
+            maskfile = os.path.join(tdir, 'masks.pkl')
+            kernelfile = os.path.join(tdir, 'kernel.pkl')
+            save_pickle(np.ones((2,2,2)), kernelfile)
+            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+                nuc_rad=8)
+            masks = [mask, mask]
+            save_pickle(masks, maskfile)
+            
+            sim_rpb1_batch(outfolder=tdir, kernelfile=kernelfile, 
+                maskfile=maskfile, nsims=2, nreps=2, nprocesses=2,
                 nfree_rng=[10,20], hlb_diam_rng=[7,15], 
                 hlb_nmols_rng=[100,1000], n_clusters_rng=[0,30], 
                 cluster_diam_mean_rng=[1,3], cluster_diam_var_rng=[0.5, 2], 

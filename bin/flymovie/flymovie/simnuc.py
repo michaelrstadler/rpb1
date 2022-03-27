@@ -756,8 +756,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
 
 #-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
-    nprocesses, mask_dims, sim_func=sim_rpb1, nuc_rad=90, nmasks=50, 
-    **kwargs):
+    nprocesses, sim_func=sim_rpb1, **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
 
     Note: I tried to make a batch function that would be general
@@ -766,18 +765,17 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
 
     Args:
         outfolder: path, folder to which to write simulation outputs
-        kernel: ndarray, convolution kernel for images
+        kernelfile: string, path to pickled file containingconvolution 
+            kernel for images (ndarray)
+        maskfile: string, path to file containing nuclear masks (either
+            a list of ndarrays or single ndarray)
         nsims: int, number of simulations to perform
         nreps: int, number of replicate simulations to make for each
             parameter set
         nprocesses: int, the number of processes to launch with 
             multiprocessing Pool
-        mask_dims: iterable of ints, dimensions in pixels of mask
         sim_func: function, function that recieved kwargs, performs
             simulations, and writes to file
-        nuc_rad: number, radius in pixels of spherical nucleus in mask
-        nmasks: int, the number of different masks to make (different
-            nucleus sizes and shapes)
         kwargs: args supplied to sim_func
     
     Outputs:
