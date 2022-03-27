@@ -796,7 +796,6 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     # Generate masks.
     masks = load_pickle(maskfile)
     kernel = load_pickle(kernelfile)
-    #masks = make_imperfect_masks(dims=mask_dims, nucrad_mean=nuc_rad, nucrad_range=round(nuc_rad * 0.08), center_range=round(nuc_rad * 0.15), n=nmasks)
 
     # Get a list of candidate HLB coordinates by performing erosion on nuclear mask.
     # This ensures that the HLB won't be placed at the nuclear periphery and end up
@@ -848,7 +847,7 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     return folder
 
 #-----------------------------------------------------------------------
-def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
+def sim_histones(masks, kernel, outfolder, nfree, n_domains, a1,
     p1, noise_sigma, nreps, rad_range=(0.5,1,1.5,2,2.5), 
     density_range=np.arange(2,10), dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), dims_final=(250,85,85), rng=None, 
@@ -875,8 +874,9 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
     a value of 0 means all densities equally likely for all domain sizes.
 
     Args:
-        mask: ndarray
-            Nuclear mask
+        mask: iterable of ndarrays
+            Nuclear masks, used in order for nreps. Length must be equal
+            to nreps
         kernel: ndarray
             Convolution kernel
         outfolder: string
@@ -932,6 +932,7 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
 
     for nrep in range(nreps):
         # Initialize sim.
+        mask = masks[nrep]
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
 
@@ -982,6 +983,89 @@ def sim_histones(mask, kernel, outfolder, nfree, n_domains, a1,
         filepath = os.path.join(outfolder, file_id + '_' + paramstring 
             + '_rep' + str(nrep) + '.pkl')
         save_pickle(sim.im, filepath)
+
+#-----------------------------------------------------------------------
+def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
+    nprocesses, nfree_rng, n_domains_rng, a1_rng,
+    p1_rng, noise_sigma_rng, sim_func=sim_histones, **kwargs):
+    """Perform parallelized simulations of histone nuclei in batch.
+
+    Note: quite similar to sim_rpb1_batch, but my efforts to harmonize
+    them into a single function proved to be more trouble than it 
+    was worth, so I ended up with two functions with a lot of overlap.
+
+    Args:
+        outfolder: path, folder to which to write simulation outputs
+        kernelfile: string, path to pickled file containingconvolution 
+            kernel for images (ndarray)
+        maskfile: string, path to file containing nuclear masks (either
+            a list of ndarrays or single ndarray)
+        nsims: int, number of simulations to perform
+        nreps: int, number of replicate simulations to make for each
+            parameter set
+        nprocesses: int, the number of processes to launch with 
+            multiprocessing Pool
+        sim_func: function, function that recieved kwargs, performs
+            simulations, and writes to file
+        kwargs: args supplied to sim_func
+    
+    Outputs:
+        A unique 8-character identifier is associated with the entire 
+        batch. This ID is appended to the folder name. A log file is 
+        saved in the folder containing all supplied paramaters. In 
+        addition, each parameter batch gets a 3-letter random ID to 
+        avoid collisions (unlikely). Parameters for each simulation 
+        are saved in the filename, separated by underscores.
+
+    Note: "Replicates" use identical parameters but different masks. 
+    """
+    # Set folder name with unique identifier and create it.
+    folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
+    folder = outfolder + '_' + folder_id
+    os.mkdir(folder)
+    
+    # Generate masks.
+    masks = load_pickle(maskfile)
+    kernel = load_pickle(kernelfile)
+
+    # Set constant args.
+    f_kwargs = kwargs.copy()
+    f_kwargs['kernel'] = kernel
+    f_kwargs['outfolder'] = folder
+    f_kwargs['nreps'] = nreps
+    
+    # For each replicate, perform selection of random masks and matching
+    # HLB coordinates, add all kwargs to arglist for parallel calling.
+    arglist = []
+    rng = np.random.default_rng()
+    # Select random masks, from masks select random HLB coordinates.
+    for _ in range(nsims):
+        f_kwargs_loc = f_kwargs.copy()
+        mask_idxs = rng.integers(0, len(masks), nreps)
+        f_kwargs_loc['masks'] = [masks[x] for x in mask_idxs]
+        f_kwargs_loc['nfree'] = round(randomize_ab(nfree_rng, rng))
+        f_kwargs_loc['n_domains'] = round(randomize_ab(n_domains_rng, rng))
+        f_kwargs_loc['a1'] = randomize_ab(a1_rng, rng)
+        f_kwargs_loc['p1'] = randomize_ab(p1_rng, rng)
+        f_kwargs_loc['noise_sigma'] = randomize_ab(noise_sigma_rng, rng)
+        arglist.append(f_kwargs_loc)
+    print('arglist done')
+
+    run_pooled_processes(arglist, nprocesses, sim_func)
+    
+    # Write logfile.
+    logitems = kwargs.copy()
+    new_args = {'outfolder': outfolder, 'kernelfile': kernelfile, 
+        'maskfile': maskfile, 'nsims': nsims, 'nreps': nreps,
+        'nfree_rng': nfree_rng, 'n_domains_rng': n_domains_rng, 
+        'a1:rng': a1_rng, 'p1_rng': p1_rng, 
+        'noise_sigma_rng': noise_sigma_rng
+    }
+    logitems.update(new_args)
+    logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
+    write_logfile(logfilepath, logitems)
+    
+    return folder
 
 #-----------------------------------------------------------------------
 def make_mask_file(folder, outfile, target_dims=(100,100,100)):

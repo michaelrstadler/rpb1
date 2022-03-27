@@ -1,6 +1,7 @@
 import flymovie as fm
 import subprocess
 import os
+import numpy as np
 from time import time, process_time
 
 t_start = time()
@@ -24,7 +25,8 @@ outfolder = fm.simnuc.sim_rpb1_batch(
     noise_sigma_rng=[1,1], 
     dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), 
-    dims_final=(250,85,85)
+    dims_final=(250,85,85),
+    dilation_struct=np.ones((1,7,7))
 )
 
 # Sort files into left and right folders.

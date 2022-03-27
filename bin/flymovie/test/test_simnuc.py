@@ -324,10 +324,29 @@ class TestSimHistones(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tdir:
             mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
                 nuc_rad=8)
-            sim_histones(mask, kernel=np.ones((2,2,2)), outfolder=tdir,
+            sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
                 nfree=1000, n_domains=100, a1=-2, p1=0, noise_sigma=3,
                 nreps=2,  
             )
+
+#---------------------------------------------------------------------------
+
+class TestSimHistonesBatch(unittest.TestCase):
+    # Just test to see if it runs.
+    def test_sim_histones_batch(self):
+        with tempfile.TemporaryDirectory() as tdir:
+            maskfile = os.path.join(tdir, 'masks.pkl')
+            kernelfile = os.path.join(tdir, 'kernel.pkl')
+            save_pickle(np.ones((2,2,2)), kernelfile)
+            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
+                nuc_rad=8)
+            masks = [mask, mask]
+            save_pickle(masks, maskfile)
+            
+            sim_histones_batch(outfolder=tdir, kernelfile=kernelfile, 
+                maskfile=maskfile, nsims=2, nreps=2, nprocesses=2,
+                nfree_rng=[100,200], n_domains_rng=[10,20], a1_rng=[1,2],
+                p1_rng=[0,0], noise_sigma_rng=[1.2,3.6])  
 """
 """ 
 
