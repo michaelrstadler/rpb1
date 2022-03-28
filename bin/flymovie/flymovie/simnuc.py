@@ -848,8 +848,8 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
 
 #-----------------------------------------------------------------------
 def sim_histones(masks, kernel, outfolder, nfree, genome_size, 
-    nucleosome_density, fraction_labeled, a1, p1, noise_sigma, nreps, 
-    rad_range=(0.5,1,1.5,2,2.5), density_range=np.arange(2,10), 
+    bp_per_nucleosome, fraction_labeled, a1, p1, noise_sigma, nreps, 
+    rad_max=3, density_min=2, density_max=10, 
     dims_init=(85, 85, 85), dims_kernel=(100,50,50), 
     dims_final=(250,85,85), rng=None, return_sim=False, 
     mask_nuclei=False, dilation_struct=np.ones((1,7,7))):
@@ -883,7 +883,7 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
             Number of "free" (single and randomly distributed in nucleus) fluors
         genome_size: int
             Size of genome in base pairs (be sure to account for ploidy)
-        nucleosome_density: int
+        bp_per_nucleosome: int
             Mean number of base pairs per nucleosome
         fraction_labeled: float
             Fraction of nucleosomes that incorporate a fluor
@@ -895,10 +895,12 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
             Sigma for gaussian noise
         nreps: int
             Number of replicates to simulate
-        rad_range: iterable of floats
-            Range of possible domain radii
-        density_range: iterable of floats 
-            Range of possible domain densities, in fluors per pixel
+        rad_max: float
+            Radius of largest domain
+        density_min: float
+            Minimum domain density, in nucleosomes per pixel
+        density_max: float
+            Maximum domain density, in nucleosomes per pixel
         dims_init: tuple 
             Dimensions (in nm) of voxels in initial image
         dims_kernel: tuple 
@@ -916,10 +918,10 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
     """
     # Set up some variables and make random number generator (if needed).
     a1, p1 = (float(a1), float(p1))
-    rad_range = np.array(rad_range)
-    density_range = np.array(density_range)
+    rad_range = np.arange(0.5, rad_max, 0.25)
+    density_range = np.arange(density_min, density_max, 0.25)
     gfp_intensity = 100
-    n_labeled_nucleosomes = round(genome_size / nucleosome_density * fraction_labeled)
+    n_labeled_nucleosomes = round(genome_size / bp_per_nucleosome * fraction_labeled)
     if rng is None:
         rng = np.random.default_rng()
     
@@ -930,7 +932,6 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
     rad_range_norm = (rad_range - np.min(rad_range)) / (np.max(rad_range) - np.min(rad_range) + 0.001) # For one item list, prevents divide by 0.
     rad_exp = rad_range ** (-1 * a1)
     rad_probs = rad_exp / np.sum(rad_exp)
-    print(rad_probs)
 
     for nrep in range(nreps):
         # Initialize sim.
@@ -956,6 +957,7 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
             nucleosome_density = rng.choice(density_range, p=density_probs) 
             fluor_density = nucleosome_density * fraction_labeled
             
+            # Add domain.
             sim.add_sphere(center_coords=coords, fluor_intensity=gfp_intensity, 
                         num_fluors=fluor_density, rad=rad, random=True, rng=rng, 
                         density=True)
@@ -972,7 +974,6 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
         sim.convolve()
         sim.resize(dims_final, order=1)
         sim.add_noise('gaussian', sigma=noise_sigma)
-        #sim.im = stack_normalize_minmax(sim.im) * (100)
 
         if mask_nuclei:
             mask = ndi.morphology.binary_dilation(sim.mask, 
@@ -983,15 +984,18 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
             return sim
         
         paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
-                genome_size, nucleosome_density, a1, p1, noise_sigma]])
+            bp_per_nucleosome, fraction_labeled, a1, p1, 
+            noise_sigma, rad_max, density_min, density_max]])
         filepath = os.path.join(outfolder, file_id + '_' + paramstring 
             + '_rep' + str(nrep) + '.pkl')
         save_pickle(sim.im, filepath)
 
 #-----------------------------------------------------------------------
 def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
-    nprocesses, nfree_rng, n_domains_rng, a1_rng,
-    p1_rng, noise_sigma_rng, sim_func=sim_histones, **kwargs):
+    nprocesses, genome_size, nfree_rng, nucleosome_density_rng, 
+    fraction_labeled_rng, density_min_rng, density_max_rng, rad_min_rng,
+    rad_max_rng, a1_rng, p1_rng, noise_sigma_rng, sim_func=sim_histones, 
+    **kwargs):
     """Perform parallelized simulations of histone nuclei in batch.
 
     Note: quite similar to sim_rpb1_batch, but my efforts to harmonize
@@ -1048,7 +1052,13 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
         mask_idxs = rng.integers(0, len(masks), nreps)
         f_kwargs_loc['masks'] = [masks[x] for x in mask_idxs]
         f_kwargs_loc['nfree'] = round(randomize_ab(nfree_rng, rng))
-        f_kwargs_loc['n_domains'] = round(randomize_ab(n_domains_rng, rng))
+        f_kwargs_loc['genome_size'] = genome_size
+        f_kwargs_loc['nucleosome_density'] = round(randomize_ab(nucleosome_density_rng, rng))
+        f_kwargs_loc['fraction_labeled'] = randomize_ab(fraction_labeled_rng, rng)
+        f_kwargs_loc['rad_range'] = np.arange(randomize_ab(rad_min_rng, rng),
+            randomize_ab(rad_max_rng, rng), 0.25)
+        f_kwargs_loc['density_range'] = np.arange(randomize_ab(density_min_rng, rng),
+            randomize_ab(density_max_rng, rng), 0.25)
         f_kwargs_loc['a1'] = randomize_ab(a1_rng, rng)
         f_kwargs_loc['p1'] = randomize_ab(p1_rng, rng)
         f_kwargs_loc['noise_sigma'] = randomize_ab(noise_sigma_rng, rng)
