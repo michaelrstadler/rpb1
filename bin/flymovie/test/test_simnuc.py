@@ -324,13 +324,53 @@ class TestSimHistones(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tdir:
             mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
                 nuc_rad=8)
+
+            # Test writing file.
             sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
-                nfree=1000, n_domains=100, a1=-2, p1=0, noise_sigma=3,
-                nreps=2,  
+                nfree=100, fraction_labeled=0.5, genome_size=5_000_000, nucleosome_density=250, a1=1, 
+                p1=0, noise_sigma=0.1, nreps=2,  
             )
 
-#---------------------------------------------------------------------------
+            # Test genome_size.
+            sim1 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=100, fraction_labeled=0.5, genome_size=5_000_000, nucleosome_density=250, a1=1, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
+            
+            sim2 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=100, fraction_labeled=0.5, genome_size=10_000_000, nucleosome_density=250, a1=1, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
 
+            self.assertGreater(np.mean(sim2.im), np.mean(sim1.im), 'Mean should go up.')
+            
+            # Test fraction labeled.
+            sim1 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=100, fraction_labeled=0.1, genome_size=5_000_000, nucleosome_density=250, a1=1, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
+
+            sim2 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=100, fraction_labeled=0.9, genome_size=5_000_000, nucleosome_density=250, a1=1, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
+
+            self.assertGreater(np.mean(sim2.im), np.mean(sim1.im), 'Mean should go up.')
+
+            # Test size_distribution.
+            sim1 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=0, fraction_labeled=0.5, genome_size=5_000_000, nucleosome_density=3_000_000, a1=10, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
+
+            sim2 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
+                nfree=0, fraction_labeled=0.5, genome_size=5_000_000, nucleosome_density=3_000_000, a1=-10, 
+                p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
+            print(np.max(sim2.im), np.max(sim1.im))
+            self.assertGreater(np.max(sim2.im), np.max(sim1.im), 'Max should go up.')
+
+            # Test p1.
+            # TO DO.
+
+            self.assertGreater(np.mean(sim2.im), np.mean(sim1.im), 'Mean should go up.')
+
+#---------------------------------------------------------------------------
+"""
 class TestSimHistonesBatch(unittest.TestCase):
     # Just test to see if it runs.
     def test_sim_histones_batch(self):
@@ -347,7 +387,7 @@ class TestSimHistonesBatch(unittest.TestCase):
                 maskfile=maskfile, nsims=2, nreps=2, nprocesses=2,
                 nfree_rng=[100,200], n_domains_rng=[10,20], a1_rng=[1,2],
                 p1_rng=[0,0], noise_sigma_rng=[1.2,3.6])  
-"""
+
 """ 
 
 if __name__ == '__main__':
