@@ -469,7 +469,7 @@ class Sim():
             res_ij: float, resolution in ij of kernel (typical: nm)
         """
         if kernel.ndim != self.im.ndim:
-            raise ValueError('Dimensions of kernel do not match image.')
+            raise ValueError('Number of dimensions of kernel do not match image.')
         self.kernel = kernel / np.sum(kernel)
         self.kernel_res_z = res_z
         self.kernel_res_ij = res_ij
@@ -1097,13 +1097,26 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
 
 #-----------------------------------------------------------------------
 def make_mask_file(folder, outfile, target_dims=(100,100,100)):
+    """Take a folder of mask files, resize if necessary, save as a 
+    single ndarray pickle file.
+    
+    Args:
+        folder: str
+            Folder with pickled ndarray masks
+        outfile: str
+            Output file
+        target_dims: tuple of ints
+            Dimensions of final masks
+    """
     masks = np.ndarray(tuple([0]) + target_dims)
     for f in os.listdir(folder):
         if f[0] == '.':
             continue
         mask = load_pickle(os.path.join(folder, f))
 
-        mask = ndi.zoom(mask, zoom=(target_dims[0] / mask.shape[0], target_dims[1] / mask.shape[1], target_dims[2] / mask.shape[2]), order=0)
+        mask = ndi.zoom(mask, zoom=(target_dims[0] / mask.shape[0], 
+            target_dims[1] / mask.shape[1], 
+            target_dims[2] / mask.shape[2]), order=0)
         mask = np.expand_dims(mask, axis=0)
         masks = np.vstack((masks, mask))
     

@@ -361,7 +361,7 @@ class TestSimHistones(unittest.TestCase):
             sim2 = sim_histones([mask, mask], kernel=np.ones((2,2,2)), outfolder=tdir,
                 nfree=0, fraction_labeled=0.5, genome_size=5_000_000, bp_per_nucleosome=3_000_000, a1=-10, 
                 p1=0, noise_sigma=0.1, nreps=2, return_sim=True)
-            print(np.max(sim2.im), np.max(sim1.im))
+
             self.assertGreater(np.max(sim2.im), np.max(sim1.im), 'Max should go up.')
 
             # Test p1.
@@ -370,7 +370,7 @@ class TestSimHistones(unittest.TestCase):
             self.assertGreater(np.mean(sim2.im), np.mean(sim1.im), 'Mean should go up.')
 
 #---------------------------------------------------------------------------
-"""
+
 class TestSimHistonesBatch(unittest.TestCase):
     # Just test to see if it runs.
     def test_sim_histones_batch(self):
@@ -378,16 +378,18 @@ class TestSimHistonesBatch(unittest.TestCase):
             maskfile = os.path.join(tdir, 'masks.pkl')
             kernelfile = os.path.join(tdir, 'kernel.pkl')
             save_pickle(np.ones((2,2,2)), kernelfile)
-            mask = Sim.make_spherical_mask(zdim=20, idim=20, jdim=20, 
-                nuc_rad=8)
+            mask = Sim.make_spherical_mask(zdim=20, idim=200, jdim=200, 
+                nuc_rad=42)
             masks = [mask, mask]
             save_pickle(masks, maskfile)
             
             sim_histones_batch(outfolder=tdir, kernelfile=kernelfile, 
                 maskfile=maskfile, nsims=2, nreps=2, nprocesses=2,
-                nfree_rng=[100,200], n_domains_rng=[10,20], a1_rng=[1,2],
-                p1_rng=[0,0], noise_sigma_rng=[1.2,3.6])  
-
+                nfree_rng=[100,200], genome_size=1.8e7, bp_per_nucleosome_rng=[1800,2000], 
+                fraction_labeled_rng=[0.1,0.2], density_min_rng=[2,4], density_max_rng=[8,10], 
+                rad_max_rng=[2.5,4], a1_rng=[0,2], p1_rng=[0,2], noise_sigma_rng=[1,3]
+                )  
+"""
 """ 
 
 if __name__ == '__main__':
