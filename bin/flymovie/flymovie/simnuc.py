@@ -861,7 +861,7 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
     exponent a1. The densities (nucleosomes/pixel) of domains are drawn 
     from a power-law distribution with exponent a2 that is a function of 
     domain size. This relationship is defined by the parameter p1, such 
-    that the power law exponent for the smallest domain size is -p1, 0
+    that the power law exponent is -p1 for the smallest domain size is, 0
     for the min/max midpoint, and p1 for the largest domain size. 
     Intuitively: for a value of 0, there is no relationship between size
     and density, for increasing values the tendency gets stronger for 
@@ -888,13 +888,15 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
         fraction_labeled: float
             Fraction of nucleosomes that incorporate a fluor
         a1: float
-            Exponent for power law defining domain radius
+            Exponent for power law defining domain radius (more positive
+            gives a stronger bias for smaller domains)
         p1: float
             Sensitivity of density to domain size
         noise_sigma: float
             Sigma for gaussian noise
         nreps: int
-            Number of replicates to simulate
+            Number of replicates to simulate (same parameters, 
+            different masks)
         rad_max: float
             Radius of largest domain
         density_min: float
@@ -918,8 +920,8 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
     """
     # Set up some variables and make random number generator (if needed).
     a1, p1 = (float(a1), float(p1))
-    rad_range = np.arange(0.5, rad_max, 0.25)
-    density_range = np.arange(density_min, density_max, 0.25)
+    rad_range = np.arange(0.5, rad_max + 0.01, 0.25) # 0.01 is so rad_max is included
+    density_range = np.arange(density_min, density_max + 0.01, 0.25)
     gfp_intensity = 100
     n_labeled_nucleosomes = round(genome_size / bp_per_nucleosome * fraction_labeled)
     if rng is None:
@@ -941,8 +943,8 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
 
         # Add domains by randomly drawing from domain sizes and densities,
         # placing at random nuclear coordinates.
-        eroded_coords = sim.get_eroded_coordinates(5)
-        for n in range(round(n_labeled_nucleosomes / fraction_labeled * 2)): # Avoiding while true.
+        eroded_coords = sim.get_eroded_coordinates(4)
+        for n in range(round(n_labeled_nucleosomes / fraction_labeled * 3)): # Avoiding while true.
             # Draw coords and radius.
             rad_idx = rng.choice(np.arange(len(rad_range)), p=rad_probs)
             rad = rad_range[rad_idx]
@@ -992,8 +994,8 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
 
 #-----------------------------------------------------------------------
 def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
-    nprocesses, genome_size, nfree_rng, nucleosome_density_rng, 
-    fraction_labeled_rng, density_min_rng, density_max_rng, rad_min_rng,
+    nprocesses, genome_size, nfree_rng, bp_per_nucleosome_rng, 
+    fraction_labeled_rng, density_min_rng, density_max_rng,
     rad_max_rng, a1_rng, p1_rng, noise_sigma_rng, sim_func=sim_histones, 
     **kwargs):
     """Perform parallelized simulations of histone nuclei in batch.
@@ -1013,6 +1015,18 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
             parameter set
         nprocesses: int, the number of processes to launch with 
             multiprocessing Pool
+        genome_size: int, size of genome in basepairs
+        Ranges (tuple of 2 numbers defining upper and lower bounds)
+            for sim_histones parameters:
+                nfree_rng
+                bp_per_nucleosome_rng
+                fraction_labeled_rng
+                density_min_rng
+                density_max_rng
+                rad_max_rng
+                a1_rng
+                p1_rng
+                noise_sigma_rng
         sim_func: function, function that recieved kwargs, performs
             simulations, and writes to file
         kwargs: args supplied to sim_func
@@ -1032,7 +1046,7 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     folder = outfolder + '_' + folder_id
     os.mkdir(folder)
     
-    # Generate masks.
+    # Get masks and kernel.
     masks = load_pickle(maskfile)
     kernel = load_pickle(kernelfile)
 
@@ -1042,23 +1056,20 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     f_kwargs['outfolder'] = folder
     f_kwargs['nreps'] = nreps
     
-    # For each replicate, perform selection of random masks and matching
-    # HLB coordinates, add all kwargs to arglist for parallel calling.
+    # For parallel calls to sim_func, build argument lists by random draws.
     arglist = []
     rng = np.random.default_rng()
-    # Select random masks, from masks select random HLB coordinates.
     for _ in range(nsims):
         f_kwargs_loc = f_kwargs.copy()
         mask_idxs = rng.integers(0, len(masks), nreps)
         f_kwargs_loc['masks'] = [masks[x] for x in mask_idxs]
         f_kwargs_loc['nfree'] = round(randomize_ab(nfree_rng, rng))
         f_kwargs_loc['genome_size'] = genome_size
-        f_kwargs_loc['nucleosome_density'] = round(randomize_ab(nucleosome_density_rng, rng))
+        f_kwargs_loc['bp_per_nucleosome'] = round(randomize_ab(bp_per_nucleosome_rng, rng))
         f_kwargs_loc['fraction_labeled'] = randomize_ab(fraction_labeled_rng, rng)
-        f_kwargs_loc['rad_range'] = np.arange(randomize_ab(rad_min_rng, rng),
-            randomize_ab(rad_max_rng, rng), 0.25)
-        f_kwargs_loc['density_range'] = np.arange(randomize_ab(density_min_rng, rng),
-            randomize_ab(density_max_rng, rng), 0.25)
+        f_kwargs_loc['rad_max'] = randomize_ab(rad_max_rng, rng)
+        f_kwargs_loc['density_min'] = randomize_ab(density_min_rng, rng)
+        f_kwargs_loc['density_max'] = randomize_ab(density_max_rng, rng)
         f_kwargs_loc['a1'] = randomize_ab(a1_rng, rng)
         f_kwargs_loc['p1'] = randomize_ab(p1_rng, rng)
         f_kwargs_loc['noise_sigma'] = randomize_ab(noise_sigma_rng, rng)
@@ -1071,8 +1082,11 @@ def sim_histones_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     logitems = kwargs.copy()
     new_args = {'outfolder': outfolder, 'kernelfile': kernelfile, 
         'maskfile': maskfile, 'nsims': nsims, 'nreps': nreps,
-        'nfree_rng': nfree_rng, 'n_domains_rng': n_domains_rng, 
-        'a1:rng': a1_rng, 'p1_rng': p1_rng, 
+        'nfree_rng': nfree_rng,  'genome_size': genome_size,
+        'bp_per_nucleosome_rng': bp_per_nucleosome_rng, 
+        'fraction_labeled_rng': fraction_labeled_rng, 
+        'density_min_rng': density_min_rng, 'density_max_rng': density_max_rng,
+        'rad_max_rng': rad_max_rng, 'a1:rng': a1_rng, 'p1_rng': p1_rng, 
         'noise_sigma_rng': noise_sigma_rng
     }
     logitems.update(new_args)
