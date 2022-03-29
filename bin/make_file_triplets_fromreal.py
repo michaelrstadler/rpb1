@@ -13,16 +13,17 @@ import argparse
 import sys
 import pickle
 import os
+import gzip
 import numpy as np
 
 def make_parser():
     parser = argparse.ArgumentParser(description='.')
     parser.add_argument("-a", "--anchor_image_folder", type=str,  required=True,
                         help='Folder containing pickled image files.')
-    parser.add_argument("-p", "--positive_image_folder", type=str,  required=True,
-                        help='Folder containing pickled image files.')
-    parser.add_argument("-n", "--negative_image_folder", type=str,  required=True,
-                        help='Folder containing pickled image files.')
+    parser.add_argument("-p", "--positive_image_folder", type=str,  default=None,
+                        help='(optional) Folder containing pickled image files. Default: anchor image folder')
+    parser.add_argument("-n", "--negative_image_folder", type=str,  default=None,
+                        help='(optional) Folder containing pickled image files. Default: anchor image folder')
     parser.add_argument("-t", "--num_triplets", type=int, required=True,
                         help='Number of triplets to make for each real image')
     parser.add_argument("-o", "--outfile", type=str, required=True,
@@ -85,7 +86,7 @@ def get_positives(positive_files, sampleID, stackID, nucID, n, rs):
 
 def make_triplets(anchor_files, positive_files, negative_files, outfilepath, num_triplets):
     rs = np.random.RandomState()
-    with open(outfilepath, 'w') as outfile:
+    with gzip.open(outfilepath, 'wt') as outfile:
         for sampleID in anchor_files.keys():
             for stackID in anchor_files[sampleID].keys():
                 for nucID in anchor_files[sampleID][stackID].keys():
@@ -102,9 +103,17 @@ def main(argv):
     parser = make_parser()
     args = parser.parse_args(argv)
 
-    anchor_files = get_files(args.anchor_image_folder)
-    positive_files = get_files(args.positive_image_folder)
-    negative_files = get_files(args.negative_image_folder)
+    anchor_image_folder = args.anchor_image_folder
+    positive_image_folder = args.positive_image_folder
+    negative_image_folder = args.negative_image_folder
+    if positive_image_folder is None:
+        positive_image_folder = anchor_image_folder
+    if negative_image_folder is None:
+        negative_image_folder = anchor_image_folder
+
+    anchor_files = get_files(anchor_image_folder)
+    positive_files = get_files(positive_image_folder)
+    negative_files = get_files(negative_image_folder)
 
     make_triplets(anchor_files, positive_files, negative_files, args.outfile, args.num_triplets)
 
