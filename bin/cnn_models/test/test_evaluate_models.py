@@ -22,6 +22,21 @@ class TestEvaluateModels(unittest.TestCase):
 
             im_embeddings, params = ev.embed_images(tempdir, embedding)
 
+            outputs = ev.embed_images(tempdir, embedding, return_params=False)
+            self.assertEqual(len(outputs), 1, 'Should be 1 output')
+
+            outputs = ev.embed_images(tempdir, embedding, return_params=False, return_files=True)
+            self.assertEqual(len(outputs), 2, 'Should be 2 output')
+            self.assertEqual(len(outputs[1]), 4, 'Should be 4 files')
+
+            outputs = ev.embed_images(tempdir, embedding, return_params=False, return_files=True, return_stack=True)
+            self.assertEqual(len(outputs), 3, 'Should be 3 output')
+            self.assertTrue(np.array_equal(outputs[1].shape, [4,20,100,100]), 'Wrong shape')
+            self.assertEqual(len(outputs[2]), 4, 'Should be 4 files')
+
+            outputs = ev.embed_images(tempdir, embedding, return_params=False, return_files=True, return_stack=False)
+            self.assertEqual(len(outputs), 2, 'Should be 2 output')
+
         self.assertTrue(np.array_equal(im_embeddings.shape, (4,256)), 'Wrong size of im_embeddings')
         self.assertTrue(np.array_equal(params.shape, (4,2)), 'Wrong size of params')
         for c in range(params.shape[1]):

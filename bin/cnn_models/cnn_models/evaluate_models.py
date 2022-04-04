@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 #---------------------------------------------------------------------------
 def embed_images(im_folder, embedding, mip=False, verbose=False, 
-    return_params=True):
+    return_params=True, return_stack=False, return_files=False):
     """Pass images from a folder through embedding model, return their 
     location and normalized simulation parameters.
     
@@ -35,6 +35,10 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
             Use maximum intensity projections
         return_params: bool
             Return normalized parameters
+        return_stack: bool
+            Return images as ndarray
+        return_files:
+            Return list of filenames
         
     Returns:
         im_embeddings: ndarray
@@ -42,6 +46,10 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
         params: ndarray
             Simulation parameters of images, taken from file name,
             each normalized mean=0 std=1.
+        stack: ndarray
+            Input images
+        files_output: list
+            List of input filenames
     """
     
     def normalize_params(params):
@@ -62,6 +70,8 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
 
     # Load images and extract parameters.
     # Ensure it's a good file, ignore hidden files.
+    ims = []
+    files_out = []
     count = 0
     for f in files:
         if (f[-3:] != 'pkl') or (f[0] == '.'):
@@ -85,13 +95,27 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
             p= f.split('_')[1:-1]
             p = [float(x) for x in p]
             params = np.vstack([params, p])
+
+        if return_stack:
+            ims.append(np.squeeze(im))
+
+        if return_files:
+            files_out.append(f)
+    
+    returns = [im_embeddings]
     
     if return_params:
         params = normalize_params(params)
-        return im_embeddings, params
+        returns.append(params)
     
-    return im_embeddings
+    if return_stack:
+        returns.append(np.array(ims))
 
+    if return_files:
+        returns.append(files_out)
+
+    return returns
+    
 #---------------------------------------------------------------------------
 def rank_embeddingdist_matchedpairs(embeddings1, embeddings2):
     """Determine the ranking of matched pairs of images w.r.t. embedding 
