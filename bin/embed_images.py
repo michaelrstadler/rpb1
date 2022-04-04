@@ -22,11 +22,13 @@ def make_parser():
     parser.add_argument("-m", "--model_path", type=str, required=True,
                         help='Path to variables for model')
     parser.add_argument("-s", "--image_shape", nargs='+', type=int, required=True,
-                        help='Shape (z, y, x) of input images')
+                        help='Shape "z y x" of input images')
     parser.add_argument("-o", "--outfile", type=str, required=True,
                         help='Path for output file')
     parser.add_argument("-l", "--num_layers", type=int, default=8,
                         help='number of layers in CNN model')
+    parser.add_argument("-p", "--return_params", action="store_true",
+                        help='Return normalized parameters')
 
     return parser
 
@@ -42,11 +44,11 @@ def main(argv):
     embedding.load_weights(args.model_path)
 
     # Get embeddings.
-    embeddings = embed_images(args.image_folder, embedding, verbose=True)
+    outputs = embed_images(args.image_folder, embedding, verbose=True, return_files=True, return_params=args.return_params)
 
     # Save.
     with open(args.outfile, 'wb') as outfile:
-        pickle.dump(embeddings, outfile, protocol=4)
+        pickle.dump(outputs, outfile, protocol=4)
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

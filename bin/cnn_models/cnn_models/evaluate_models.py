@@ -33,6 +33,8 @@ def embed_images(im_folder, embedding, mip=False, verbose=False,
             model for image embedding
         mip: bool
             Use maximum intensity projections
+        verbose:
+            Print progress counter to standard out
         return_params: bool
             Return normalized parameters
         return_stack: bool
