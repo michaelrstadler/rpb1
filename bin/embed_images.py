@@ -39,7 +39,7 @@ def main(argv):
     target_shape = tuple(args.image_shape)
     
     # Make model.
-    base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=8)
+    base_cnn = cn.make_base_cnn_3d(image_shape=target_shape, nlayers=args.num_layers)
     embedding = cn.make_embedding(base_cnn)
     embedding.load_weights(args.model_path)
 
