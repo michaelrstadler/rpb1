@@ -21,6 +21,34 @@ import matplotlib.pyplot as plt
 
 
 #---------------------------------------------------------------------------
+def save_embeddings(outfilepath, embeddings, filenames):
+    """Save embeddings and matched filenames to tsv files.
+    
+    Args:
+        outfilepath: str
+            Path and stem for files to save, 'embeddings' and 'filenames'
+            are appended
+        embeddings: ndarray
+            Embeddings
+        filenames: list-like
+            Filenames corresponding to rows of embedding
+    """
+    if len(filenames) != embeddings.shape[0]:
+        raise ValueError('Embedding dimensions do not match number of filenames.')
+
+    np.savetxt(outfilepath + '_embeddings.tsv', embeddings, delimiter='\t')
+
+    with open(outfilepath + '_filenames.tsv', 'w') as filenames_file:
+        for f in filenames:
+            if f[0] == '.':
+                continue
+            filenames_file.write(f + '\n')
+
+#---------------------------------------------------------------------------
+
+
+
+#---------------------------------------------------------------------------
 def embed_images(im_folder, embedding, mip=False, verbose=False, 
     return_params=True, return_stack=False, return_files=False):
     """Pass images from a folder through embedding model, return their 
@@ -417,3 +445,5 @@ def visualize_batch(ds, figsize=4, **kwargs):
     im3 = process_im(batch[2])
 
     fm.viewer([im1, im2, im3], figsize, **kwargs)
+
+
