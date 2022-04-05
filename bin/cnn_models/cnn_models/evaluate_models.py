@@ -45,7 +45,37 @@ def save_embeddings(outfilepath, embeddings, filenames):
             filenames_file.write(f + '\n')
 
 #---------------------------------------------------------------------------
+def combine_embeddings(outfilestem, infilestems):
+    """Combine embeddings and filenames from files, write combined data
+    to file, return embeddings and filenames.
 
+    Args:
+        outfilestem: str
+            Path to stem of files to write
+        infilestem: list-like of str
+            List of paths to embeddings/filenames
+    
+    Returns:
+        merged: ndarray
+            Combined embeddings
+        filenames: numpy array
+            Combined filenames
+    """
+    # Merge embeddings.
+    merged = np.genfromtxt(fname=infilestems[0] + '_embeddings.tsv', delimiter="\t")
+    filenames = np.genfromtxt(fname=infilestems[0] + '_filenames.tsv', delimiter="\t", dtype='str')
+
+    for n in range(1, len(infilestems)):
+        new = np.genfromtxt(fname=infilestems[n] + '_embeddings.tsv', delimiter="\t")
+        merged = np.vstack((merged, new))
+
+        newfiles = np.genfromtxt(fname=infilestems[n] + '_filenames.tsv', dtype='str', delimiter='\t')
+        filenames = np.concatenate((filenames, newfiles))
+
+    np.savetxt(outfilestem + '_embeddings.tsv', merged, delimiter='\t')
+    np.savetxt(outfilestem + '_filenames.tsv', filenames, delimiter='\t', fmt="%s")
+    
+    return merged, filenames
 
 
 #---------------------------------------------------------------------------
