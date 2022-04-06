@@ -123,7 +123,17 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
         p = (p - p.mean(axis=0)) / std
         return p
         
+    def get_batch_shape(folder, files):
+        """Initialize embeddings ndarray with proper shape."""
+        for f in files:
+            if (f[-3:] != 'pkl') or (f[0] == '.'):
+                continue
+            im_shape = fm.load_pickle(os.path.join(folder, f)).shape
+            expanded_shape = tuple([0]) + im_shape + tuple([1])
+            return expanded_shape
+
     files = sorted(os.listdir(im_folder))
+    batch_shape = get_batch_shape(im_folder, files)
     num_params = len(files[-1].split('_')) - 2
     params = np.ndarray((0, num_params))
     im_embeddings = np.ndarray((0,256))
@@ -133,34 +143,41 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
     ims = []
     files_out = []
     count = 0
-    for f in files:
-        if (f[-3:] != 'pkl') or (f[0] == '.'):
-            continue
-        if verbose and (count % 1_000 == 0):
-            print(count)
-            sys.stdout.flush()
-        count += 1
-        # Because of the silliness with extracting filename from tensor, 
-        # have to add two single quotes flanking filename.
-        filename = "_'" + os.path.join(im_folder, f) + "'_"
+    
+    for test in range(1):
+        #batch = np.zeros(batch_shape)
+        batch = []
+        for f in files:
+            if (f[-3:] != 'pkl') or (f[0] == '.'):
+                continue
+            if verbose and (count % 1_000 == 0):
+                print(count)
+                sys.stdout.flush()
+            count += 1
+            # Because of the silliness with extracting filename from tensor, 
+            # have to add two single quotes flanking filename.
+            filename = "_'" + os.path.join(im_folder, f) + "'_"
+            
+            # Get embedding.
+            im = preprocess_image(filename, mip)
+            #batch = np.vstack((batch, im))
+            batch.append(im)
+
+            # Get parameters.
+            if return_params:
+                p= f.split('_')[1:-1]
+                p = [float(x) for x in p]
+                params = np.vstack([params, p])
+
+            if return_stack:
+                ims.append(np.squeeze(im))
+
+            if return_files:
+                files_out.append(f)
         
-        # Get embedding.
-        im = preprocess_image(filename, mip)
-        im = np.expand_dims(im, axis=0)
-        e = embedding(im).numpy()
+        batch = np.array(batch)
+        e = embedding(batch).numpy()
         im_embeddings = np.vstack([im_embeddings, e])
-
-        # Get parameters.
-        if return_params:
-            p= f.split('_')[1:-1]
-            p = [float(x) for x in p]
-            params = np.vstack([params, p])
-
-        if return_stack:
-            ims.append(np.squeeze(im))
-
-        if return_files:
-            files_out.append(f)
     
     returns = [im_embeddings]
     
