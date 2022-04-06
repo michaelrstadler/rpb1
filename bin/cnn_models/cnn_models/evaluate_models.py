@@ -89,6 +89,9 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
             Folder containing pickled ndarray image stacks
         embedding: keras model
             model for image embedding
+        batch_size: int
+            Number of images to embed simultaneously (higher is faster,
+            can cause memory constraints)
         mip: bool
             Use maximum intensity projections
         verbose:
@@ -138,6 +141,7 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
         start = b * batch_size
         files_batch = files[start:start + batch_size]
         batch = []
+        
         for f in files_batch:
             if (f[-3:] != 'pkl') or (f[0] == '.'):
                 continue
@@ -167,7 +171,6 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
                 files_out.append(f)
         
         batch = np.array(batch)
-        print(batch.shape)
         e = embedding(batch).numpy()
         im_embeddings = np.vstack([im_embeddings, e])
     
