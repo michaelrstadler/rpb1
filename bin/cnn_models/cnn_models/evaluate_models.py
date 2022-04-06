@@ -79,7 +79,7 @@ def combine_embeddings(outfilestem, infilestems):
 
 
 #---------------------------------------------------------------------------
-def embed_images(im_folder, embedding, mip=False, verbose=False, 
+def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False, 
     return_params=True, return_stack=False, return_files=False):
     """Pass images from a folder through embedding model, return their 
     location and normalized simulation parameters.
