@@ -122,18 +122,8 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
         p = params.copy()
         p = (p - p.mean(axis=0)) / std
         return p
-        
-    def get_batch_shape(folder, files):
-        """Initialize embeddings ndarray with proper shape."""
-        for f in files:
-            if (f[-3:] != 'pkl') or (f[0] == '.'):
-                continue
-            im_shape = fm.load_pickle(os.path.join(folder, f)).shape
-            expanded_shape = tuple([0]) + im_shape + tuple([1])
-            return expanded_shape
 
     files = sorted(os.listdir(im_folder))
-    batch_shape = get_batch_shape(im_folder, files)
     num_params = len(files[-1].split('_')) - 2
     params = np.ndarray((0, num_params))
     im_embeddings = np.ndarray((0,256))
@@ -144,10 +134,11 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
     files_out = []
     count = 0
     
-    for test in range(1):
-        #batch = np.zeros(batch_shape)
+    for b in range(int(len(files) / batch_size) + 1):
+        start = b * batch_size
+        files_batch = files[start:start + batch_size]
         batch = []
-        for f in files:
+        for f in files_batch:
             if (f[-3:] != 'pkl') or (f[0] == '.'):
                 continue
             if verbose and (count % 1_000 == 0):
@@ -176,6 +167,7 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
                 files_out.append(f)
         
         batch = np.array(batch)
+        print(batch.shape)
         e = embedding(batch).numpy()
         im_embeddings = np.vstack([im_embeddings, e])
     
