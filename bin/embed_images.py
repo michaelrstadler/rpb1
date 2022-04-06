@@ -27,6 +27,8 @@ def make_parser():
                         help='Path for output file')
     parser.add_argument("-l", "--num_layers", type=int, default=8,
                         help='number of layers in CNN model')
+    parser.add_argument("-b", "--batch_size", type=int, default=250,
+                        help='Size of batches to process at once')
     parser.add_argument("-p", "--return_params", action="store_true",
                         help='Return normalized parameters')
 
@@ -44,7 +46,8 @@ def main(argv):
     embedding.load_weights(args.model_path)
 
     # Get embeddings.
-    outputs = embed_images(args.image_folder, embedding, verbose=True, return_files=True, return_params=args.return_params)
+    outputs = embed_images(args.image_folder, embedding, verbose=True, return_files=True, 
+            return_params=args.return_params, batch_size=args.batch_size)
 
     # Save.
     with open(args.outfile, 'wb') as outfile:
