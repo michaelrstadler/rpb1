@@ -470,7 +470,7 @@ class Sim():
         """
         if kernel.ndim != self.im.ndim:
             raise ValueError('Number of dimensions of kernel do not match image.')
-        self.kernel = kernel / np.sum(kernel)
+        self.kernel = kernel / np.max(kernel)
         self.kernel_res_z = res_z
         self.kernel_res_ij = res_ij
     
@@ -493,7 +493,6 @@ class Sim():
                 self.kernel_res_ij  / self.res_ij, 
                 self.kernel_res_ij  / self.res_ij
                 ])
-            kernel = kernel / np.sum(kernel)
 
         conv = ndi.convolve(self.im, kernel)
         self.im = conv
