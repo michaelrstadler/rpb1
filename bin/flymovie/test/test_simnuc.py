@@ -288,7 +288,7 @@ class TestSimRpb1(unittest.TestCase):
                 nuc_rad=8)
             masks = [mask, mask]            
             sim_rpb1(masks=masks, kernel=np.ones((2,2,2)), 
-                outfolder=tdir, nreps=2, nfree_rng=[1,1], hlb_diam_rng=[1,1], 
+                outfolder=tdir, nreps=2, ntotal_rng=[10_000,10_000], hlb_diam_rng=[1,1], 
                 hlb_nmols_rng=[1,1], n_clusters_rng=[1,1], 
                 cluster_diam_mean_rng=[1,1], cluster_diam_var_rng=[1,1], 
                 cluster_nmols_mean_rng=[1,1], cluster_nmols_var_rng=[1,1], 
@@ -310,11 +310,11 @@ class TestSimRpb1Batch(unittest.TestCase):
             
             sim_rpb1_batch(outfolder=tdir, kernelfile=kernelfile, 
                 maskfile=maskfile, nsims=2, nreps=2, nprocesses=2,
-                nfree_rng=[10,20], hlb_diam_rng=[7,15], 
+                ntotal_rng=[20_000,20_000], hlb_diam_rng=[7,15], 
                 hlb_nmols_rng=[100,1000], n_clusters_rng=[0,30], 
-                cluster_diam_mean_rng=[1,3], cluster_diam_var_rng=[0.5, 2], 
-                cluster_nmols_mean_rng=[10,100], cluster_nmols_var_rng=[1,10], 
-                noise_sigma_rng=[1_000, 2_000])  
+                cluster_diam_mean_rng=[1,2], cluster_diam_var_rng=[0.5, 2], 
+                cluster_nmols_mean_rng=[10,25], cluster_nmols_var_rng=[1,3], 
+                noise_sigma_rng=[1, 2])  
 
 #---------------------------------------------------------------------------
 

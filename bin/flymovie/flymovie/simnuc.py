@@ -627,7 +627,7 @@ def write_logfile(filepath, logitems):
             logfile.write('\n')
 
 #-----------------------------------------------------------------------
-def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng, 
+def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng, 
     hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
@@ -672,7 +672,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         Simulated images are saved as pickled ndarrays. Filenames contain 
         a random 3-letter string followed by parameters separated by _ :
 
-            0: nfree
+            0: ntotal
             1: hlb_diam
             2: hlb_nmols
             3: n_clusters
@@ -698,7 +698,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
     rs = np.random.RandomState()
 
     ### Randomly draw parameters from supplied ranges. ###
-    nfree = round(randomize_ab(nfree_rng, rs))
+    ntotal = round(randomize_ab(ntotal_rng, rs))
     hlb_diam = float(randomize_ab(hlb_diam_rng, rs))
     hlb_nmols = round(randomize_ab(hlb_nmols_rng, rs))
     n_clusters = round(randomize_ab(n_clusters_rng, rs))
@@ -716,8 +716,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         mask = masks[nrep]
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
-        # Add free population.
-        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+
         # Add HLB.
         sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
         sim.add_sphere(hlb_coords[(nrep * 2) + 1], gfp_intensity, hlb_nmols, hlb_diam / 2)
@@ -727,6 +726,13 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
             size=cluster_diam_vals, fluors_per_object_probs=cluster_nmols_probs, 
             size_probs=cluster_diam_probs)
         
+        nfree = round(ntotal - (np.sum(sim.im) / gfp_intensity))
+        if nfree <= 0:
+            warnings.warn('nfree is <=0; not a valid simulation.')
+            return
+        # Add free population.
+        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+
         # Add noise and convolve.
         sim.add_noise('poisson')
         sim.convolve()
@@ -746,7 +752,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, nfree_rng, hlb_diam_rng,
         if return_sim:
             return sim
 
-        paramstring = '_'.join([str(round(x, 2)) for x in [nfree, 
+        paramstring = '_'.join([str(round(x, 2)) for x in [ntotal, 
                 hlb_diam, hlb_nmols, n_clusters, cluster_diam_mean, 
                 cluster_diam_var, cluster_nmols_mean, cluster_nmols_var, 
                 noise_sigma]])
