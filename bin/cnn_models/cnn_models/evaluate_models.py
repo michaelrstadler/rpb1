@@ -141,7 +141,7 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
         start = b * batch_size
         files_batch = files[start:start + batch_size]
         batch = []
-        
+
         for f in files_batch:
             if (f[-3:] != 'pkl') or (f[0] == '.'):
                 continue
@@ -155,7 +155,6 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
             
             # Get embedding.
             im = preprocess_image(filename, mip)
-            #batch = np.vstack((batch, im))
             batch.append(im)
 
             # Get parameters.
@@ -170,9 +169,10 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
             if return_files:
                 files_out.append(f)
         
-        batch = np.array(batch)
-        e = embedding(batch).numpy()
-        im_embeddings = np.vstack([im_embeddings, e])
+        if len(batch) > 0:
+            batch = np.array(batch)
+            e = embedding(batch).numpy()
+            im_embeddings = np.vstack([im_embeddings, e])
     
     returns = [im_embeddings]
     
