@@ -252,7 +252,7 @@ def identity_block_3d(input_tensor, kernel_size, filters, stage, block,
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = layers.Conv3D(filters1, kernel_size,
+    x = layers.Conv3D(filters1, kernel_size, 
                       padding='same',
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
