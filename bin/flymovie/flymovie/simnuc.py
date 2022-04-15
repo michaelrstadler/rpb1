@@ -936,9 +936,11 @@ def sim_histones(masks, kernel, outfolder, nfree, genome_size,
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
     # Get domain radius probabilities from power law.
-    rad_range_norm = (rad_range - np.min(rad_range)) / (np.max(rad_range) - np.min(rad_range) + 0.001) # For one item list, prevents divide by 0.
     rad_exp = rad_range ** (-1 * a1)
     rad_probs = rad_exp / np.sum(rad_exp)
+
+    # Normalize radius range for later use (below).
+    rad_range_norm = (rad_range - np.min(rad_range)) / (np.max(rad_range) - np.min(rad_range) + 0.001) # For one item list, prevents divide by 0.
 
     for nrep in range(nreps):
         # Initialize sim.

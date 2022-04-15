@@ -109,3 +109,23 @@ def fit_viewable(data, p):
     x, y, z = np.indices(data.shape)
     fit = f(x, y, z)
     return fit
+
+############################################################################
+def gaussian_pdf(x, x_0, sigma):
+    """Get pdf for gaussian distribution for supplied values.
+    
+    Args:
+        x: numeric vector
+            Values to get pdf for
+        x_0: numeric
+            Center (mean) of gaussian
+        sigma: numeric
+            Std. deviation of gaussian
+    
+    Returns:
+        pdf: numpy array
+            Values from PDF matching input values
+    """
+    coeff = (1 / (sigma * np.sqrt(2 * np.pi)))
+    pdf =  coeff * np.exp(-0.5 * ((x - x_0) / sigma) ** 2)
+    return pdf

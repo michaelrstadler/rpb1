@@ -29,7 +29,7 @@ from flymovie.load_save import load_pickle
 # load_test_data function in test package.
 wkdir = os.getcwd()
 sys.path.append(wkdir)
-from .load_test_data import load_test_data
+from load_test_data import load_test_data
 
 class TestData():
     def __init__(self):
@@ -37,9 +37,9 @@ class TestData():
 
 test_data = load_test_data(wkdir)
 
-lattice_folder = os.path.join(os.getcwd(), 'test', 'test_data', 'test_lattice_data')
-test_czi_file = os.path.join(os.getcwd(), 'test', 'test_data', 'czi_test.czi')
-test_czi_folder = os.path.join(os.getcwd(), 'test', 'test_data')
+lattice_folder = os.path.join(os.getcwd(), 'test_data', 'test_lattice_data')
+test_czi_file = os.path.join(os.getcwd(), 'test_data', 'czi_test.czi')
+test_czi_folder = os.path.join(os.getcwd(), 'test_data')
 
 #---------------------------------------------------------------------------
 

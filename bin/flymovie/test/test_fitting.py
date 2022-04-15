@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import sys
 
+#import flymovie
 from flymovie.fitting import *
 from flymovie.load_save import load_pickle
 
@@ -12,7 +13,7 @@ from flymovie.load_save import load_pickle
 # load_test_data function in test package.
 wkdir = os.getcwd()
 sys.path.append(wkdir)
-from .load_test_data import load_test_data
+from load_test_data import load_test_data
 
 class TestData():
     def __init__(self):
@@ -36,6 +37,17 @@ class TestFitting(unittest.TestCase):
         output = fitgaussian3d(input_)
         self.assertTrue(output.success, 'Fit should have succeeded')
         self.assertTrue(len(output.x) == 7, 'Should have 7 items')
+
+    def test_gaussian_pdf(self):
+        pdf = gaussian_pdf(np.arange(0, 10, 1), 5, 1)
+        self.assertAlmostEqual(pdf[5], 0.39894228, 4, 'Should be equal')
+        self.assertAlmostEqual(pdf[2], 0.00443185, 4, 'Should be equal')
+        self.assertAlmostEqual(pdf[6], 0.24197072, 4, 'Should be equal')
+
+        pdf = gaussian_pdf(np.arange(0, 20, 1) - 10, 0, 2)
+        self.assertAlmostEqual(pdf[10], 0.19947114, 4, 'Should be equal')
+        self.assertAlmostEqual(pdf[2], 0.00006692, 8, 'Should be equal')
+        self.assertAlmostEqual(pdf[18], 0.00006692, 8, 'Should be equal')
 
     
 if __name__ == '__main__':

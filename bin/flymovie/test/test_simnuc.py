@@ -204,7 +204,7 @@ class TestAddKernel(unittest.TestCase):
         sim.add_kernel(kernel, res_z=50, res_ij=50)
         self.assertEqual(sim.kernel_res_ij, 50, 'Should be 50.')
         self.assertEqual(sim.kernel_res_z, 50, 'Should be 50.')
-        self.assertAlmostEqual(np.sum(sim.kernel), 1, 5, 'Should be 1.')
+        self.assertAlmostEqual(np.max(sim.kernel), 1, 5, 'Should be 1.')
 
 #---------------------------------------------------------------------------
 class TestConvolve(unittest.TestCase):
@@ -216,8 +216,10 @@ class TestConvolve(unittest.TestCase):
         kernel = np.ones((3,3,3))
         sim.add_kernel(kernel, res_z=50, res_ij=50)
         sim.add_object([10,10,10], 10, 1, 1)
+        sum_before = np.sum(sim.im)
         sim.convolve()
-        self.assertAlmostEqual(np.sum(sim.im), 10, 3, 'Should be 270')
+        sum_after = np.sum(sim.im)
+        self.assertAlmostEqual(sum_after, np.sum(kernel) * sum_before, 3, 'Should be equal.')
         self.assertAlmostEqual(np.count_nonzero(sim.im.flatten()), 27, 5, 'Should be 27.')
 
 #---------------------------------------------------------------------------

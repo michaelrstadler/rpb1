@@ -13,7 +13,7 @@ from flymovie.load_save import load_pickle
 
 wkdir = os.getcwd()
 sys.path.append(wkdir)
-from test.load_test_data import load_test_data
+from load_test_data import load_test_data
 
 class TestData():
     def __init__(self):
