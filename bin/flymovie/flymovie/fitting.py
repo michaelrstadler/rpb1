@@ -8,6 +8,7 @@ __version__ = '1.1.0'
 __author__ = 'Michael Stadler'
 
 import numpy as np
+import scipy
 from scipy import optimize
 
 ############################################################################
@@ -128,4 +129,31 @@ def gaussian_pdf(x, x_0, sigma):
     """
     coeff = (1 / (sigma * np.sqrt(2 * np.pi)))
     pdf =  coeff * np.exp(-0.5 * ((x - x_0) / sigma) ** 2)
+    return pdf
+
+############################################################################
+def n_binom_pdf(x, r, p):
+    """Get pdf for negative binomial distribution.
+    
+    Formulating as the prob of seeing x failures before r successes. 
+    Alternately, can just think of r as the dispersion factor and p defines
+    mean.
+
+    Args:
+        x: numeric vector
+            Values to get pdf for
+        r: int
+            Number of successes
+        p: numeric
+            Probability of success on one trial
+    
+    Returns:
+        pdf: numpy array
+            Values for PDF matching input values x
+    """
+    comb = scipy.special.comb(
+        (x + r - 1),
+        (r - 1)
+    )
+    pdf = comb * ((1-p)**x) * (p**r)
     return pdf

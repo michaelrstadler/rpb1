@@ -49,6 +49,17 @@ class TestFitting(unittest.TestCase):
         self.assertAlmostEqual(pdf[2], 0.00006692, 8, 'Should be equal')
         self.assertAlmostEqual(pdf[18], 0.00006692, 8, 'Should be equal')
 
+    def test_n_binom_pdf(self):
+        pdf = n_binom_pdf(np.arange(0, 10, 1), 5, 0.5)
+        self.assertAlmostEqual(pdf[0], 0.03125, 5, 'Should be equal')
+        self.assertAlmostEqual(pdf[9], 0.04364, 5, 'Should be equal')
+        
+        pdf = n_binom_pdf(np.arange(0, 100, 1), 10, 0.1)
+        self.assertAlmostEqual(pdf[30], 0.0009, 4, 'Should be equal')
+        self.assertAlmostEqual(pdf[97], 0.01196, 5, 'Should be equal')
+
+        
+
     
 if __name__ == '__main__':
     unittest.main()
