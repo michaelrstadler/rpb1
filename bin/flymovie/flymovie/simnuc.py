@@ -659,12 +659,13 @@ def write_logfile(filepath, logitems):
             logfile.write('\n')
 
 #-----------------------------------------------------------------------
-def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng, 
-    hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
+def sim_rpb1(masks, kernel, outfolder, nreps, concentration, 
+    hlb_diam_rng, hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
-    dims_kernel=(100,50,50), dims_final=(250,85,85), return_sim=False,
-    mask_nuclei=False, dilation_struct=np.ones((1,7,7))):
+    dims_kernel=(100,50,50), dims_final=(250,85,85), gfp_intensity = 1,
+    return_sim=False, mask_nuclei=False, 
+    dilation_struct=np.ones((1,7,7))):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
         write to file.
 
@@ -687,12 +688,14 @@ def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng,
         outfolder: string; folder in which to write outputs
         nreps: int; number of replicate simulations to make with each 
             parameter set.
+        concentration: number; concentration of fluor in nM
         xxx_rng: iterable of 2 ints; upper/lower bounds for parameter xxx
         hlb_coords: iterable of tuples; coordinates for hlb locations, will 
             be drawn in order
         dims_init: tuple; dimensions (in nm) of voxels in initial image
         dims_kernel: tuple; dimensions (in nm) of kernel
         dims_final: tuple; dimensions (in nm) of final image
+        gfp_intensity: number, intensity of fluor relative to GFP
         return_sim: bool; if true, performs one simulation and returns,
             does not write to file.
         mask_nuclei: bool, if true, mask out nuclei in final image (
@@ -726,11 +729,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng,
     # Generate random file prefix.
     file_id = ''.join(random.choice(string.ascii_letters) for i in range(3))
 
-    gfp_intensity = 100
     rs = np.random.RandomState()
 
     ### Randomly draw parameters from supplied ranges. ###
-    ntotal = round(randomize_ab(ntotal_rng, rs))
     hlb_diam = float(randomize_ab(hlb_diam_rng, rs))
     hlb_nmols = round(randomize_ab(hlb_nmols_rng, rs))
     n_clusters = round(randomize_ab(n_clusters_rng, rs))
@@ -746,9 +747,10 @@ def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng,
     ### Simulate an Rpb1 nucleus with selected parameters. ###
     for nrep in range(nreps):
         mask = masks[nrep]
-
+        
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
+        ntotal = sim.conc_to_nmolecules(concentration)
 
         # Add HLB.
         sim.add_sphere(hlb_coords[nrep * 2], gfp_intensity, hlb_nmols, hlb_diam / 2)
