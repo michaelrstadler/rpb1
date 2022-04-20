@@ -105,6 +105,25 @@ class TestGetErodedCoordinates(unittest.TestCase):
             '1s in mask should have shrunk.')
 
 #---------------------------------------------------------------------------
+class TestConcToNMolecules(unittest.TestCase):
+
+    def test_conc_to_nmolecules(self):
+        mask = np.zeros((10,10,10))
+        sim = Sim(mask, res_z=100, res_ij=100)
+        x = sim.conc_to_nmolecules(60)
+        self.assertEqual(x, 0, 'Should be 0.')
+
+        mask[5,5,5] = 1
+        sim = Sim(mask, res_z=100, res_ij=100)
+        x = sim.conc_to_nmolecules(100)
+        self.assertAlmostEqual(x, 0.0602, 4,'Wrong for 1 pixel')
+
+        mask[5:8,5:8,5:8] = 1
+        sim = Sim(mask, res_z=100, res_ij=100)
+        x = sim.conc_to_nmolecules(100)
+        self.assertAlmostEqual(x, 1.6259, 2,'Wrong for 1 pixel')
+
+#---------------------------------------------------------------------------
 class TestAddSphere(unittest.TestCase):
 
     def test_add_sphere(self):

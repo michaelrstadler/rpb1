@@ -206,6 +206,20 @@ class Sim():
                 "Only 'poisson' and 'gaussian' model currently supported.")
 
     #-----------------------------------------------------------------------
+    def add_noise_custommodel(self, pix_values, probs):
+        """Add noise to image according to a supplied model.
+        
+        Args:
+            pix_values: iterable
+
+        """
+        rng = np.random.default_rng()
+        noise = rng.choice(pix_values, size = self.im.shape, replace=True, 
+            p=probs)
+        
+        self.im = self.im + noise
+
+    #-----------------------------------------------------------------------
     def get_eroded_coordinates(self, erosion_size):
         """Get the coordinates (pixels >0) of a mask after applying binary
         erosion. Effectively makes a coordinate set excluding pixels at the 
@@ -222,6 +236,25 @@ class Sim():
             structure=np.ones((struct_z, struct_ij, struct_ij)))
         eroded_mask_coords = np.where(eroded_mask)
         return eroded_mask_coords
+
+    #-----------------------------------------------------------------------
+    def conc_to_nmolecules(self, nM):
+        """Get the number of molecules of a species in the nucleus at a
+        given concentration.
+        
+        Args:
+            nM: number
+                Concentration of species in nM
+
+        Returns:
+            nmolecules: number
+                Number of molecules in nucleus
+        """
+        num_pix = np.count_nonzero(self.mask)
+        # Get nuclear volume in liters.
+        vol = num_pix * self.res_z * 1e-9 * (self.res_ij * 1e-9)**2 * 1000
+        nmolecules = nM * 1e-9 * vol * 6.022e23
+        return nmolecules
 
     #-----------------------------------------------------------------------
     def _add_box_to_stack(self, box, coords):
@@ -713,6 +746,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, ntotal_rng, hlb_diam_rng,
     ### Simulate an Rpb1 nucleus with selected parameters. ###
     for nrep in range(nreps):
         mask = masks[nrep]
+
         sim = Sim(mask, res_z=dims_init[0], res_ij=dims_init[1])
         sim.add_kernel(kernel, res_z=dims_kernel[0], res_ij=dims_kernel[1])
 
