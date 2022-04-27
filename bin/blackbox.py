@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras.layers import Dense, Flatten, Reshape
 from tensorflow.keras import Model
+import sys
 from time import time
 
 """
@@ -69,7 +70,7 @@ output = tf.math.reduce_sum(x, axis=-1)
 model = Model(img_input, output, name="Embedding")
 
 model.compile(optimizer=tf.keras.optimizers.Adam(0.001), loss=tf.keras.losses.mean_squared_error)
-model.fit(sim_ds, epochs=1)
+model.fit(sim_ds, epochs=20)
 model.save(model_file)
 
 t2 = time()
