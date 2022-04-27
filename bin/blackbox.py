@@ -1,7 +1,6 @@
 from importlib import reload
 import flymovie as fm
 import cnn_models.siamese_cnn as cn
-import cnn_models.evaluate_models as ev
 from flymovie.simnuc import Sim
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +16,12 @@ import skimage as ski
 from tensorflow.keras import layers
 from tensorflow.keras.layers import Dense, Flatten, Reshape
 from tensorflow.keras import Model
+from time import time
 
+"""
+export PYTHONPATH="$PWD/rpb1/bin/cnn_models";module unload python/3.7;module load ml/tensorflow/2.5.0-py37
+"""
+t1 = time()
 # Add files and folders.
 reals_folder = '/global/home/users/mstadler/scratch/blackbox/reals/'
 sims_folder = '/global/home/users/mstadler/scratch/blackbox/sims/'
@@ -78,4 +82,6 @@ model.compile(optimizer=tf.keras.optimizers.Adam(0.001), loss=tf.keras.losses.me
 model.fit(sim_ds, epochs=1)
 model.save(model_file)
 
-
+t2 = time()
+sys.stdout.write('training time: ' + str(t2 - t1) + '\n')
+sys.stdout.flush()
