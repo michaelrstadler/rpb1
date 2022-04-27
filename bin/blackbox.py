@@ -17,9 +17,12 @@ t1 = time()
 reals_folder = '/global/home/users/mstadler/scratch/blackbox/reals/'
 sims_folder = '/global/home/users/mstadler/scratch/blackbox/sims/'
 model_file = '/global/home/users/mstadler/scratch/blackbox/model3'
-#reals_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/reals/'
-#sims_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/sims/'
-#model_file = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/model'
+"""
+reals_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/reals/'
+sims_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/sims/'
+model_file = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/model'
+"""
+
 batch_size = 32
 image_shape = (34,100,100)
 
@@ -68,7 +71,7 @@ x = layers.Conv3D(1, (1,1,1),
         strides=(1, 1, 1),
         padding='same',
         kernel_initializer='he_normal',
-        name='conv1')(x)
+        name='conv2')(x)
 
 
 output = tf.math.reduce_sum(x, axis=-1)
