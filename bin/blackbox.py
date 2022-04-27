@@ -61,11 +61,15 @@ x = layers.Conv3D(1, (8,24,24),
         kernel_initializer='he_normal',
         name='psf')(img_input)
 
-x = layers.Conv3D(256, (3,3,3),
+x = layers.Activation('relu')(x)
+
+x = layers.Conv3D(128, (3,3,3),
         strides=(1, 1, 1),
         padding='same',
         kernel_initializer='he_normal',
         name='conv1')(x)
+
+x = layers.Activation('relu')(x)
 
 x = layers.Conv3D(1, (1,1,1),
         strides=(1, 1, 1),
