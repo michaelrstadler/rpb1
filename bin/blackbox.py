@@ -1,18 +1,8 @@
 from importlib import reload
-import flymovie as fm
 import cnn_models.siamese_cnn as cn
-from flymovie.simnuc import Sim
-import matplotlib.pyplot as plt
 import numpy as np
 import os
-import random
-import string
 import tensorflow as tf
-import pickle
-from importlib import reload
-from sklearn.manifold import TSNE
-import scipy.ndimage as ndi
-import skimage as ski
 from tensorflow.keras import layers
 from tensorflow.keras.layers import Dense, Flatten, Reshape
 from tensorflow.keras import Model
