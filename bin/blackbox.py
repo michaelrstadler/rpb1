@@ -51,19 +51,18 @@ sim_ds = sim_ds.batch(batch_size, drop_remainder=False)
 num_elem = np.product(image_shape)
 img_input = layers.Input(shape=image_shape + (1,)) # Channels last.
 #x = layers.ZeroPadding3D(padding=(5, 10, 10), name='psf_pad')(img_input)
-x = layers.Conv3D(1, (10,20,20),
+x = layers.Conv3D(1, (8,15,15),
         strides=(1, 1, 1),
         padding='same',
         kernel_initializer='he_normal',
         name='psf')(img_input)
 
-"""
 x = layers.Conv3D(64, (3,3,3),
         strides=(1, 1, 1),
         padding='same',
         kernel_initializer='he_normal',
         name='conv1')(x)
-"""
+
 
 output = tf.math.reduce_sum(x, axis=-1)
 
