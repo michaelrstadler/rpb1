@@ -16,7 +16,7 @@ t1 = time()
 # Add files and folders.
 reals_folder = '/global/home/users/mstadler/scratch/blackbox/reals/'
 sims_folder = '/global/home/users/mstadler/scratch/blackbox/sims/'
-model_file = '/global/home/users/mstadler/scratch/blackbox/model'
+model_file = '/global/home/users/mstadler/scratch/blackbox/model2'
 #reals_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/reals/'
 #sims_folder = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/sims/'
 #model_file = '/Users/michaelstadler/Bioinformatics/Projects/rpb1/data/blackbox/model'
