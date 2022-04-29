@@ -63,7 +63,7 @@ x = layers.Conv3D(1, (8,24,24),
 
 x = layers.Activation('relu')(x)
 
-x = layers.Conv3D(128, (3,3,3),
+x = layers.Conv3D(64, (3,3,3),
         strides=(1, 1, 1),
         padding='same',
         kernel_initializer='he_normal',
