@@ -27,7 +27,8 @@ outfolder = fm.simnuc.sim_rpb1_batch(
     dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), 
     dims_final=(250,85,85),
-    dilation_struct=np.ones((1,7,7))
+    dilation_struct=np.ones((1,7,7)),
+    mask_nuclei=True 
 )
 
 # Sort files into left and right folders.

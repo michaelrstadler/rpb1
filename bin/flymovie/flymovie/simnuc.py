@@ -663,7 +663,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
     hlb_diam_rng, hlb_nmols_rng, n_clusters_rng, cluster_diam_mean_rng, 
     cluster_diam_var_rng, cluster_nmols_mean_rng, cluster_nmols_var_rng,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
-    dims_kernel=(100,50,50), dims_final=(250,85,85), gfp_intensity = 1,
+    dims_kernel=(100,50,50), dims_final=(250,85,85), gfp_intensity=1,
     return_sim=False, mask_nuclei=False, 
     dilation_struct=np.ones((1,7,7))):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
