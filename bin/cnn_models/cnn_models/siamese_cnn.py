@@ -590,8 +590,9 @@ def preprocess_image(input, mip=False):
         im = im.astype('float32')
         # Dummy axis must be added in position 0.
         im = np.expand_dims(im, axis=-1)
-        # Normalize 0-1.
-        im = (im - np.min(im)) / (np.max(im) - np.min(im))
+        # Normalize by dividing by mean of unmasked (>0) values.
+        mean_ = np.mean(im[im > 0])
+        im = im / mean_
         return im
 
 #---------------------------------------------------------------------------
