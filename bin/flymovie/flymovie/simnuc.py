@@ -764,9 +764,10 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
         nfree = round(ntotal - (np.sum(sim.im) / gfp_intensity))
         if nfree <= 0:
             warnings.warn('nfree is <=0; not a valid simulation.')
-            return
-        # Add free population.
-        sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+
+        else:
+            # Add free population.
+            sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
 
         # Add noise and convolve.
         sim.add_noise('poisson')
