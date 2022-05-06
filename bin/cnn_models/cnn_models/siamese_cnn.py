@@ -842,7 +842,7 @@ def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
         dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
 
     # Divide into training and evaluation.
-    train_size = np.max([round(epoch_size / batch_size  * 0.95), 1])
+    train_size = np.max([round(epoch_size / batch_size  * 0.99), 1])
     train_dataset = dataset.take(train_size)
     val_dataset = dataset.skip(train_size)
 
