@@ -526,8 +526,9 @@ class Sim():
                 self.kernel_res_ij  / self.res_ij, 
                 self.kernel_res_ij  / self.res_ij
                 ])
-
-        conv = ndi.convolve(self.im, kernel)
+        # Note: if convolution done with reflection mode, edges behave
+        # oddly. You get bright spots (makes sense).
+        conv = ndi.convolve(self.im, kernel, mode='constant', cval=0)
         self.im = conv
 
     #-----------------------------------------------------------------------
