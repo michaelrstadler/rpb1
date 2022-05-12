@@ -768,7 +768,11 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
 
         else:
             # Add free population.
-            sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+            #sim.add_n_objects(nfree, gfp_intensity, fluors_per_object=1, size=1, mode='nuc')
+            num_pix = np.count_nonzero(sim.mask)
+            mean_val = gfp_intensity * nfree / num_pix
+            sim.im[sim.mask] += mean_val
+
 
         # Add noise and convolve.
         sim.add_noise('poisson')
