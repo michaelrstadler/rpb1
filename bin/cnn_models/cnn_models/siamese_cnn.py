@@ -591,8 +591,9 @@ def preprocess_image(input, mip=False):
         # Dummy axis must be added in position 0.
         im = np.expand_dims(im, axis=-1)
         # Normalize by dividing by mean of unmasked (>0) values.
-        mean_ = np.mean(im[im > 0])
-        im = im / mean_
+        min_ = np.min(im[im > 0])
+        max_ = np.max(im)
+        im = (im - min_) / (max_ - min_)
         return im
 
 #---------------------------------------------------------------------------
@@ -756,8 +757,6 @@ def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
     """Create an input dataset of anchor-positive-negative triplets.
 
     Args:
-        folder: Path object
-            Folder containing left and right subfolders with matching images
         triplets_file: str
             CSV file containing file triplets (anchor, positive, negative)
         epoch_size: int

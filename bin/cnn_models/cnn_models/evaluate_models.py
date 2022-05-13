@@ -486,7 +486,6 @@ def visualize_batch(ds, figsize=4, **kwargs):
     im1 = process_im(batch[0])
     im2 = process_im(batch[1])
     im3 = process_im(batch[2])
-    return [im1, im2, im3]
     fm.viewer([im1, im2, im3], figsize, **kwargs)
 
 
