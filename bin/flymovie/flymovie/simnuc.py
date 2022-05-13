@@ -779,10 +779,10 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
         sim.convolve()
         sim.resize(dims_final, order=1)
         sim.add_noise('gaussian', sigma=noise_sigma)
-        sim.im = stack_normalize_minmax(sim.im) * (100)
+        #sim.im = stack_normalize_minmax(sim.im) * (100)
 
         # Bound values.
-        sim.im[sim.im < 0] = 0
+        sim.im[sim.im <= 0] = 0.1
         sim.im[sim.im > 65_536] = 65_536
 
         if mask_nuclei:

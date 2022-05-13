@@ -160,7 +160,7 @@ for i in range(len(epoch_nums)):
             save_best_only=True)
 
     # Train model, store history.
-    history = siamese_model.fit(train_dataset, epochs=epoch_num, validation_data=val_dataset, 
+    history = siamese_model.fit(train_dataset, epochs=epoch_num, 
         callbacks=[lr_scheduler_callback, model_checkpoint_callback], verbose=True)
 
     histories.append(history.history)
