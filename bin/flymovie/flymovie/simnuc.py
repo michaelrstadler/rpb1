@@ -1169,3 +1169,34 @@ def make_mask_file(folder, outfile, target_dims=(100,100,100)):
         masks = np.vstack((masks, mask))
     
     save_pickle(masks.astype(bool), outfile)
+
+#-----------------------------------------------------------------------
+def maskfile_from_masked_ims(im_folder_path, outpath, target_dims=(100,100,100), erosion_struct=(1,7,7)):
+    """Make a maskfile from a folder of masked images.
+    
+    Assumes that all pixel values of 0 are background and all
+    foreground pixels are > 0.
+
+    Args:
+        im_folder_path: str
+            Path to folder containing images (pickled ndarrays)
+        outpath: str
+            Path to write pickle file to
+        target_dims: tuple of 3 ints
+            Dimensions of final masks
+        erosion_structure: tuple of 3 ints
+            Structure used for morphological dilation in constructing
+            input images (this is reversed by erosion).
+    """
+    masks = []
+    for f in os.listdir(im_folder_path):
+        if f[0] == '.':
+            continue
+        im = fm.load_pickle(os.path.join(im_folder_path, f))
+        mask = np.where(im > 0, 1, 0)
+        if erosion_struct is not None:
+            mask = ndi.morphology.binary_erosion(mask, np.ones(erosion_struct))
+        mask = ndi.zoom(mask, np.divide(target_dims, im.shape), order=0)
+        masks.append(mask.astype(bool))
+    masks = np.array(masks)
+    save_pickle(masks, outpath)

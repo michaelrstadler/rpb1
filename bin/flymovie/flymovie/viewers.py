@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 # Functions for interactive image viewing/analysis
 ############################################################################
 
-def viewer(stacks, figsize=12, order='default', zmax=False, init_minval=None, 
+def viewer(stacks, figsize=5, order='default', zmax=False, init_minval=None, 
     init_maxval=None, color="cividis", coordfile=None, text_data=None, 
     text_color='yellow', grid=False):
     """Interactive Jupyter notebook viewer for n-dimensional image stacks.
