@@ -488,7 +488,7 @@ class SiameseModel(Model):
     Siamese Network.
 
     The triplet loss is defined as:
-       L(A, P, N) = max(‖f(A) - f(P)‖² - ‖f(A) - f(N)‖² + margin, 0)
+       L(A, P, N) = max(‖f(A) - f(P)‖^2 - ‖f(A) - f(N)‖^2 + margin, 0)
 
     Args:
         Model: keras model, siamese network
