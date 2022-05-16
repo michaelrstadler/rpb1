@@ -41,14 +41,14 @@ def main(argv):
 
     target_files = get_files(target_folder)
     source_files = get_files(source_folder)
-
+    nucID = 1000
     for source_file in source_files:
         target_file = np.random.choice(target_files)
-        sampleID, stackID, nucID, sliceID = target_file.split('_')
-        nucID = str(int(nucID) + 1)
-        newfile = '_'.join((sampleID, stackID, nucID, sliceID)) + '.pkl'
+        sampleID, stackID, _, sliceID = target_file.split('_')
+        newfile = '_'.join((sampleID, stackID, str(nucID), sliceID)) + '.pkl'
         newfilepath = os.path.join(output_folder, newfile)
         shutil.copyfile(os.path.join(source_folder, source_file), newfilepath)
+        nucID += 1
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
