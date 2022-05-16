@@ -593,6 +593,7 @@ def preprocess_image(input, mip=False):
         # Normalize by dividing by mean of unmasked (>0) values.
         min_ = np.min(im[im > 0])
         max_ = np.max(im)
+        im[im == 0] = min_ # Avoid negative values.
         im = (im - min_) / (max_ - min_)
         return im
 
