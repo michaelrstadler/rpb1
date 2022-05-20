@@ -1171,7 +1171,8 @@ def make_mask_file(folder, outfile, target_dims=(100,100,100)):
     save_pickle(masks.astype(bool), outfile)
 
 #-----------------------------------------------------------------------
-def maskfile_from_masked_ims(im_folder_path, outpath, target_dims=(100,100,100), erosion_struct=(1,7,7)):
+def maskfile_from_masked_ims(im_folder_path, outpath, 
+        target_dims=(100,100,100), erosion_struct=(1,7,7)):
     """Make a maskfile from a folder of masked images.
     
     Assumes that all pixel values of 0 are background and all
@@ -1192,7 +1193,7 @@ def maskfile_from_masked_ims(im_folder_path, outpath, target_dims=(100,100,100),
     for f in os.listdir(im_folder_path):
         if f[0] == '.':
             continue
-        im = fm.load_pickle(os.path.join(im_folder_path, f))
+        im = load_pickle(os.path.join(im_folder_path, f))
         mask = np.where(im > 0, 1, 0)
         if erosion_struct is not None:
             mask = ndi.morphology.binary_erosion(mask, np.ones(erosion_struct))
