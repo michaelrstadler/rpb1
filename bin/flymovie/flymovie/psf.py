@@ -34,7 +34,8 @@ def extract_beads(stack, thresh, box_dims):
     """
 
     # Make mask with thresholding, use opening to get rid of small objects, label.
-    mask = np.where(stack > thresh, 1, 0)
+    stack_sm = ndi.gaussian_filter(stack, 1)
+    mask = np.where(stack_sm > thresh, 1, 0)
     mask = ndi.morphology.binary_opening(mask, structure=np.ones((3,3,3)))
 
     # Strategy: ndi.measurements.center_of_mass finds the center of mass of objects
