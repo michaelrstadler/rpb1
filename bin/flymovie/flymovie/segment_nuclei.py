@@ -84,7 +84,7 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
     if usemax:
         stack_smooth = ndi.gaussian_filter(stack.max(axis=0), sigma)
     else:
-        stack_smooth = ndi.gaussian_filter(stack, sigma)
+        stack_smooth = ndi.gaussian_filter(stack, (1, sigma, sigma))
     # Define a threshold for nuclear signal if not supplied.
     if thresh is None:
         thresh = threshold_otsu(stack_smooth)
