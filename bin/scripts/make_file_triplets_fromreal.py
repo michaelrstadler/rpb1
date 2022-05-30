@@ -97,7 +97,7 @@ def make_triplets(anchor_files, positive_files, negative_files, outfilepath, num
                         try:
                             outfile.write(','.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
                         except:
-                            print(sampleID, stackID, nucID)
+                            print(len(anchor_selections), len(positive_selections), len(negative_selections))
 
 
 
