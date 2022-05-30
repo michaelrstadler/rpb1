@@ -22,7 +22,7 @@ def make_parser():
                         help='Folder containing pickled image files.')
     parser.add_argument("-p", "--positive_image_folder", type=str,  default=None,
                         help='(optional) Folder containing pickled image files. Default: anchor image folder')
-    parser.add_argument("-n", "--negative_image_folder", type=str,  default=None,
+    parser.add_argument("-n", "--negative_image_folder", type=str, default=None,
                         help='(optional) Folder containing pickled image files. Default: anchor image folder')
     parser.add_argument("-t", "--num_triplets", type=int, required=True,
                         help='Number of triplets to make for each real image')
@@ -94,7 +94,10 @@ def make_triplets(anchor_files, positive_files, negative_files, outfilepath, num
                     positive_selections = get_positives(positive_files, sampleID, stackID, nucID, num_triplets, rs)
                     negative_selections = get_negatives(negative_files, sampleID, num_triplets, rs)
                     for i in range(len(anchor_selections)):
-                        outfile.write(','.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
+                        try:
+                            outfile.write(','.join([anchor_selections[i], positive_selections[i], negative_selections[i]]) + '\n')
+                        except:
+                            print(sampleID, stackID, nucID)
 
 
 

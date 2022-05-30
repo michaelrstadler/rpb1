@@ -28,7 +28,7 @@ from flymovie import gradient_nD, peak_local_max_nD, get_object_centroid, expand
 ############################################################################
 def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5, 
     usemax=False, display=False, return_intermediates=False, 
-    seed_window=None, thresh=None):
+    seed_window=None, thresh=None, thresh_boost=0):
     """Segment nuclei from Rpb1 fluorescence in confocal data.
     
     Algorithm is smooth -> threshold -> gradient -> distance transform to 
@@ -66,6 +66,10 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
             diagonal of the box is equal to twice this distance.
         thresh: float (optional)
             Threshold value to use for creating initial mask
+        thresh_boost: float
+            Value to add to base (otsu) threshold. Based on the observation
+            that the otsu threshold is often a little lower than one would
+            set by eye
     
     Returns:
         labelmask: ndarray
@@ -88,6 +92,8 @@ def segment_nuclei_3Dstack_rpb1(stack, min_nuc_center_dist=25, sigma=5,
     # Define a threshold for nuclear signal if not supplied.
     if thresh is None:
         thresh = threshold_otsu(stack_smooth)
+    thresh = thresh + thresh_boost
+    print('threshold: ' + str(thresh))
     # Make a binary mask using threshold.
     mask = np.where(stack_smooth > thresh, 1, 0)
     # Take the gradient of the mask to produce outlines for use in watershed algorithm.
