@@ -576,6 +576,15 @@ def preprocess_image(input, mip=False):
             im: ndarray
                 Processed image stack
         """
+        def normalize(input, mask):
+            """Normalize by dividing by mean of unmasked values."""
+            im = input.copy()
+            min_ = np.min(im[mask])
+            max_ = np.max(im)
+            im = (im - min_) / (max_ - min_)
+            im = np.where(mask, im, 0)
+            return im
+
         # This next part absolutely sucks but I cannot fucking figure out 
         # how else to get the string out.
         a = str(input)
@@ -588,14 +597,117 @@ def preprocess_image(input, mip=False):
             im = im.max(axis=0)
 
         im = im.astype('float32')
+        mask = np.where(im > 0, True, False)
+        
+        # Normalize, add noise, normalize.
+        im = normalize(im, mask)
+        rng = np.random.default_rng()
+        sigma = rng.random() * 0.05
+        gaussian_noise = rng.normal(np.zeros_like(im), scale=sigma)
+        im = im + gaussian_noise
+        im = normalize(im, mask)
+
         # Dummy axis must be added in position 0.
         im = np.expand_dims(im, axis=-1)
-        # Normalize by dividing by mean of unmasked (>0) values.
-        min_ = np.min(im[im > 0])
-        max_ = np.max(im)
-        im[im == 0] = min_ # Avoid negative values.
-        im = (im - min_) / (max_ - min_)
         return im
+
+#---------------------------------------------------------------------------
+def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
+    """Create an input dataset of anchor-positive-negative triplets.
+
+    Args:
+        triplets_file: str
+            CSV file containing file triplets (anchor, positive, negative)
+        epoch_size: int
+            Number of triplets to use in each training epoch (randomly sampled
+            from triplets in file)
+        batch_size: int
+            Batch size
+        rotate: bool
+            If true, apply random transformation to each image: 50% flipped
+            along axis 1, random rotation at 90-degree multiples
+    
+    Returns:
+        train_dataset and val_dataset, two tf.data.Datasets ready to be loaded
+            by models.
+    """
+    
+    def preprocess_batch(input, mip=False):
+        """Wrapper to apply preprocess_image to batch"""
+        ims = []
+        for ft in input:
+            ims.append(preprocess_image(ft))
+        return np.array(ims)
+
+    def preprocess_triplets(anchor, positive, negative):
+        """Given the filenames corresponding to the three images, load and
+        preprocess them."""
+        [anchor,] = tf.py_function(preprocess_batch,[anchor,],[tf.float32,])
+        [positive,] = tf.py_function(preprocess_batch,[positive,],[tf.float32,])
+        [negative,] = tf.py_function(preprocess_batch,[negative,],[tf.float32,])
+        return (anchor, positive, negative)
+
+    def rotate_batch(input, mip=False):
+        """Apply random rotations/flips to batch of images. Rotations are multiple 
+        of 90 degrees, 50% of images are flipped along axis 1."""
+        rs = np.random.RandomState()
+        ims = []
+        for im in input:
+            im_rot = ndimage.rotate(im, rs.choice([0,90,180,270]), axes=(1,2), 
+                        reshape=False)
+            if rs.choice([0,1]) == 1:
+                im_rot = np.flip(im_rot, axis=1)
+            ims.append(im_rot)
+        return np.array(ims)
+
+    def rotate_triplets(anchor, positive, negative):
+        """Wrapper to apply random flips/rotations to each image in triplet."""
+        [anchor,] = tf.py_function(rotate_batch,[anchor,],[tf.float32,])
+        [positive,] = tf.py_function(rotate_batch,[positive,],[tf.float32,])
+        [negative,] = tf.py_function(rotate_batch,[negative,],[tf.float32,])
+        return (anchor, positive, negative)
+
+
+    # Create datasets from these sorted files. These are in order and match in pairs.
+    file_triplets = pd.read_csv(triplets_file, header=None)
+    anchor_files = list(file_triplets.iloc[:,0])
+    positive_files = list(file_triplets.iloc[:,1])
+    negative_files = list(file_triplets.iloc[:,2])
+
+    dataset_full_size = len(anchor_files)
+
+    if epoch_size > dataset_full_size:
+        raise ValueError('Epoch size must be <= full dataset size.')
+
+    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
+    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_files)
+    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_files)
+    
+    # Combine datasets to form triplet images, apply shuffle to the whole
+    # dataset. So upon iteration, order of triplets will be random, and
+    # within triplets, the negative image will shuffle.
+    dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
+    dataset = dataset.shuffle(buffer_size=dataset_full_size)
+    dataset = dataset.take(epoch_size)
+
+    # Batch (before mapping -- supposed to be faster).
+    dataset = dataset.batch(batch_size, drop_remainder=False)
+
+    # Apply preprocessing and rotation via special mappable functions.
+    dataset = dataset.map(preprocess_triplets, num_parallel_calls=tf.data.AUTOTUNE)
+
+    if rotate:
+        dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
+
+    # Divide into training and evaluation.
+    train_size = np.max([round(epoch_size / batch_size  * 0.99), 1])
+    train_dataset = dataset.take(train_size)
+    val_dataset = dataset.skip(train_size)
+
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
+
+    return train_dataset, val_dataset
 
 #---------------------------------------------------------------------------
 def match_file_triplets(anchor_files, positive_files, num_negatives=5, 
@@ -753,100 +865,3 @@ def match_file_triplets(anchor_files, positive_files, num_negatives=5,
     a, p, n = [list(x) for x in zip(*zipped)]
     return a, p, n
 
-#---------------------------------------------------------------------------
-def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
-    """Create an input dataset of anchor-positive-negative triplets.
-
-    Args:
-        triplets_file: str
-            CSV file containing file triplets (anchor, positive, negative)
-        epoch_size: int
-            Number of triplets to use in each training epoch (randomly sampled
-            from triplets in file)
-        batch_size: int
-            Batch size
-        rotate: bool
-            If true, apply random transformation to each image: 50% flipped
-            along axis 1, random rotation at 90-degree multiples
-    
-    Returns:
-        train_dataset and val_dataset, two tf.data.Datasets ready to be loaded
-            by models.
-    """
-    
-    def preprocess_batch(input, mip=False):
-        """Wrapper to apply preprocess_image to batch"""
-        ims = []
-        for ft in input:
-            ims.append(preprocess_image(ft))
-        return np.array(ims)
-
-    def preprocess_triplets(anchor, positive, negative):
-        """Given the filenames corresponding to the three images, load and
-        preprocess them."""
-        [anchor,] = tf.py_function(preprocess_batch,[anchor,],[tf.float32,])
-        [positive,] = tf.py_function(preprocess_batch,[positive,],[tf.float32,])
-        [negative,] = tf.py_function(preprocess_batch,[negative,],[tf.float32,])
-        return (anchor, positive, negative)
-
-    def rotate_batch(input, mip=False):
-        """Apply random rotations/flips to batch of images. Rotations are multiple 
-        of 90 degrees, 50% of images are flipped along axis 1."""
-        rs = np.random.RandomState()
-        ims = []
-        for im in input:
-            im_rot = ndimage.rotate(im, rs.choice([0,90,180,270]), axes=(1,2), 
-                        reshape=False)
-            if rs.choice([0,1]) == 1:
-                im_rot = np.flip(im_rot, axis=1)
-            ims.append(im_rot)
-        return np.array(ims)
-
-    def rotate_triplets(anchor, positive, negative):
-        """Wrapper to apply random flips/rotations to each image in triplet."""
-        [anchor,] = tf.py_function(rotate_batch,[anchor,],[tf.float32,])
-        [positive,] = tf.py_function(rotate_batch,[positive,],[tf.float32,])
-        [negative,] = tf.py_function(rotate_batch,[negative,],[tf.float32,])
-        return (anchor, positive, negative)
-
-
-    # Create datasets from these sorted files. These are in order and match in pairs.
-    file_triplets = pd.read_csv(triplets_file, header=None)
-    anchor_files = list(file_triplets.iloc[:,0])
-    positive_files = list(file_triplets.iloc[:,1])
-    negative_files = list(file_triplets.iloc[:,2])
-
-    dataset_full_size = len(anchor_files)
-
-    if epoch_size > dataset_full_size:
-        raise ValueError('Epoch size must be <= full dataset size.')
-
-    anchor_dataset = tf.data.Dataset.from_tensor_slices(anchor_files)
-    positive_dataset = tf.data.Dataset.from_tensor_slices(positive_files)
-    negative_dataset = tf.data.Dataset.from_tensor_slices(negative_files)
-    
-    # Combine datasets to form triplet images, apply shuffle to the whole
-    # dataset. So upon iteration, order of triplets will be random, and
-    # within triplets, the negative image will shuffle.
-    dataset = tf.data.Dataset.zip((anchor_dataset, positive_dataset, negative_dataset))
-    dataset = dataset.shuffle(buffer_size=dataset_full_size)
-    dataset = dataset.take(epoch_size)
-
-    # Batch (before mapping -- supposed to be faster).
-    dataset = dataset.batch(batch_size, drop_remainder=False)
-
-    # Apply preprocessing and rotation via special mappable functions.
-    dataset = dataset.map(preprocess_triplets, num_parallel_calls=tf.data.AUTOTUNE)
-
-    if rotate:
-        dataset = dataset.map(rotate_triplets, num_parallel_calls=tf.data.AUTOTUNE)
-
-    # Divide into training and evaluation.
-    train_size = np.max([round(epoch_size / batch_size  * 0.99), 1])
-    train_dataset = dataset.take(train_size)
-    val_dataset = dataset.skip(train_size)
-
-    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
-    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
-
-    return train_dataset, val_dataset
