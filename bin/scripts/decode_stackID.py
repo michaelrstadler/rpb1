@@ -48,7 +48,9 @@ def decode_files(image_folder, output_path, stack_key):
         if image_file[0] == '.':
             continue
         items = image_file.split('_')
-
+        if len(items) < 3:
+            warnings.warn(image_file + ' does not contain enough _-delimited items.')
+            continue
         sampleID, stackID, nucID, remainder = items[0], items[1], items[2], '_'.join(items[3:])
         if stackID in stack_key:
             new_stackID = stack_key[stackID]
