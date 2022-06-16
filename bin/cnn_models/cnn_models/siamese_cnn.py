@@ -589,19 +589,24 @@ def preprocess_image(input, mip=False):
         # how else to get the string out.
         a = str(input)
         _, filename, _ = a.split("'")
-        
+        rng = np.random.default_rng()
+
         with open(filename, 'rb') as file:
             im = pickle.load(file)
 
         if mip:
             im = im.max(axis=0)
 
+        # Define mask, randomly erode with radius between 1 and 7.
         im = im.astype('float32')
         mask = np.where(im > 0, True, False)
+        erode_factor_ij = round((rng.random() * 7) + 0.5)
+        erode_factor_z = np.max([1, round(erode_factor_ij / 3)])
+        mask = ndimage.morphology.binary_erosion(mask, np.ones((erode_factor_z, erode_factor_ij, erode_factor_ij)))
         
         # Normalize, add noise, normalize.
         im = normalize(im, mask)
-        rng = np.random.default_rng()
+        
         sigma = rng.random() * 0.05
         gaussian_noise = rng.normal(np.zeros_like(im), scale=sigma)
         im = im + gaussian_noise
