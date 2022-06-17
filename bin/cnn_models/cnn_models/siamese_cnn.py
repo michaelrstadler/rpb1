@@ -557,7 +557,7 @@ class SiameseModel(Model):
         return [self.loss_tracker]
 
 #---------------------------------------------------------------------------
-def preprocess_image(input, mip=False):
+def preprocess_image(input, mip=False, erode=True, addnoise=True):
         """
         Load the specified file as an ndarray, preprocess it and
         resize it to the target shape.
@@ -571,6 +571,11 @@ def preprocess_image(input, mip=False):
             mip: bool
                 Whether or not to take/return maximum intensity 
                 projection
+            erode: bool
+                Erode nuclear mask with random radius between 1 and 7
+            addnoise: bool
+                Add gaussian noise to image with sigma chosen random 
+                uniform 0 to 0.15 (of max 1)
 
         Return:
             im: ndarray
@@ -600,24 +605,27 @@ def preprocess_image(input, mip=False):
         # Define mask, randomly erode with radius between 1 and 7.
         im = im.astype('float32')
         mask = np.where(im > 0, True, False)
-        erode_factor_ij = round((rng.random() * 7) + 0.5)
-        erode_factor_z = np.max([1, round(erode_factor_ij / 3)])
-        mask = ndimage.morphology.binary_erosion(mask, np.ones((erode_factor_z, erode_factor_ij, erode_factor_ij)))
-        
-        # Normalize, add noise, normalize.
-        im = normalize(im, mask)
-        
-        sigma = rng.random() * 0.05
-        gaussian_noise = rng.normal(np.zeros_like(im), scale=sigma)
-        im = im + gaussian_noise
-        im = normalize(im, mask)
 
-        # Dummy axis must be added in position 0.
+        if erode:
+            erode_factor_ij = round((rng.random() * 7) + 0.5)
+            erode_factor_z = np.max([1, round(erode_factor_ij / 3)])
+            mask = ndimage.morphology.binary_erosion(mask, np.ones((erode_factor_z, erode_factor_ij, erode_factor_ij)))
+            
+        im = normalize(im, mask)
+        
+        if addnoise:
+            sigma = rng.random() * 0.05
+            gaussian_noise = rng.normal(np.zeros_like(im), scale=sigma)
+            im = im + gaussian_noise
+            im = normalize(im, mask)
+
+        # Dummy axis must be added in position -1.
         im = np.expand_dims(im, axis=-1)
         return im
 
 #---------------------------------------------------------------------------
-def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
+def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, 
+    rotate=False, erode=True, addnoise=True):
     """Create an input dataset of anchor-positive-negative triplets.
 
     Args:
@@ -631,7 +639,12 @@ def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
         rotate: bool
             If true, apply random transformation to each image: 50% flipped
             along axis 1, random rotation at 90-degree multiples
-    
+        erode: bool
+            Erode nuclear masks with random radius between 1 and 7
+        addnoise: bool
+            Add gaussian noise to each image with sigma chosen random 
+            uniform 0 to 0.15 (of max 1)
+
     Returns:
         train_dataset and val_dataset, two tf.data.Datasets ready to be loaded
             by models.
@@ -641,7 +654,7 @@ def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
         """Wrapper to apply preprocess_image to batch"""
         ims = []
         for ft in input:
-            ims.append(preprocess_image(ft))
+            ims.append(preprocess_image(ft, erode=erode, addnoise=addnoise))
         return np.array(ims)
 
     def preprocess_triplets(anchor, positive, negative):
@@ -671,7 +684,6 @@ def make_triplet_inputs(triplets_file, epoch_size, batch_size=32, rotate=False):
         [positive,] = tf.py_function(rotate_batch,[positive,],[tf.float32,])
         [negative,] = tf.py_function(rotate_batch,[negative,],[tf.float32,])
         return (anchor, positive, negative)
-
 
     # Create datasets from these sorted files. These are in order and match in pairs.
     file_triplets = pd.read_csv(triplets_file, header=None)

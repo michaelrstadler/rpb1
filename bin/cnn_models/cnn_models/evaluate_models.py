@@ -154,7 +154,7 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
             filename = "_'" + os.path.join(im_folder, f) + "'_"
             
             # Get embedding.
-            im = preprocess_image(filename, mip)
+            im = preprocess_image(filename, mip, erode=False, addnoise=False)
             batch.append(im)
 
             # Get parameters.

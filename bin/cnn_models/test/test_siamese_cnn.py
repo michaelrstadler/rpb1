@@ -225,7 +225,8 @@ class TestSiameseCNN(unittest.TestCase):
                     temp_csv
                     )
 
-                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False)
+                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False,
+                    erode=False, addnoise=False)
             
                 for batch in train_dataset:
                     self.assertEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should be the same')
@@ -239,15 +240,17 @@ class TestSiameseCNN(unittest.TestCase):
                     temp_csv
                     )
 
-                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False)
+                train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=False,
+                    erode=False, addnoise=False)
 
                 for batch in train_dataset:
                     self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
                     
                 for batch in val_dataset:
                     self.assertNotEqual(batch[0][0,0,0,0,0], batch[2][0,0,0,0,0], 'These images should NOT be the same')
-            # Run it in rotate mode and make sure it doesn't explode.
-            train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=True)
+            # Run it in rotate, erode, addnoise mode and make sure it doesn't explode.
+            train_dataset, val_dataset = make_triplet_inputs(temp_csv, epoch_size=2, batch_size=1, rotate=True,
+                erode=True, addnoise=True)
 
 if __name__ == '__main__':
 	unittest.main()
