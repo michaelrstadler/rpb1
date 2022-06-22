@@ -16,6 +16,7 @@ import tempfile
 import os
 import numpy as np
 import sys
+import warnings
 import sklearn.decomposition
 import matplotlib.pyplot as plt
 
@@ -153,8 +154,12 @@ def embed_images(im_folder, embedding, batch_size=1000, mip=False, verbose=False
             # have to add two single quotes flanking filename.
             filename = "_'" + os.path.join(im_folder, f) + "'_"
             
-            # Get embedding.
-            im = preprocess_image(filename, mip, erode=False, addnoise=False)
+            # Preprocess and append image.
+            try:
+                im = preprocess_image(filename, mip, erode=False, addnoise=False)
+            except:
+                warnings.warn(filename + " could not be preprocessed.")
+                continue # Skip to next file.
             batch.append(im)
 
             # Get parameters.
