@@ -743,7 +743,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
     noise_sigma = float(randomize_ab(noise_sigma_rng, rs))
 
     cluster_diam_vals, cluster_diam_probs = make_vals_probs(cluster_diam_mean, cluster_diam_var)
-    cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var)
+    cluster_nmols_vals, cluster_nmols_probs = make_vals_probs(cluster_nmols_mean, cluster_nmols_var * cluster_nmols_mean)
 
     ### Simulate an Rpb1 nucleus with selected parameters. ###
     for nrep in range(nreps):
