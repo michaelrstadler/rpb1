@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument( "--param_tojitter", type=str, required=True)
     parser.add_argument( "--num_batches", type=int, required=True)
     parser.add_argument( "--num_bins", type=int, required=True)
+    parser.add_argument("--nprocesses", type=int, required=False, default=20)
     parser.add_argument("--gfp_intensity", type=float, required=False, default=1)
     parser.add_argument("--dims_init", type=int, required=False, nargs=3, default=(85,85,85))
     parser.add_argument("--dims_kernel", type=int, required=False, nargs=3, default=(100,50,50))
@@ -89,7 +90,7 @@ for _ in range(args.num_batches):
         maskfile=args.mask_file,
         nsims=args.num_bins,
         nreps=1,
-        nprocesses=4,
+        nprocesses=args.nprocesses,
         sim_func=fm.sim_rpb1,
         concentration=args.concentration, 
         hlb_diam_rng=hlb_diam_rng, 
