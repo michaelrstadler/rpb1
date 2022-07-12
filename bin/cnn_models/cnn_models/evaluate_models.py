@@ -493,4 +493,46 @@ def visualize_batch(ds, figsize=4, **kwargs):
     im3 = process_im(batch[2])
     fm.viewer([im1, im2, im3], figsize, **kwargs)
 
+#---------------------------------------------------------------------------
+def extract_jitteredparam_dists(embedding_pkl_file):
+    """Recover distance in embedding and paramater distance from embedding of 
+    jittered simulations -- simulations where all parameters but one are
+    fixed.
+    
+    Args:
+        embedding_pkl_file: str
+            Path to pickled tuple with embedding and filenames
+    
+    Returns:
+        param_diffs: ndarray
+            Absolute values of differences in jittered parameter
+        embedding_dists: ndarray
+            Euclidean distance in embedding space
+    """
+    embedding, names = fm.load_pickle(embedding_pkl_file)
+    
+    # Extract parameters from names (except number of molecules).
+    params = []
+    for name in names:
+        params.append(name.split('_')[2:-1])
+    params = np.array(params)
+    params = params.astype(float)
+
+    # For each row, find the entries that differ in only one parameters, add 
+    # distances to arrays.
+    param_diffs = []
+    embedding_dists = []
+    for i in range(embedding.shape[0]): 
+        diffs = params - params[i]   
+        bool_1diff = np.count_nonzero(diffs, axis=1) == 1
+        diffs_1diff = diffs[bool_1diff]
+        # Reduce to just column with diffs
+        diffs_1diff = np.squeeze(diffs_1diff[:, np.count_nonzero(diffs_1diff, axis=0) > 0])
+        param_diffs.extend(diffs_1diff)
+
+        embedding_1diff = embedding[bool_1diff]
+        dists = np.sqrt(np.sum((embedding_1diff - embedding[i]) ** 2, axis=1))
+        embedding_dists.extend(dists)
+    
+    return np.array(param_diffs), np.array(embedding_dists)
 

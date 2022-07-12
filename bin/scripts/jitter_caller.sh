@@ -1,5 +1,6 @@
 python /Users/michaelstadler/Bioinformatics/Projects/rpb1/bin/scripts/jitter.py \
 --outfolder /Users/michaelstadler/Desktop/testout \
+--nprocesses 2 \
 --hlb_diam_rng 8 14 \
 --hlb_nmols_rng 100 800 \
 --nclusters_rng 0 400 \
