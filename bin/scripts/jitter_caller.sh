@@ -1,0 +1,23 @@
+python /Users/michaelstadler/Bioinformatics/Projects/rpb1/bin/scripts/jitter.py \
+--outfolder /Users/michaelstadler/Desktop/testout \
+--hlb_diam_rng 8 14 \
+--hlb_nmols_rng 100 800 \
+--nclusters_rng 0 3000 \
+--cluster_diam_mean_rng 1 2 \
+--cluster_diam_var_rng 0.1 1 \
+--cluster_nmols_mean_rng 1 100 \
+--cluster_nmols_var_rng 0.1 3 \
+--noise_sigma_rng 4 6 \
+--concentration 200 \
+--kernel_file /Users/michaelstadler/Bioinformatics/Projects/rpb1/PSFs/psf_20220614_insitu_nm100x50x50_px27x25x25_normed.pkl \
+--mask_file /Users/michaelstadler/Bioinformatics/Projects/rpb1/data/real_masks/mask_files/nc13_1.pkl \
+--param_tojitter nclusters \
+--num_batches 2 \
+--num_bins 10 \
+--gfp_intensity 1 \
+--dims_init 85 85 85 \
+--dims_kernel 100 50 50 \
+--dims_final 250 85 85 \
+--dims_dilation 1 7 7 \
+--mask_nuclei
+ 

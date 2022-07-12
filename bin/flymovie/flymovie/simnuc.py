@@ -802,7 +802,8 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
 
 #-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
-    nprocesses, sim_func=sim_rpb1, **kwargs):
+    nprocesses, sim_func=sim_rpb1, unique_folder_id=True, 
+    write_logfile=True, **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
 
     Note: I tried to make a batch function that would be general
@@ -822,6 +823,10 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
             multiprocessing Pool
         sim_func: function, function that recieved kwargs, performs
             simulations, and writes to file
+        unique_folder_id: bool
+            Append unique 8 digit alphanumeric id to outfolder name
+        write_logfile: bool
+            Write logfile with simulation parameters
         kwargs: args supplied to sim_func
     
     Outputs:
@@ -835,9 +840,13 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     Note: "Replicates" use identical parameters but different masks. 
     """
     # Set folder name with unique identifier and create it.
-    folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
-    folder = outfolder + '_' + folder_id
-    os.mkdir(folder)
+    if unique_folder_id:
+        folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
+        folder = outfolder + '_' + folder_id
+    else:
+        folder = outfolder
+    if not os.path.exists(folder):
+        os.mkdir(folder)
     
     # Generate masks.
     masks = load_pickle(maskfile)
@@ -884,11 +893,12 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     run_pooled_processes(arglist, nprocesses, sim_func)
     
     # Write logfile.
-    logitems = kwargs.copy()
-    logitems['nsims'] = nsims
-    logitems['nreps'] = nreps
-    logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
-    write_logfile(logfilepath, logitems)
+    if write_logfile:
+        logitems = kwargs.copy()
+        logitems['nsims'] = nsims
+        logitems['nreps'] = nreps
+        logfilepath = os.path.join(folder, 'logfile_' + folder_id + '.txt')
+        write_logfile(logfilepath, logitems)
     
     return folder
 
