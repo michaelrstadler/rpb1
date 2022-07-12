@@ -2,7 +2,7 @@ python /Users/michaelstadler/Bioinformatics/Projects/rpb1/bin/scripts/jitter.py 
 --outfolder /Users/michaelstadler/Desktop/testout \
 --hlb_diam_rng 8 14 \
 --hlb_nmols_rng 100 800 \
---nclusters_rng 0 3000 \
+--nclusters_rng 0 400 \
 --cluster_diam_mean_rng 1 2 \
 --cluster_diam_var_rng 0.1 1 \
 --cluster_nmols_mean_rng 1 100 \

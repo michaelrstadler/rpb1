@@ -1,7 +1,18 @@
+#!/usr/bin/env python
+
+"""jitter.py
+
+Make rpb1-like simulations by sampling supplied parameter ranges, then 
+fixing all parameters but the designated "jittered" parameter and 
+executing multiple sims varying that one. 
+"""
+
+__author__      = "Michael Stadler"
+
 import flymovie as fm
-import os
-import string
 import numpy as np
+import string
+import random
 import argparse
 
 def parse_args():
@@ -37,8 +48,13 @@ args = parse_args()
 if args.param_tojitter not in ['hlb_diam', 'hlb_nmols', 'nclusters', 'cluster_diam_mean', 'cluster_nmols_mean', 'cluster_nmols_var', 'noise_sigma']:
     raise ValueError('param to jitter not valid')
 
+# Append unique ID to outfolder name.
+folder_id = ''.join(random.choice(string.ascii_letters) for i in range(8))
+outfolder = args.outfolder + '_' + folder_id
+
 # Select batch of params.
 for _ in range(args.num_batches):
+    # Set up 0 ranges for all params.
     hlb_diam_rng = [fm.randomize_ab(args.hlb_diam_rng)] * 2
     hlb_nmols_rng = [fm.randomize_ab(args.hlb_nmols_rng)] * 2
     nclusters_rng = [fm.randomize_ab(args.nclusters_rng)] * 2
@@ -48,6 +64,7 @@ for _ in range(args.num_batches):
     cluster_nmols_var_rng = [fm.randomize_ab(args.cluster_nmols_var_rng)] * 2
     noise_sigma_rng = [fm.randomize_ab(args.noise_sigma_rng)] * 2
 
+    # Reset the range for the jittered parameter.
     if args.param_tojitter == 'hlb_diam':
         hlb_diam_rng = args.hlb_diam_rng
     if args.param_tojitter == 'hlb_nmols':
@@ -65,11 +82,12 @@ for _ in range(args.num_batches):
     if args.param_tojitter == 'noise_sigma':
         noise_sigma_rng = args.noise_sigma_rng   
 
+    # Call rpb1 batch.
     outfolder = fm.sim_rpb1_batch(
-        outfolder=args.outfolder,
+        outfolder=outfolder,
         kernelfile=args.kernel_file,
         maskfile=args.mask_file,
-        nsims=args.num_batches,
+        nsims=args.num_bins,
         nreps=1,
         nprocesses=4,
         sim_func=fm.sim_rpb1,
@@ -91,6 +109,3 @@ for _ in range(args.num_batches):
         unique_folder_id = False,
         write_logfile=False
     )
-# Set up 0 ranges for all params but the jittered one.
-
-# Call rpb1 batch 
