@@ -494,7 +494,8 @@ def visualize_batch(ds, figsize=4, **kwargs):
     fm.viewer([im1, im2, im3], figsize, **kwargs)
 
 #---------------------------------------------------------------------------
-def extract_jitteredparam_dists(embedding_pkl_file):
+def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
+    bins_params=29, bins_embed=29):
     """Recover distance in embedding and paramater distance from embedding of 
     jittered simulations -- simulations where all parameters but one are
     fixed.
@@ -502,12 +503,23 @@ def extract_jitteredparam_dists(embedding_pkl_file):
     Args:
         embedding_pkl_file: str
             Path to pickled tuple with embedding and filenames
+        plot: bool
+            Plot a 2D histogram
+        vmax: float
+            Max value for 2D histogram plot
+        bins_params: int
+            number of bins for paramter differences
+        bins_embed: int
+            Number of bins for embedding distance
     
     Returns:
         param_diffs: ndarray
             Absolute values of differences in jittered parameter
         embedding_dists: ndarray
             Euclidean distance in embedding space
+        h: tuple
+            Outputs of hist2d function with 2d histogram matrix column
+            normalized
     """
     embedding, names = fm.load_pickle(embedding_pkl_file)
     
@@ -534,5 +546,16 @@ def extract_jitteredparam_dists(embedding_pkl_file):
         dists = np.sqrt(np.sum((embedding_1diff - embedding[i]) ** 2, axis=1))
         embedding_dists.extend(dists)
     
-    return np.array(param_diffs), np.array(embedding_dists)
+    param_diffs = np.array(param_diffs)
+    embedding_dists = np.array(embedding_dists)
+    # Make 2d histogram matrix, normalize within parameter bins.
+    h = np.histogram2d(abs(param_diffs), embedding_dists, bins=(bins_params, bins_embed))
+    h2d = h[0]
+    h2d = h2d / h2d.sum(axis=1)[:,None]
+    h = tuple([h2d, h[1], h[2]])
+
+    if plot:
+        plt.imshow(np.swapaxes(h2d,0,1) * 1000, origin='lower', 
+        extent=(h[1][0],h[1][-1],h[2][0],h[2][-1]), aspect=5, vmax=vmax)
+    return param_diffs, embedding_dists, h
 
