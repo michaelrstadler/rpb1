@@ -11,6 +11,7 @@ __author__      = "Michael Stadler"
 
 import flymovie as fm
 import numpy as np
+import os
 import string
 import random
 import argparse
@@ -110,3 +111,7 @@ for _ in range(args.num_batches):
         unique_folder_id = False,
         write_logfile=False
     )
+
+with open(os.path.join(outfolder, 'logfile.txt'), 'w') as logfile:
+    for arg in vars(args):
+        logfile.write(arg + '\t' + str(getattr(args, arg)) + '\n')

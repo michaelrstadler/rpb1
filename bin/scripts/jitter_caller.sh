@@ -14,7 +14,7 @@ python /Users/michaelstadler/Bioinformatics/Projects/rpb1/bin/scripts/jitter.py 
 --mask_file /Users/michaelstadler/Bioinformatics/Projects/rpb1/data/real_masks/mask_files/nc13_1.pkl \
 --param_tojitter nclusters \
 --num_batches 2 \
---num_bins 10 \
+--num_bins 2 \
 --gfp_intensity 1 \
 --dims_init 85 85 85 \
 --dims_kernel 100 50 50 \

@@ -496,8 +496,8 @@ def visualize_batch(ds, figsize=4, **kwargs):
 #---------------------------------------------------------------------------
 def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
     bins_params=29, bins_embed=29):
-    """Recover distance in embedding and paramater distance from embedding of 
-    jittered simulations -- simulations where all parameters but one are
+    """Recover distance in embedding and paramater distance from embedding 
+    of jittered simulations -- simulations where all parameters but one are
     fixed.
     
     Args:
@@ -534,6 +534,8 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
     # distances to arrays.
     param_diffs = []
     embedding_dists = []
+    param_refs = []
+    param_target = []
     for i in range(embedding.shape[0]): 
         diffs = params - params[i]   
         bool_1diff = np.count_nonzero(diffs, axis=1) == 1
@@ -545,9 +547,17 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
         embedding_1diff = embedding[bool_1diff]
         dists = np.sqrt(np.sum((embedding_1diff - embedding[i]) ** 2, axis=1))
         embedding_dists.extend(dists)
+        
+        params_1diff = params[bool_1diff]
+        for j in range(params_1diff.shape[0]):
+            param_refs.append(params[i])
+            param_target.append(params[j])
+
     
     param_diffs = np.array(param_diffs)
     embedding_dists = np.array(embedding_dists)
+    param_refs = np.array(param_refs)
+    param_target = np.array(param_target)
     # Make 2d histogram matrix, normalize within parameter bins.
     h = np.histogram2d(abs(param_diffs), embedding_dists, bins=(bins_params, bins_embed))
     h2d = h[0]
@@ -557,5 +567,5 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
     if plot:
         plt.imshow(np.swapaxes(h2d,0,1) * 1000, origin='lower', 
         extent=(h[1][0],h[1][-1],h[2][0],h[2][-1]), aspect=5, vmax=vmax)
-    return param_diffs, embedding_dists, h
+    return param_diffs, embedding_dists, h, param_refs, param_target
 
