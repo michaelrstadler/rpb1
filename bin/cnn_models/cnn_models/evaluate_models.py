@@ -520,6 +520,12 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
         h: tuple
             Outputs of hist2d function with 2d histogram matrix column
             normalized
+        params_ref: ndarray
+            Param table for one of the pair of images, rows corresponding
+            to entries of param_diffs and embedding_dists
+        params_target:
+            Param table for the other of the pair of images, rows 
+            corresponding to entries of param_diffs and embedding_dists
     """
     embedding, names = fm.load_pickle(embedding_pkl_file)
     
@@ -534,8 +540,8 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
     # distances to arrays.
     param_diffs = []
     embedding_dists = []
-    param_refs = []
-    param_target = []
+    params_refs = []
+    params_target = []
     for i in range(embedding.shape[0]): 
         diffs = params - params[i]   
         bool_1diff = np.count_nonzero(diffs, axis=1) == 1
@@ -550,14 +556,14 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
         
         params_1diff = params[bool_1diff]
         for j in range(params_1diff.shape[0]):
-            param_refs.append(params[i])
-            param_target.append(params[j])
+            params_refs.append(params[i])
+            params_target.append(params_1diff[j])
 
     
     param_diffs = np.array(param_diffs)
     embedding_dists = np.array(embedding_dists)
-    param_refs = np.array(param_refs)
-    param_target = np.array(param_target)
+    params_refs = np.array(params_refs)
+    params_target = np.array(params_target)
     # Make 2d histogram matrix, normalize within parameter bins.
     h = np.histogram2d(abs(param_diffs), embedding_dists, bins=(bins_params, bins_embed))
     h2d = h[0]
@@ -567,5 +573,5 @@ def extract_jitteredparam_dists(embedding_pkl_file, plot=False, vmax=1000,
     if plot:
         plt.imshow(np.swapaxes(h2d,0,1) * 1000, origin='lower', 
         extent=(h[1][0],h[1][-1],h[2][0],h[2][-1]), aspect=5, vmax=vmax)
-    return param_diffs, embedding_dists, h, param_refs, param_target
+    return param_diffs, embedding_dists, h, params_refs, params_target
 
