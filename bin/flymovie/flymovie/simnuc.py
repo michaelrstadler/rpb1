@@ -803,7 +803,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
 #-----------------------------------------------------------------------
 def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     nprocesses, sim_func=sim_rpb1, unique_folder_id=True, 
-    write_logfile=True, **kwargs):
+    create_logfile=True, **kwargs):
     """Perform parallelized simulations of Rpb1 nuclei in batch.
 
     Note: I tried to make a batch function that would be general
@@ -825,7 +825,7 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
             simulations, and writes to file
         unique_folder_id: bool
             Append unique 8 digit alphanumeric id to outfolder name
-        write_logfile: bool
+        create_logfile: bool
             Write logfile with simulation parameters
         kwargs: args supplied to sim_func
     
@@ -893,7 +893,7 @@ def sim_rpb1_batch(outfolder, kernelfile, maskfile, nsims, nreps,
     run_pooled_processes(arglist, nprocesses, sim_func)
     
     # Write logfile.
-    if write_logfile:
+    if create_logfile:
         logitems = kwargs.copy()
         logitems['nsims'] = nsims
         logitems['nreps'] = nreps
