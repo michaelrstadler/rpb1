@@ -666,7 +666,7 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
     noise_sigma_rng, hlb_coords, dims_init=(85, 85, 85), 
     dims_kernel=(100,50,50), dims_final=(250,85,85), gfp_intensity=1,
     return_sim=False, mask_nuclei=False, 
-    dilation_struct=np.ones((1,7,7))):
+    dilation_struct=np.ones((1,7,7)), only_valid=False):
     """Simulate an rpb1 nucleus from parameters drawn from ranges, 
         write to file.
 
@@ -703,6 +703,9 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
             background set to 0)
         dilation_struct: ndarray, structure for dilating mask if mask_nuclei 
             is true
+        only_valid: bool
+            If true, only valid simulations are written to file. Otherwise,
+            warning is raised but simulation is still written.
 
     Output:
         Simulated images are saved as pickled ndarrays. Filenames contain 
@@ -765,6 +768,8 @@ def sim_rpb1(masks, kernel, outfolder, nreps, concentration,
         nfree = round(ntotal - (np.sum(sim.im) / gfp_intensity))
         if nfree <= 0:
             warnings.warn('nfree is <=0; not a valid simulation.')
+            if only_valid:
+                continue
 
         else:
             # Add free population.
