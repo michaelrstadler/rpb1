@@ -9,3 +9,4 @@ from .segment_nuclei import *
 from .viewers import *
 from .simnuc import *
 from .psf import *
+from .figures import *
