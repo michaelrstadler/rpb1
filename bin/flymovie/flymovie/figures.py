@@ -14,6 +14,168 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import os
+
+#-----------------------------------------------------------------------
+# Figure W2.
+def match_names_and_distcutoff(real_embedding_pkl, sims_embedding_pkl, cutoff_lower, cutoff_upper, savestem=None, pattern=''):
+    """Extract the names of real images that match a supplied pattern and of
+    simulations that embed within a cutoff distance of the center of a 
+    this real set.
+    
+    Args:
+        real_embedding_pkl: str
+            Path to embedding pkl object for real nucs
+        sims_embedding_pkl: str
+            Path to embedding pkl object for simulated nucs
+        cutoff_lower: float
+            Lower limit for embedding distance
+        cutoff_upper: float
+            Upper limit for embedding distance
+        savestem: None or str
+            If not None, filenames are saved in text files
+        pattern: str
+            Pattern to match to names of real sim files
+
+    Returns:
+        names_ref: list
+            Names of reference image files (generally real images that
+            match supplied pattern)
+        names_withindist: list
+            Names of simulated images that fall within distance cutoffs
+            of reference images
+    """
+
+    def embeddings_match_names(em, names, pattern):
+        """Match names to a pattern, select corresponding rows of embedding."""
+        if len(names) != em.shape[0]:
+            raise ValueError('Sizes of embedding and names object do not match.')
+
+        match_rows = pd.Series(names).str.contains(pattern).to_numpy()
+        return em[match_rows], np.array(names)[match_rows]
+
+    def dist_to_center(ref_arr, arr):
+        """Get the euclidean distance between each row of arr to center (mean) of ref_arr."""
+        center = ref_arr.mean(axis=0)
+        sqdist = np.sum((arr - center) ** 2, axis=1)
+        return np.sqrt(sqdist)
+
+    em_real, names_real = fm.load_pickle(real_embedding_pkl)
+    em_sims, names_sims = fm.load_pickle(sims_embedding_pkl)
+
+    # Extract embedding rows and names of real nuclei that match pattern.
+    em_ref, names_ref = embeddings_match_names(em_real, names_real, pattern)
+
+    # Get names of sim files that are within distance cutoffs of selected real
+    # nucs in embedding space.
+    dists = dist_to_center(em_ref, em_sims)
+    names_withindist = np.array(names_sims)[(dists <= cutoff_upper) & (dists > cutoff_lower)]
+
+    # Optional: save the filenames as text files for separate extraction.
+    if savestem is not None:
+        np.savetxt(savestem + '_real.txt', names_ref, fmt='%s')
+        np.savetxt(savestem + '_sims.txt', names_withindist, fmt='%s')
+        
+    return names_ref, names_withindist
+
+def display_image_sets(dir1, names1, dir2, names2, savefile):
+    """Display selected images from two directories.
+    
+    Images are plotted in two sets separated by vertical space.
+    For each image, left-most image is a max projection (in Z)
+    and remaining are individual Z slices.
+
+    Args:
+        dir1: str
+            Path to directory containing first image set
+        names1: iterable
+            Filenames from dir1 to display
+        dir2: str
+            Path to directory containing second image set
+        names2: iterable
+            Filenames from dir2 to display
+        savefile: str
+            File to save figure to
+    """
+    def load_ims(dir, names):
+        """Load ims from dir found in names."""
+        names_set = set(names)
+        l = []
+        fnames = []
+        for f in os.listdir(dir):
+            if (f[0] == '.') or (f[-3:] != 'pkl'):
+                continue
+            if f in names_set:
+                im = fm.load_pickle(os.path.join(dir, f))
+                l.append(im)
+                fnames.append(f)
+        return np.array(l)
+    
+    def display(ims, fig, vstart, nrows):
+        """Plot images in two batches and save."""
+        print(ims.shape)
+        for im in ims:
+            min_, max_ = np.min(im), np.max(im) * 0.9
+            ax = fig.add_axes((0,vstart,0.15,0.15))
+            ax.imshow(im.max(axis=0), vmin=min_, vmax=max_, cmap='cividis')
+            ax.axis('off')
+            ax = fig.add_axes((0.18,vstart,0.15,0.15))
+            ax.imshow(im[8], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.axis('off')
+            ax = fig.add_axes((0.34,vstart,0.15,0.15))
+            ax.imshow(im[14], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.axis('off')
+            ax = fig.add_axes((0.50,vstart,0.15,0.15))
+            ax.imshow(im[20], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.axis('off')
+            ax = fig.add_axes((0.66,vstart,0.15,0.15))
+            ax.imshow(im[26], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.axis('off')
+
+            vstart = vstart - (1 / nrows * 0.77)
+
+    ims_1 = load_ims(dir1, names1)    
+    ims_2 = load_ims(dir2, names2)
+    nrows = (len(ims_1) + len(ims_2))
+    fig = plt.figure(constrained_layout=False, facecolor='1', figsize=(8.48,12 * nrows / 6))
+    display(ims_1, fig, 0.89, nrows)
+    
+    display(ims_2, fig, 0.89 - (1 / nrows * (len(ims_1) + 0.25)), nrows)
+    fig.savefig(savefile,dpi=300)
+
+
+def display_real_sim_pattern_cutoff(real_embedding_pkl, sims_embedding_pkl, dir_reals, dir_sims, pattern, cutoff_lower, cutoff_upper, savefile, nsample=[3,3]):            
+    """Match a set of real images to a supplied pattern, identify simulated images
+    that are embedded within specified distance range, display both together.
+    
+    Args:
+        real_embedding_pkl: str
+            Path to embedding pkl object for real nucs
+        sims_embedding_pkl: str
+            Path to embedding pkl object for simulated nucs
+        dir_reals: str
+            Directory containing real images
+        dir_sims: str
+            Directory containing simulated images
+        pattern: str
+            Pattern to match to names of real sim files
+        cutoff_lower: float
+            Lower limit for embedding distance
+        cutoff_upper: float
+            Upper limit for embedding distance
+        savefile: None or str
+            For for saving final image (must be image file)
+        nsample: iterable of length 2
+            Number of real and simulated images (respectively) to display
+        
+    """
+    em_real, names_real = fm.load_pickle(real_embedding_pkl)
+    em_sim, names_sim = fm.load_pickle(sims_embedding_pkl)
+    names_real, names_sim = match_names_and_distcutoff(real_embedding_pkl, sims_embedding_pkl, cutoff_lower, cutoff_upper, pattern=pattern)
+    # Sample from available images.
+    names_real = np.random.choice(names_real, size=np.min([nsample[0], len(names_real)]), replace=False)
+    names_sim = np.random.choice(names_sim, size=np.min([nsample[1], len(names_sim)]), replace=False)
+    display_image_sets(dir_reals, names_real, dir_sims, names_sim, savefile)
 
 #-----------------------------------------------------------------------
 # Figure W4.
