@@ -115,21 +115,32 @@ def display_image_sets(dir1, names1, dir2, names2, savefile):
         """Plot images in two batches and save."""
         print(ims.shape)
         for im in ims:
-            min_, max_ = np.min(im), np.max(im) * 0.9
+            mask = np.where(im > 0, True, False)
+            """
+            #max_ = np.percentile(im, 99.9)
+            print(round(np.max(im) / max_, 2))
+            min_ = np.min(im[mask])
+            im = (im - min_) / (max_ - min_) * 1000
+            im = np.where(mask, im, 0)
+            """
+            pix = im[mask]
+            im = im / np.median(pix)
+            vmin = 0
+            vmax = 4
             ax = fig.add_axes((0,vstart,0.15,0.15))
-            ax.imshow(im.max(axis=0), vmin=min_, vmax=max_, cmap='cividis')
+            ax.imshow(im.max(axis=0), vmin=vmin, vmax=vmax, cmap='cividis')
             ax.axis('off')
             ax = fig.add_axes((0.18,vstart,0.15,0.15))
-            ax.imshow(im[8], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.imshow(im[8], vmin=vmin, vmax=vmax, cmap='cividis')
             ax.axis('off')
             ax = fig.add_axes((0.34,vstart,0.15,0.15))
-            ax.imshow(im[14], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.imshow(im[14], vmin=vmin, vmax=vmax, cmap='cividis')
             ax.axis('off')
             ax = fig.add_axes((0.50,vstart,0.15,0.15))
-            ax.imshow(im[20], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.imshow(im[20], vmin=vmin, vmax=vmax, cmap='cividis')
             ax.axis('off')
             ax = fig.add_axes((0.66,vstart,0.15,0.15))
-            ax.imshow(im[26], vmin=min_, vmax=max_*0.7, cmap='cividis')
+            ax.imshow(im[26], vmin=vmin, vmax=vmax, cmap='cividis')
             ax.axis('off')
 
             vstart = vstart - (1 / nrows * 0.77)
@@ -141,7 +152,7 @@ def display_image_sets(dir1, names1, dir2, names2, savefile):
     display(ims_1, fig, 0.89, nrows)
     
     display(ims_2, fig, 0.89 - (1 / nrows * (len(ims_1) + 0.25)), nrows)
-    fig.savefig(savefile,dpi=300)
+    fig.savefig(savefile, dpi=300)
 
 
 def display_real_sim_pattern_cutoff(real_embedding_pkl, sims_embedding_pkl, dir_reals, dir_sims, pattern, cutoff_lower, cutoff_upper, savefile, nsample=[3,3]):            
